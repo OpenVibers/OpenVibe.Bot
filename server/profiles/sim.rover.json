@@ -1,0 +1,17 @@
+{
+  "id": "sim.rover",
+  "version": 1,
+  "name": "Simulated rover",
+  "vendor": "OpenVibe",
+  "kind": "server",
+  "description": "The browser simulator on the openvibe.bot home: a differential-drive rover with a camera, driven by the same gate and profile as real hardware.",
+  "capabilities": ["drive.differential", "camera"],
+  "mapping": { "driver": "sim" },
+  "widgets": [
+    { "type": "drive", "capability": "drive.differential", "label": "Drive", "order": 1 },
+    { "type": "camera", "capability": "camera", "label": "Camera", "order": 2 },
+    { "type": "latency", "label": "Latency", "order": 3 }
+  ],
+  "camera": { "transport": "whip", "resolution": "640x360" },
+  "limits": { "max_speed": 1, "max_turn": 1, "max_command_ms": 300, "heartbeat_ms": 1000 }
+}

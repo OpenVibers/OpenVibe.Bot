@@ -1,0 +1,41 @@
+{
+  "name": "openvibe-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenVibe.Bot — devices, pairing and control for robots on the OpenVibe network: one outbound WebSocket per device, profiles instead of rows, safety by default.",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "NODE_ENV=development node server/index.js",
+    "test": "node test/run.js",
+    "test:pg": "BOT_TEST_STORE=pg node test/run.js"
+  },
+  "keywords": [
+    "openvibe",
+    "bot",
+    "robot",
+    "devices",
+    "control"
+  ],
+  "author": "OpenVibers",
+  "license": "AGPL-3.0-only",
+  "repository": "github:OpenVibers/OpenVibe.Bot",
+  "dependencies": {
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "iovalkey": "^0.4.0",
+    "jsonwebtoken": "^9.0.2",
+    "openvibe-contracts": "https://codeload.github.com/OpenVibers/OpenVibe.Contracts/tar.gz/refs/tags/v0.79.0",
+    "openvibe-sdk": "https://codeload.github.com/OpenVibers/OpenVibe.SDK/tar.gz/refs/tags/v0.25.0",
+    "openvibe-shared": "https://codeload.github.com/OpenVibers/OpenVibe.Shared/tar.gz/refs/tags/v2.2.0",
+    "pg": "^8.23.0",
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8"
+  }
+}

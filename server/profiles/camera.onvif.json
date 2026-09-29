@@ -1,0 +1,20 @@
+{
+  "id": "camera.onvif",
+  "version": 1,
+  "name": "ONVIF camera",
+  "vendor": "generic",
+  "kind": "server",
+  "description": "A bare ONVIF PTZ camera, no motion: Bot connects to it server-side (credentials by secret reference, never in the profile). Proves the bring-your-own-camera path needs no new frontend.",
+  "capabilities": ["ptz", "camera"],
+  "mapping": {
+    "driver": "onvif",
+    "credentials": "secret-ref"
+  },
+  "widgets": [
+    { "type": "ptz", "capability": "ptz", "label": "Pan / tilt / zoom", "order": 1 },
+    { "type": "camera", "capability": "camera", "label": "Camera", "order": 2 },
+    { "type": "latency", "label": "Latency", "order": 3 }
+  ],
+  "camera": { "transport": "onvif", "resolution": "1920x1080" },
+  "limits": { "max_speed": 1, "max_turn": 1, "max_command_ms": 300, "heartbeat_ms": 1000 }
+}

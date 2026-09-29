@@ -1,0 +1,49 @@
+{
+  "id": "cozmo",
+  "version": 1,
+  "name": "Cozmo",
+  "vendor": "Anki",
+  "kind": "bridge",
+  "description": "Anki Cozmo over PyCozmo: differential drive, head and lift, speech and face display, backpack and cube lights, cliff and pick-up sensors, a 320x240 camera and the stock animation set. A bridge computer joins the robot's Wi-Fi on one interface and OpenVibe on another.",
+  "capabilities": [
+    "drive.differential",
+    "head",
+    "lift",
+    "speaker.say",
+    "display.text",
+    "display.animation",
+    "lights.backpack",
+    "lights.cube",
+    "battery",
+    "sensor.cliff",
+    "sensor.pickup",
+    "camera"
+  ],
+  "mapping": {
+    "driver": "cozmo",
+    "animations": [
+      "anim_freeplay_reacttoface_happy_01",
+      "anim_freeplay_reacttoface_sad_01",
+      "anim_eyepose_happy",
+      "anim_eyepose_sad",
+      "anim_eyepose_angry",
+      "anim_eyepose_excited",
+      "anim_blackjack_win",
+      "anim_bored_01",
+      "anim_fistbump_success_01"
+    ]
+  },
+  "widgets": [
+    { "type": "drive", "capability": "drive.differential", "label": "Drive", "order": 1 },
+    { "type": "head", "capability": "head", "label": "Head", "order": 2 },
+    { "type": "lift", "capability": "lift", "label": "Lift", "order": 3 },
+    { "type": "speaker", "capability": "speaker.say", "label": "Say", "order": 4 },
+    { "type": "display", "capability": "display.text", "label": "Face", "order": 5 },
+    { "type": "lights", "capability": "lights.backpack", "label": "Lights", "order": 6 },
+    { "type": "telemetry", "capability": "sensor.cliff", "label": "Cliff / pick-up", "order": 7 },
+    { "type": "battery", "capability": "battery", "label": "Battery", "order": 8 },
+    { "type": "latency", "label": "Latency", "order": 9 }
+  ],
+  "camera": { "transport": "whip", "resolution": "320x240" },
+  "limits": { "max_speed": 0.6, "max_turn": 0.8, "max_command_ms": 300, "heartbeat_ms": 1000 }
+}

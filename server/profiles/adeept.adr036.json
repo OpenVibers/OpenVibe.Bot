@@ -1,0 +1,43 @@
+{
+  "id": "adeept.adr036",
+  "version": 1,
+  "name": "Adeept ADR036 4WD Smart Car",
+  "vendor": "Adeept",
+  "kind": "onboard",
+  "description": "Raspberry Pi rover with the Adeept Robot HAT: four DC motors and the pan/tilt servos on a PCA9685, an ADS7830 battery readout, WS2812 lights, a buzzer, ultrasound and line tracking. Ships as both a differential and a mecanum chassis.",
+  "capabilities": [
+    "drive.differential",
+    "drive.mecanum",
+    "servo.pan_tilt",
+    "lights.rgb",
+    "speaker.horn",
+    "sensor.ultrasonic",
+    "sensor.line",
+    "battery"
+  ],
+  "variants": {
+    "differential": { "drive": "differential" },
+    "mecanum": { "drive": "mecanum" }
+  },
+  "mapping": {
+    "driver": "pca9685",
+    "i2c_bus": 1,
+    "address": "0x5f",
+    "motor_channels": [8, 9, 10, 11, 12, 13, 14, 15],
+    "servo_channels": { "pan": 0, "tilt": 1 },
+    "battery": { "driver": "ads7830", "address": "0x48" },
+    "lights": "ws2812",
+    "horn": "buzzer"
+  },
+  "widgets": [
+    { "type": "drive", "capability": "drive.differential", "label": "Drive", "order": 1 },
+    { "type": "pan-tilt", "capability": "servo.pan_tilt", "label": "Pan / tilt", "order": 2 },
+    { "type": "lights", "capability": "lights.rgb", "label": "Lights", "order": 3 },
+    { "type": "horn", "capability": "speaker.horn", "label": "Horn", "order": 4 },
+    { "type": "telemetry", "capability": "sensor.ultrasonic", "label": "Distance", "order": 5 },
+    { "type": "battery", "capability": "battery", "label": "Battery", "order": 6 },
+    { "type": "latency", "label": "Latency", "order": 7 }
+  ],
+  "camera": { "transport": "whip", "resolution": "640x480" },
+  "limits": { "max_speed": 1, "max_turn": 1, "max_command_ms": 300, "heartbeat_ms": 1000 }
+}
