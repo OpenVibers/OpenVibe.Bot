@@ -155,8 +155,12 @@ const { boot, check, done } = require('./helpers/app');
     });
 
     await check('a queue robot gives a turn that expires and passes to the next waiting person', async () => {
-        const { robot, pairing } = await t.robot(alex, { access_policy: 'queue', limits: { turn_ms: 300, turn_budget: 5 } });
-        const dev = await deviceFor(robot.id, pairing.code);
+        const { robot, pairing } = await t.robot(alex, { access_policy: 'queue', limits: { turn_ms: 60000, turn_budget: 5 } });
+        // deviceFor, but keeping the credential: the device reconnects past the clock jump below.
+        const paired = await t.call('POST', '/api/v1/pair', { token: null, body: { robot: robot.id, code: pairing.code } });
+        const deviceHeaders = { Authorization: `Bearer ${paired.json.credential}` };
+        let dev = await t.ws('/device', { headers: deviceHeaders });
+        await dev.waitFor((m) => m.type === 'hello');
         const c = await op(carol);
         const cj = await joinResult(c, robot.id);
         assert.strictEqual(cj.role, 'queue');
@@ -167,13 +171,22 @@ const { boot, check, done } = require('./helpers/app');
         assert.ok(q1, 'the turn holder may drive');
         dev.send({ type: 'ack', id: q1.id });
         await result(c, 'q1');
-        t.clock.offset += 1000;                       // past the 300 ms turn
-        cmd(c, { id: 'q2', kind: 'drive', value: { throttle: 0.2 } });
-        const rc = await result(c, 'q2');
-        assert.strictEqual(rc.result, 'refused', 'the expired turn no longer drives');
-        cmd(d, { id: 'q3', kind: 'drive', value: { throttle: 0.2 } });
-        assert.ok(await dev.waitFor((m) => m.type === 'command' && m.ref === 'q3'), 'the next waiting person is promoted');
-        t.clock.offset -= 1000;
+        t.clock.offset += 120000;                     // past the 60 s turn
+        try {
+            // Device liveness runs on the same injected clock (a 200 ms beat, offline after 400 ms here), so
+            // the jump drops this link: reconnecting with the same credential replaces the stale socket with
+            // one that comes online at the jumped clock, and no real-time race decides whether dave's command
+            // reaches the device.
+            dev = await t.ws('/device', { headers: deviceHeaders });
+            await dev.waitFor((m) => m.type === 'hello');
+            cmd(c, { id: 'q2', kind: 'drive', value: { throttle: 0.2 } });
+            const rc = await result(c, 'q2');
+            assert.strictEqual(rc.result, 'refused', 'the expired turn no longer drives');
+            cmd(d, { id: 'q3', kind: 'drive', value: { throttle: 0.2 } });
+            assert.ok(await dev.waitFor((m) => m.type === 'command' && m.ref === 'q3'), 'the next waiting person is promoted');
+        } finally {
+            t.clock.offset -= 120000;
+        }
         c.close(); d.close();
     });
 
