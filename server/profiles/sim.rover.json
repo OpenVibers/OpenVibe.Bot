@@ -7,8 +7,11 @@
   "description": "The browser simulator on the openvibe.bot home: a differential-drive rover with a camera, driven by the same gate and profile as real hardware.",
   "capabilities": ["drive.differential", "camera"],
   "mapping": { "driver": "sim" },
+  "commands": {
+    "drive": { "axes": { "throttle": [-1, 1], "steer": [-1, 1] } }
+  },
   "widgets": [
-    { "type": "drive", "capability": "drive.differential", "label": "Drive", "order": 1 },
+    { "type": "drive", "capability": "drive.differential", "label": "Drive", "order": 1, "command": { "kind": "drive" } },
     { "type": "camera", "capability": "camera", "label": "Camera", "order": 2 },
     { "type": "latency", "label": "Latency", "order": 3 }
   ],

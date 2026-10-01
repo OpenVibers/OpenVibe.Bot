@@ -1,12 +1,12 @@
 {
-  "id": "adeept.adr036",
+  "id": "adeept.adr036.mecanum",
   "version": 1,
-  "name": "Adeept ADR036 4WD Smart Car",
+  "name": "Adeept ADR036 4WD Smart Car (mecanum)",
   "vendor": "Adeept",
   "kind": "onboard",
-  "description": "Raspberry Pi rover with the Adeept Robot HAT: four DC motors (ordinary wheels) and the pan/tilt servos on a PCA9685, an ADS7830 battery readout, WS2812 lights, a buzzer, ultrasound and line tracking. The mecanum chassis is adeept.adr036.mecanum.",
+  "description": "The Adeept ADR036 on mecanum wheels: it drives forward/back (x), strafes left/right (y) and rotates in place, plus the same pan/tilt servos, WS2812 lights, buzzer, ultrasound, line tracking and ADS7830 battery readout as adeept.adr036.",
   "capabilities": [
-    "drive.differential",
+    "drive.mecanum",
     "servo.pan_tilt",
     "lights.rgb",
     "speaker.horn",
@@ -17,7 +17,7 @@
   "mapping": {
     "driver": "pca9685",
     "plugin": "adeept_adr036",
-    "wheels": "ordinary",
+    "wheels": "mecanum",
     "i2c_bus": 1,
     "address": "0x5f",
     "motor_channels": [8, 9, 10, 11, 12, 13, 14, 15],
@@ -27,7 +27,7 @@
     "horn": "buzzer"
   },
   "commands": {
-    "drive": { "axes": { "throttle": [-1, 1], "steer": [-1, 1] } },
+    "drive": { "axes": { "x": [-1, 1], "y": [-1, 1], "rotation": [-1, 1] } },
     "actuator": {
       "names": {
         "pan": { "type": "number", "range": [-1, 1] },
@@ -38,7 +38,7 @@
     }
   },
   "widgets": [
-    { "type": "drive", "capability": "drive.differential", "label": "Drive", "order": 1, "command": { "kind": "drive" } },
+    { "type": "drive", "capability": "drive.mecanum", "label": "Drive", "order": 1, "command": { "kind": "drive" } },
     { "type": "pan-tilt", "capability": "servo.pan_tilt", "label": "Pan / tilt", "order": 2, "command": { "kind": "actuator", "names": ["pan", "tilt"] } },
     { "type": "lights", "capability": "lights.rgb", "label": "Lights", "order": 3, "command": { "kind": "actuator", "names": ["lights"] } },
     { "type": "horn", "capability": "speaker.horn", "label": "Horn", "order": 4, "command": { "kind": "actuator", "names": ["buzzer"] } },

@@ -91,6 +91,69 @@ const { boot, check, done } = require('./helpers/app');
         a.close(); b.close();
     });
 
+    await check('halt passes the gate while the e-stop is latched; every other kind is refused', async () => {
+        const { robot, pairing } = await t.robot(alex, { limits: { cooldown_ms: 60000, allow: { operator: ['drive'] } } });
+        await invite(robot.id, bob.subject, 'operator');
+        const dev = await deviceFor(robot.id, pairing.code);
+        const b = await op(bob);
+        const j = await joinResult(b, robot.id);
+        assert.deepStrictEqual(j.allowed_commands, ['drive', 'halt'], 'no allowlist removes halt');
+        b.send({ type: 'estop' });
+        assert.ok(await poll(() => t.domain.robots.get(robot.id).then((r) => !!r.estop_latched)), 'the e-stop latched');
+        cmd(b, { id: 'h0', kind: 'drive', value: { throttle: 0.2 } });
+        assert.strictEqual((await result(b, 'h0')).code, 'bot.estop_latched');
+        cmd(b, { id: 'h1', kind: 'halt' });
+        const h1 = await dev.waitFor((m) => m.type === 'command' && m.ref === 'h1');
+        assert.strictEqual(h1.kind, 'halt');
+        assert.deepStrictEqual(h1.value, {});
+        assert.strictEqual(h1.deadline_ms, null, 'halt is not a motion with a deadline');
+        dev.send({ type: 'ack', id: h1.id });
+        assert.strictEqual((await result(b, 'h1')).result, 'ack');
+        cmd(b, { id: 'h2', kind: 'halt' });
+        const h2 = await dev.waitFor((m) => m.type === 'command' && m.ref === 'h2');
+        assert.ok(h2, 'halt is never cooled down');
+        const audit = await t.domain.audit.list(robot.id, { limit: 5 });
+        assert.ok(audit.some((x) => x.kind === 'halt' && x.result === 'ack'), 'halt is audited like any command');
+        b.close();
+    });
+
+    await check('the profile decides the kinds and shapes: a mecanum drive keeps x/y/rotation, an actuator is {name, value}', async () => {
+        const { robot, pairing } = await t.robot(alex, { profile_id: 'adeept.adr036.mecanum', limits: { max_turn: 0.5 } });
+        const dev = await deviceFor(robot.id, pairing.code);
+        const a = await op(alex);
+        const j = await joinResult(a, robot.id);
+        assert.deepStrictEqual(j.allowed_commands, ['drive', 'actuator', 'halt']);
+        cmd(a, { id: 'm1', kind: 'drive', value: { x: 0.5, y: -0.4, rotation: 2 } });
+        const m1 = await dev.waitFor((m) => m.type === 'command' && m.ref === 'm1');
+        assert.deepStrictEqual(m1.value, { x: 0.5, y: -0.4, rotation: 0.5 });
+        cmd(a, { id: 'm2', kind: 'actuator', value: { name: 'lights', value: { r: 300, g: 0, b: 7 } } });
+        const m2 = await dev.waitFor((m) => m.type === 'command' && m.ref === 'm2');
+        assert.deepStrictEqual(m2.value, { name: 'lights', value: { r: 255, g: 0, b: 7 } });
+        cmd(a, { id: 'm3', kind: 'actuator', value: { name: 'horn' } });
+        assert.strictEqual((await result(a, 'm3')).code, 'bot.unknown_actuator');
+        cmd(a, { id: 'm4', kind: 'say', value: { text: 'hi' } });
+        const m4 = await result(a, 'm4');
+        assert.strictEqual(m4.code, 'bot.command_not_allowed', 'the adeept plugin has no speech');
+        a.close();
+    });
+
+    await check('config carries the effective limits and is re-sent to the device when the owner changes them', async () => {
+        const { robot, pairing } = await t.robot(alex, { profile_id: 'cozmo', limits: { max_speed: 0.9, max_turn: 0.5 } });
+        const dev = await deviceFor(robot.id, pairing.code);
+        const first = await dev.waitFor((m) => m.type === 'config');
+        assert.deepStrictEqual(first.limits, { max_speed: 0.6, max_turn: 0.5, max_command_ms: 300, heartbeat_ms: 1000 }, 'the owner\'s clamped by cozmo\'s 0.6');
+        assert.deepStrictEqual(first.allowed_commands, ['drive', 'actuator', 'say', 'display', 'halt'], 'cozmo takes no ptz');
+        const r = await t.call('PATCH', `/api/v1/robots/${robot.id}`, { user: alex, body: { limits: { max_speed: 0.3, max_turn: 0.2, max_command_ms: 200, allow: { owner: ['drive', 'say'] } } } });
+        assert.strictEqual(r.status, 200, r.text);
+        const second = await dev.waitFor((m) => m.type === 'config' && m.seq > first.seq);
+        assert.deepStrictEqual(second.limits, { max_speed: 0.3, max_turn: 0.2, max_command_ms: 200, heartbeat_ms: 1000 });
+        assert.deepStrictEqual(second.allowed_commands, ['drive', 'say', 'halt']);
+        const renamed = await t.call('PATCH', `/api/v1/robots/${robot.id}`, { user: alex, body: { name: 'Cozmo II' } });
+        assert.strictEqual(renamed.status, 200);
+        await t.wait(100);
+        assert.strictEqual(dev.messages.filter((m) => m.type === 'config').length, 2, 'a rename does not re-send config');
+    });
+
     await check('a queue robot gives a turn that expires and passes to the next waiting person', async () => {
         const { robot, pairing } = await t.robot(alex, { access_policy: 'queue', limits: { turn_ms: 300, turn_budget: 5 } });
         const dev = await deviceFor(robot.id, pairing.code);

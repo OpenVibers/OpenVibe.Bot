@@ -13,9 +13,15 @@
  *     capabilities: ["drive.differential", …],      // in CAPABILITIES
  *     variants: { differential: { drive: … }, … },  // optional: one profile, several wheel layouts
  *     mapping: { driver: "pca9685", … },            // driver + the hardware mapping (addresses, channels)
- *     widgets: [{ type: "drive", capability: …, label: … }],  // types in WIDGETS
+ *     commands: { drive: { axes: { throttle: [-1, 1], … } }, … },  // what the device accepts (COMMAND_SCHEMAS)
+ *     widgets: [{ type: "drive", capability: …, label: …, command: { kind: "drive" } }],  // types in WIDGETS
  *     camera: { transport: "whip|onvif|rtsp", resolution },
  *     limits: { max_speed, max_turn, max_command_ms, heartbeat_ms } }
+ *
+ * `commands` is the contract with the device's plugin: the gate allows only the kinds declared there
+ * (plus `halt`, which every profile takes) and builds every value from it, so a panel control can only
+ * send a name, shape and range the plugin accepts. A widget that sends commands names them in `command`
+ * ({ kind } or, for actuators, { kind: "actuator", names: [...] }), checked against `commands` at load.
  */
 const fs = require('fs');
 const path = require('path');
@@ -29,7 +35,7 @@ const CAPABILITIES = new Set([
     'servo.pan_tilt', 'head', 'lift',
     'lights.rgb', 'lights.backpack', 'lights.cube',
     'speaker.horn', 'speaker.say',
-    'display.text', 'display.animation',
+    'display.text',
     'sensor.ultrasonic', 'sensor.line', 'sensor.cliff', 'sensor.pickup',
     'battery', 'ptz', 'camera',
 ]);
@@ -44,8 +50,104 @@ const ID_RE = /^[a-z][a-z0-9._-]{1,63}$/;
 const KINDS = new Set(['onboard', 'bridge', 'server']);
 const number = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const int = (v) => (Number.isInteger(v) ? v : null);
+const isObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+const isRange = (r) => Array.isArray(r) && r.length === 2 && number(r[0]) != null && number(r[1]) != null && r[0] < r[1];
 
 function bad(why) { throw new BotError(500, 'bot.profile_invalid', why); }
+
+/**
+ * The per-kind schema of `commands` (what each kind's value may be):
+ *   drive     { axes: { <axis>: [min, max] } }    axes: throttle, steer (differential) or x, y, rotation (holonomic)
+ *   ptz       { axes: { <axis>: [min, max] } }    axes: pan, tilt, zoom
+ *   actuator  { names: { <name>: { type, … } } }  number { range: [min, max] }, rgb { count? } ({r,g,b} 0–255,
+ *                                                 `index` < count when given), tone { hz: [min, max] }, bool
+ *   say       { max_chars }
+ *   display   { modes: [text|face|image_png_b64], faces: [...] (with face), max_chars }
+ *   halt      {}                                  every profile takes it; the gate never refuses it for the e-stop
+ */
+const AXES = { drive: new Set(['throttle', 'steer', 'x', 'y', 'rotation']), ptz: new Set(['pan', 'tilt', 'zoom']) };
+const ACTUATOR_TYPES = new Set(['number', 'rgb', 'tone', 'bool']);
+const DISPLAY_MODES = new Set(['text', 'face', 'image_png_b64']);
+const COMMAND_KINDS = new Set(['drive', 'actuator', 'ptz', 'say', 'display', 'halt']);
+const NAME_RE = /^[a-z][a-z0-9_]{0,23}$/;
+
+function validateAxes(where, axes, allowed) {
+    if (!isObject(axes) || !Object.keys(axes).length) bad(`${where}.axes must name at least one axis`);
+    const out = {};
+    for (const [axis, range] of Object.entries(axes)) {
+        if (!allowed.has(axis)) bad(`${where}: unknown axis ${axis} (one of ${[...allowed].join(', ')})`);
+        if (!isRange(range)) bad(`${where}.axes.${axis} must be [min, max]`);
+        out[axis] = [range[0], range[1]];
+    }
+    return { axes: out };
+}
+
+function validateActuator(where, a) {
+    if (!isObject(a) || !ACTUATOR_TYPES.has(a.type)) bad(`${where}.type must be one of ${[...ACTUATOR_TYPES].join(', ')}`);
+    if (a.type === 'number') {
+        if (!isRange(a.range)) bad(`${where}.range must be [min, max]`);
+        return { type: 'number', range: [a.range[0], a.range[1]] };
+    }
+    if (a.type === 'rgb') {
+        if (a.count != null && !(int(a.count) > 0)) bad(`${where}.count must be a positive integer`);
+        return a.count != null ? { type: 'rgb', count: a.count } : { type: 'rgb' };
+    }
+    if (a.type === 'tone') {
+        if (!isRange(a.hz) || !(a.hz[0] > 0)) bad(`${where}.hz must be [min, max] above 0`);
+        return { type: 'tone', hz: [a.hz[0], a.hz[1]] };
+    }
+    return { type: 'bool' };
+}
+
+/** `commands`, checked kind by kind against the schema above; `halt` is always added. */
+function validateCommands(id, commands) {
+    if (commands != null && !isObject(commands)) bad(`${id}: commands must be an object keyed by command kind`);
+    const out = {};
+    for (const [kind, spec] of Object.entries(commands || {})) {
+        const where = `${id}: commands.${kind}`;
+        if (!COMMAND_KINDS.has(kind)) bad(`${id}: unknown command kind ${kind}`);
+        if (!isObject(spec)) bad(`${where} must be an object`);
+        if (kind === 'drive' || kind === 'ptz') out[kind] = validateAxes(where, spec.axes, AXES[kind]);
+        else if (kind === 'actuator') {
+            if (!isObject(spec.names) || !Object.keys(spec.names).length) bad(`${where}.names must name at least one actuator`);
+            const names = {};
+            for (const [name, a] of Object.entries(spec.names)) {
+                if (!NAME_RE.test(name)) bad(`${where}: actuator name ${name} is not valid`);
+                names[name] = validateActuator(`${where}.names.${name}`, a);
+            }
+            out.actuator = { names };
+        } else if (kind === 'say') {
+            if (spec.max_chars != null && !(int(spec.max_chars) > 0)) bad(`${where}.max_chars must be a positive integer`);
+            out.say = { max_chars: spec.max_chars || 200 };
+        } else if (kind === 'display') {
+            if (!Array.isArray(spec.modes) || !spec.modes.length) bad(`${where}.modes must be a non-empty array`);
+            for (const m of spec.modes) if (!DISPLAY_MODES.has(m)) bad(`${where}: unknown display mode ${m} (one of ${[...DISPLAY_MODES].join(', ')})`);
+            if (spec.max_chars != null && !(int(spec.max_chars) > 0)) bad(`${where}.max_chars must be a positive integer`);
+            const d = { modes: [...new Set(spec.modes)], max_chars: spec.max_chars || 200 };
+            if (d.modes.includes('face')) {
+                if (!Array.isArray(spec.faces) || !spec.faces.length || !spec.faces.every((f) => typeof f === 'string' && NAME_RE.test(f))) bad(`${where}.faces must list the face names`);
+                d.faces = spec.faces.slice();
+            }
+            out.display = d;
+        } else if (Object.keys(spec).length) bad(`${where} takes no options`);
+    }
+    out.halt = {};
+    return out;
+}
+
+/** A widget's `command`: a declared kind, and for an actuator the declared names it drives. */
+function validateWidgetCommand(id, w, commands) {
+    const c = w.command;
+    const where = `${id}: widget ${w.type}`;
+    if (!isObject(c) || !commands[c.kind]) bad(`${where} sends ${c && c.kind}, which commands does not declare`);
+    if (c.kind !== 'actuator') {
+        if (c.names != null) bad(`${where}: only an actuator command names actuators`);
+        return { kind: c.kind };
+    }
+    if (!Array.isArray(c.names) || !c.names.length) bad(`${where}: an actuator command lists its names`);
+    for (const n of c.names) if (!Object.prototype.hasOwnProperty.call(commands.actuator.names, n)) bad(`${where} drives actuator ${n}, which commands does not declare`);
+    return { kind: 'actuator', names: c.names.slice() };
+}
 
 /** Validate one profile, filling the limit defaults (max_command_ms 300, heartbeat_ms 1000). */
 function validateProfile(p) {
@@ -56,12 +158,14 @@ function validateProfile(p) {
     if (p.kind != null && !KINDS.has(p.kind)) bad(`${p.id}: kind must be one of onboard, bridge, server`);
     if (!Array.isArray(p.capabilities) || !p.capabilities.length) bad(`${p.id}: capabilities must be a non-empty array`);
     for (const c of p.capabilities) if (!CAPABILITIES.has(c)) bad(`${p.id}: unknown capability ${c}`);
+    const commands = validateCommands(p.id, p.commands);
     if (!Array.isArray(p.widgets) || !p.widgets.length) bad(`${p.id}: widgets must be a non-empty array`);
-    for (const w of p.widgets) {
+    const widgets = p.widgets.map((w) => {
         if (!w || typeof w.type !== 'string' || !WIDGETS.has(w.type)) bad(`${p.id}: unknown widget type ${w && w.type}`);
         if (w.capability != null && !CAPABILITIES.has(w.capability)) bad(`${p.id}: widget ${w.type} binds unknown capability ${w.capability}`);
         if (w.label != null && (typeof w.label !== 'string' || w.label.length > 60)) bad(`${p.id}: widget ${w.type} label is invalid`);
-    }
+        return w.command != null ? { ...w, command: validateWidgetCommand(p.id, w, commands) } : { ...w };
+    });
     if (!p.mapping || typeof p.mapping !== 'object' || !DRIVERS.has(p.mapping.driver)) bad(`${p.id}: mapping.driver must be one of ${[...DRIVERS].join(', ')}`);
     const l = p.limits && typeof p.limits === 'object' ? p.limits : {};
     const limits = {
@@ -75,7 +179,7 @@ function validateProfile(p) {
     return {
         id: p.id, version: p.version, name: p.name.trim(), vendor: p.vendor || null, kind: p.kind || null,
         description: p.description || null, capabilities: [...p.capabilities], variants: p.variants || null,
-        mapping: p.mapping, widgets: p.widgets.slice(), camera: p.camera || null, limits,
+        mapping: p.mapping, commands, widgets, camera: p.camera || null, limits,
     };
 }
 
@@ -119,4 +223,4 @@ async function listProfiles(db) {
     return db.many('SELECT DISTINCT ON (id) id, version, profile FROM robot_profiles ORDER BY id, version DESC');
 }
 
-module.exports = { validateProfile, loadProfiles, seedProfiles, getProfile, listProfiles, CAPABILITIES, WIDGETS, DRIVERS };
+module.exports = { validateProfile, loadProfiles, seedProfiles, getProfile, listProfiles, CAPABILITIES, WIDGETS, DRIVERS, COMMAND_KINDS };

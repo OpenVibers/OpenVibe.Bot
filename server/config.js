@@ -98,6 +98,11 @@ function loadConfig(env = process.env) {
             enabled: env.BOT_JOBS !== 'off',
             intervalMs: int(env.BOT_JOBS_INTERVAL_MS, 5000),
         },
+        // Video: a device publishes its camera to OpenRe's WHIP ingest at <whipBase>/<its publish key>
+        // (`whip_url` in the pairing and rotation answers). Set it empty to pair devices without video.
+        media: {
+            whipBase: trim(env.BOT_WHIP_BASE != null ? env.BOT_WHIP_BASE : 'https://ingest.openre.stream/whip'),
+        },
         // The one-line installer the owner copies next to the pairing code (the agent job builds it).
         installer: {
             scriptUrl: trim(env.BOT_INSTALLER_URL || 'https://openvibe.bot/install'),

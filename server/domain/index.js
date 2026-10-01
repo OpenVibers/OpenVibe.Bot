@@ -7,10 +7,12 @@
  *
  * A robot (rob_…) is what the owner shares; a device (dev_…) is a running agent attached to one or more
  * robots, holding one rotatable, revocable credential (32 random bytes, stored hashed, shown once). The
- * gate applies, in order: the robot exists, the e-stop is clear, the caller's role, the per-role command
- * allowlist, the access policy (private/invite: owner + operators; queue: the active turn holder too),
- * the owner's limits (clamped), the per-turn budget and cooldowns, and the device being online (commands
- * are never queued). Every decision — allowed or refused — is audited.
+ * gate applies, in order: the robot exists, its profile takes the command kind, the e-stop is clear, the
+ * caller's role, the per-role command allowlist, the access policy (private/invite: owner + operators;
+ * queue: the active turn holder too), the device being online (commands are never queued), cooldowns and
+ * the per-turn budget, and finally builds the value from the profile's `commands` (names, shapes, ranges,
+ * clamped by the owner's limits). `halt` passes the e-stop, the allowlist, cooldowns and the budget: a
+ * stop is never refused to someone who may drive. Every decision — allowed or refused — is audited.
  */
 const {
     BotError, fail, prefixedId, iso, token, hashSecret, secretEquals, json, text, storable,
@@ -25,6 +27,14 @@ const DEFAULT_ALLOW = {
 };
 const KINDS = new Set(['drive', 'actuator', 'ptz', 'say', 'display', 'halt']);
 const MOTION = new Set(['drive', 'actuator', 'ptz']);
+const CONTROL_ROLES = new Set(['owner', 'operator', 'queue']);
+// Drive axes the owner's max_turn caps; every other drive axis is capped by max_speed.
+const TURN_AXES = new Set(['steer', 'rotation']);
+// The older drive names, still read for the axis they stand for.
+const AXIS_ALIASES = { throttle: 'speed', steer: 'turn' };
+// A display image rides a 64 KB control frame, so its base64 stays well under that.
+const MAX_IMAGE_B64 = 48 * 1024;
+const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
 
 // Crockford base32: no I, L, O or U, so a code read aloud cannot be mistyped into another.
 const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
@@ -39,6 +49,15 @@ const formatCode = (s) => `${s.slice(0, 4)}-${s.slice(4)}`;
 const isCodeShape = (s) => /^[0-9A-HJKMNP-TV-Z]{8}$/.test(s);
 
 const clampNum = (v, lo, hi, d = 0) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
+
+// Scientific pitch: 'A4' is 440 Hz; a sharp (#) or flat (b) after the letter.
+const NOTE_SEMITONES = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+function noteToHz(note) {
+    const m = /^([A-Ga-g])([#b]?)(-?\d)$/.exec(String(note));
+    if (!m) return null;
+    const semis = NOTE_SEMITONES[m[1].toUpperCase()] + (m[2] === '#' ? 1 : m[2] === 'b' ? -1 : 0);
+    return 440 * 2 ** ((12 * (Number(m[3]) + 1) + semis - 69) / 12);
+}
 
 function createDomain({ db, config, outbox, link = null, now = () => Date.now(), log = console }) {
     // ── Presenters ────────────────────────────────────────────────────────────────────────────────
@@ -195,7 +214,15 @@ function createDomain({ db, config, outbox, link = null, now = () => Date.now(),
         });
         if (result.error) fail(result.error[0], result.error[1], result.error[2]);
         const profile = await getProfile(db, (await getRobot(result.robot_id)).profile_id);
-        return { device: result.device, credential: result.credential, publish_key: result.publishKey, profile: profile ? profile.profile : null };
+        return { device: result.device, credential: result.credential, publish_key: result.publishKey, whip_url: whipUrl(result.publishKey), profile: profile ? profile.profile : null };
+    }
+    /**
+     * Where the device publishes its camera: OpenRe's WHIP ingest (`POST <base>/<key>`, RFC 9725) with
+     * this device's publish key as the stream key. It carries the key, so it is shown once, with the key.
+     */
+    function whipUrl(publishKey) {
+        const base = config.media && config.media.whipBase;
+        return base && publishKey ? `${base}/${encodeURIComponent(publishKey)}` : null;
     }
     async function prunePairingCodes() {
         await db.query('DELETE FROM pairing_codes WHERE expires_at < $1', [iso(now() - 24 * 3600 * 1000)]);
@@ -223,7 +250,7 @@ function createDomain({ db, config, outbox, link = null, now = () => Date.now(),
             `UPDATE devices SET credential_hash = $2, credential_prev_hash = $3, prev_valid_until = $4, publish_key_hash = $5, updated_at = $6
              WHERE id = $1 RETURNING *`,
             [id, hashSecret(credential), d.credential_hash, iso(now() + config.device.rotateGraceMs), hashSecret(publishKey), at]);
-        return { device: updated, credential, publish_key: publishKey };
+        return { device: updated, credential, publish_key: publishKey, whip_url: whipUrl(publishKey) };
     }
     async function revokeDevice(id) {
         const d = await getDevice(id);
@@ -365,14 +392,24 @@ function createDomain({ db, config, outbox, link = null, now = () => Date.now(),
     }
 
     // ── The control gate (ADR-043 decisions 5, 6, 8) ──────────────────────────────────────────────
+    /** The owner's limits clamped by the profile's (a profile missing one falls back to Bot's defaults). */
     const effectiveLimits = (robot, profile) => {
         const rl = json(robot.limits, {});
         const pl = (profile && profile.limits) || {};
-        const maxSpeed = rl.max_speed != null ? Math.min(rl.max_speed, pl.max_speed) : pl.max_speed;
-        const maxTurn = rl.max_turn != null ? Math.min(rl.max_turn, pl.max_turn) : pl.max_turn;
-        const maxCommandMs = rl.max_command_ms != null ? Math.min(rl.max_command_ms, pl.max_command_ms) : pl.max_command_ms;
+        const pSpeed = pl.max_speed != null ? pl.max_speed : 1;
+        const pTurn = pl.max_turn != null ? pl.max_turn : 1;
+        const pMs = pl.max_command_ms != null ? pl.max_command_ms : config.control.maxCommandMs;
+        const maxSpeed = rl.max_speed != null ? Math.min(rl.max_speed, pSpeed) : pSpeed;
+        const maxTurn = rl.max_turn != null ? Math.min(rl.max_turn, pTurn) : pTurn;
+        const maxCommandMs = rl.max_command_ms != null ? Math.min(rl.max_command_ms, pMs) : pMs;
         const cooldownMs = rl.cooldown_ms != null ? rl.cooldown_ms : config.control.cooldownMs;
         return { maxSpeed, maxTurn, maxCommandMs, cooldownMs };
+    };
+    /** The limits a device enforces itself (the `config` frame): the effective ones, never the profile's alone. */
+    const deviceLimits = (robot, profile) => {
+        const eff = effectiveLimits(robot, profile);
+        const hb = profile && profile.limits && profile.limits.heartbeat_ms != null ? profile.limits.heartbeat_ms : config.device.heartbeatMs;
+        return { max_speed: eff.maxSpeed, max_turn: eff.maxTurn, max_command_ms: eff.maxCommandMs, heartbeat_ms: hb };
     };
     // Cooldown is measured from the last command sent (not from an acknowledgement), per operator and
     // kind; the owner is never cooldowned. Bounded so a flood of subjects cannot grow it without end.
@@ -382,42 +419,101 @@ function createDomain({ db, config, outbox, link = null, now = () => Date.now(),
         if (lastCommandAt.size > 4096) lastCommandAt.delete(lastCommandAt.keys().next().value);
     };
 
-    const allowedFor = (robot, role) => {
+    /** The command kinds the robot's profile takes (`halt` always). */
+    const profileTakes = (profile, kind) => kind === 'halt' || !!(profile && profile.commands && profile.commands[kind]);
+    /**
+     * What `role` may send to this robot: the owner's allowlist for the role (or the default), cut to the
+     * kinds the profile takes. Every role that may drive also gets `halt`, which no allowlist removes.
+     */
+    const allowedFor = (robot, role, profile = null) => {
         const rl = json(robot.limits, {});
         const fromOwner = rl.allow && Array.isArray(rl.allow[role]) ? rl.allow[role] : null;
-        return fromOwner || DEFAULT_ALLOW[role] || [];
+        const kinds = (fromOwner || DEFAULT_ALLOW[role] || []).filter((k) => k !== 'halt' && profileTakes(profile, k));
+        return CONTROL_ROLES.has(role) ? [...kinds, 'halt'] : kinds;
     };
 
-    /** Clamp a command value to the profile/owner limits; returns the value to send and its audit summary. */
-    function clampValue(kind, value, eff, profile) {
-        const v = value && typeof value === 'object' ? value : {};
+    /** An axis value: the schema's range, cut for drive by the owner's max_speed (or max_turn for a turn axis). */
+    function axisValue(kind, axis, range, raw, eff) {
+        const cap = kind !== 'drive' ? Infinity : TURN_AXES.has(axis) ? eff.maxTurn : eff.maxSpeed;
+        const lo = Math.max(range[0], -cap);
+        const hi = Math.min(range[1], cap);
+        return clampNum(raw, lo, hi, clampNum(0, lo, hi));
+    }
+    function actuatorValue(name, a, x) {
+        if (a.type === 'number') {
+            if (typeof x !== 'number' || !Number.isFinite(x)) fail(422, 'bot.invalid_input', `${name} takes a number`);
+            return clampNum(x, a.range[0], a.range[1]);
+        }
+        if (a.type === 'bool') {
+            if (typeof x !== 'boolean') fail(422, 'bot.invalid_input', `${name} takes true or false`);
+            return x;
+        }
+        if (a.type === 'rgb') {
+            if (x == null || x === false) return null;   // off
+            if (!x || typeof x !== 'object' || Array.isArray(x)) fail(422, 'bot.invalid_input', `${name} takes {r,g,b} (0–255) or null`);
+            const out = { r: Math.round(clampNum(x.r, 0, 255)), g: Math.round(clampNum(x.g, 0, 255)), b: Math.round(clampNum(x.b, 0, 255)) };
+            if (x.index != null) {
+                if (!a.count || !Number.isInteger(x.index) || x.index < 0 || x.index >= a.count) fail(422, 'bot.invalid_input', `${name} index must be 0..${(a.count || 1) - 1}`);
+                out.index = x.index;
+            }
+            return out;
+        }
+        // tone: {hz} or {note}, sent as {hz} inside the range; null, 0 or {hz:0} is off.
+        if (!x) return null;
+        if (typeof x !== 'object' || Array.isArray(x)) fail(422, 'bot.invalid_input', `${name} takes {note}, {hz} or null`);
+        const hz = x.note != null ? noteToHz(x.note) : typeof x.hz === 'number' && Number.isFinite(x.hz) ? x.hz : null;
+        if (hz == null) fail(422, 'bot.invalid_input', `${name} takes {note} (like "A4"), {hz} or null`);
+        if (hz === 0) return null;
+        return { hz: Math.round(clampNum(hz, a.hz[0], a.hz[1]) * 100) / 100 };
+    }
+
+    /**
+     * Build the value the device gets from the operator's, by the profile's schema for the kind: only the
+     * declared axes and actuator names, in the declared shapes, clamped to the declared ranges and the
+     * owner's limits. Throws a 422 BotError for a value the device would refuse.
+     */
+    function buildValue(kind, value, eff, profile) {
+        if (kind === 'halt') return {};
+        const spec = profile.commands[kind];
+        const v = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
         if (kind === 'drive') {
-            const out = { throttle: clampNum(v.throttle != null ? v.throttle : v.speed, -eff.maxSpeed, eff.maxSpeed, 0), steer: clampNum(v.steer != null ? v.steer : v.turn, -eff.maxTurn, eff.maxTurn, 0) };
-            if (v.variant) out.variant = String(v.variant).slice(0, 16);
+            // Every declared axis is sent; an absent one is 0, so a drive frame always says the whole motion.
+            const out = {};
+            for (const [axis, range] of Object.entries(spec.axes)) out[axis] = axisValue(kind, axis, range, v[axis] != null ? v[axis] : v[AXIS_ALIASES[axis]], eff);
+            return out;
+        }
+        if (kind === 'ptz') {
+            // Only the axes given move; the others stay where they are.
+            const out = {};
+            for (const [axis, range] of Object.entries(spec.axes)) if (v[axis] != null) out[axis] = axisValue(kind, axis, range, v[axis], eff);
+            if (!Object.keys(out).length) fail(422, 'bot.invalid_input', `ptz needs one of ${Object.keys(spec.axes).join(', ')}`);
             return out;
         }
         if (kind === 'actuator') {
-            const servo = String(v.servo || '').slice(0, 24);
-            return { servo, angle: clampNum(v.angle, -1, 1, 0) };
+            const name = typeof v.name === 'string' ? v.name : '';
+            if (!Object.prototype.hasOwnProperty.call(spec.names, name)) fail(422, 'bot.unknown_actuator', `this robot has no actuator ${name.slice(0, 24) || '(unnamed)'}`);
+            return { name, value: actuatorValue(name, spec.names[name], v.value) };
         }
-        if (kind === 'ptz') return { pan: clampNum(v.pan, -1, 1, 0), tilt: clampNum(v.tilt, -1, 1, 0), zoom: clampNum(v.zoom, -1, 1, 0) };
         if (kind === 'say') {
-            const t = text(v.text, 'text', 200);
+            const t = text(v.text, 'text', spec.max_chars);
             if (!t) fail(422, 'bot.invalid_input', 'say needs text');
             return { text: t };
         }
-        if (kind === 'display') {
-            if (v.animation != null) {
-                const anims = profile && profile.mapping && Array.isArray(profile.mapping.animations) ? profile.mapping.animations : null;
-                const anim = storable(v.animation).slice(0, 64);
-                if (anims && !anims.includes(anim)) fail(422, 'bot.unknown_animation', 'that animation is not in the profile');
-                return { animation: anim };
-            }
-            const t = text(v.text, 'text', 80);
-            if (!t) fail(422, 'bot.invalid_input', 'display needs text or animation');
-            return { text: t };
+        // display: one of the declared modes, in the plugin's order of preference.
+        const modes = new Set(spec.modes);
+        if (modes.has('image_png_b64') && v.image_png_b64 != null) {
+            const img = String(v.image_png_b64);
+            if (!img || img.length > MAX_IMAGE_B64 || !BASE64_RE.test(img)) fail(422, 'bot.invalid_input', `image_png_b64 must be base64, at most ${MAX_IMAGE_B64} characters`);
+            return { image_png_b64: img };
         }
-        return {};
+        if (modes.has('face') && v.face != null) {
+            const face = String(v.face).toLowerCase();
+            if (!spec.faces.includes(face)) fail(422, 'bot.invalid_input', `face must be one of ${spec.faces.join(', ')}`);
+            return { face };
+        }
+        const t = modes.has('text') ? text(v.text, 'text', spec.max_chars) : null;
+        if (!t) fail(422, 'bot.invalid_input', `display needs ${spec.modes.join(' or ')}`);
+        return { text: t };
     }
 
     /**
@@ -430,7 +526,9 @@ function createDomain({ db, config, outbox, link = null, now = () => Date.now(),
         const profileRow = await getProfile(db, robot.profile_id, robot.profile_version);
         const profile = profileRow ? profileRow.profile : null;
         if (!KINDS.has(kind)) return { ok: false, code: 'bot.unknown_command', reason: `unknown command kind ${kind}`, robot };
-        if (robot.estop_latched) return { ok: false, code: 'bot.estop_latched', reason: 'the e-stop is latched; only the owner can clear it', robot };
+        if (!profileTakes(profile, kind)) return { ok: false, code: 'bot.command_not_allowed', reason: `this robot takes no ${kind} commands`, robot };
+        const halt = kind === 'halt';
+        if (robot.estop_latched && !halt) return { ok: false, code: 'bot.estop_latched', reason: 'the e-stop is latched; only the owner can clear it', robot };
 
         const subject = principal && principal.kind !== 'device' ? principal.subject : null;
         let role = await roleOf(robotId, subject);
@@ -445,28 +543,35 @@ function createDomain({ db, config, outbox, link = null, now = () => Date.now(),
             if (robot.access_policy === 'queue') role = 'queue';
             else return { ok: false, code: 'bot.read_only', reason: 'you are a viewer on this robot', robot, role };
         }
-        const allow = allowedFor(robot, role);
+        const allow = allowedFor(robot, role, profile);
         if (!allow.includes(kind)) return { ok: false, code: 'bot.command_not_allowed', reason: `${kind} is not allowed for ${role}`, robot, role };
         if (!online) return { ok: false, code: 'bot.device_offline', reason: 'the device is offline; commands are never queued', robot, role };
 
         const eff = effectiveLimits(robot, profile);
-        if (eff.cooldownMs > 0 && role !== 'owner') {
+        const cooled = eff.cooldownMs > 0 && role !== 'owner' && !halt;
+        if (cooled) {
             const last = lastCommandAt.get(`${robotId}|${subject}|${kind}`);
             if (last && now() - last < eff.cooldownMs) {
                 return { ok: false, code: 'bot.cooldown', reason: `wait ${eff.cooldownMs} ms between ${kind} commands`, robot, role };
             }
         }
         if (role === 'queue') {
-            const budget = await consumeTurn(robotId, subject);
-            if (!budget.ok) return { ok: false, code: budget.code, reason: budget.code === 'bot.turn_budget' ? 'your turn budget is spent' : 'it is not your turn', robot, role };
+            // A halt needs the turn (a waiting person may not stop the driver) but spends none of its budget.
+            if (halt) {
+                const turn = await currentTurn(robotId);
+                if (!turn || turn.subject !== subject) return { ok: false, code: 'bot.not_your_turn', reason: 'it is not your turn', robot, role };
+            } else {
+                const budget = await consumeTurn(robotId, subject);
+                if (!budget.ok) return { ok: false, code: budget.code, reason: budget.code === 'bot.turn_budget' ? 'your turn budget is spent' : 'it is not your turn', robot, role };
+            }
         }
-        let clamped;
-        try { clamped = clampValue(kind, value, eff, profile); } catch (e) { return { ok: false, code: e.code || 'bot.invalid_input', reason: e.detail || e.message, robot, role }; }
-        if (eff.cooldownMs > 0 && role !== 'owner') markCooldown(robotId, subject, kind);
+        let built;
+        try { built = buildValue(kind, value, eff, profile); } catch (e) { return { ok: false, code: e.code || 'bot.invalid_input', reason: e.detail || e.message, robot, role }; }
+        if (cooled) markCooldown(robotId, subject, kind);
         const deadlineMs = MOTION.has(kind)
             ? now() + clampNum(requestedMs != null ? requestedMs : eff.maxCommandMs, 1, eff.maxCommandMs, eff.maxCommandMs)
             : null;
-        return { ok: true, robot, profile, role, kind, value: clamped, deadlineMs, limits: eff };
+        return { ok: true, robot, profile, role, kind, value: built, deadlineMs, limits: eff };
     }
 
     return {
@@ -474,13 +579,13 @@ function createDomain({ db, config, outbox, link = null, now = () => Date.now(),
         present: { robot: presentRobot, device: presentDevice },
         robots: { create: createRobot, list: listRobots, get: getRobot, update: updateRobot, remove: removeRobot },
         members: { roleOf, add: addOperator, remove: removeOperator, list: listOperators },
-        pairing: { create: createPairingCode, redeem, prune: prunePairingCodes, installerCommand },
+        pairing: { create: createPairingCode, redeem, prune: prunePairingCodes, installerCommand, whipUrl },
         devices: { byCredential, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, touchSeen, setOnline },
         estop: { set: setEstop, clear: clearEstop },
         queue: { join: joinQueue, state: queueState, currentTurn, consume: consumeTurn, sweep: sweepQueues },
         audit: { record: auditCommand, list: listAudit, listPage: listAuditPage, prune: pruneAudit },
-        control: { prepare, allowedFor, effectiveLimits, DEFAULT_ALLOW, KINDS },
+        control: { prepare, allowedFor, effectiveLimits, deviceLimits, buildValue, DEFAULT_ALLOW, KINDS },
     };
 }
 
-module.exports = { createDomain, DEFAULT_ALLOW, KINDS, normaliseCode, formatCode, newCode, isCodeShape };
+module.exports = { createDomain, DEFAULT_ALLOW, KINDS, normaliseCode, formatCode, newCode, isCodeShape, noteToHz };

@@ -33,9 +33,9 @@ so a reconnecting agent cannot be shadowed by a stale socket.
 
 | type | fields (besides v, seq, ts) | when |
 |---|---|---|
-| `paired` | `device_id, credential, publish_key, robot_ids, profile_id, profile` | the answer to `pair`; `credential`/`publish_key` are shown **once** |
+| `paired` | `device_id, credential, publish_key, whip_url, robot_ids, profile_id, profile` | the answer to `pair`; `credential`/`publish_key`/`whip_url` are shown **once** |
 | `hello` | `session_id, device_id, robot_ids, server_time` | on every authenticated connection |
-| `config` | `heartbeat_ms, limits, allowed_commands, estop_latched` | right after `hello` |
+| `config` | `heartbeat_ms, limits, allowed_commands, estop_latched` | right after `hello`, and again whenever the owner changes the robot's limits |
 | `command` | `id, kind, value, deadline_ms, operator{subject,role}, robot_id` | an operator's command passed the gate |
 | `estop` | `latched, by, at` | the e-stop latched or the owner cleared it |
 | `heartbeat_ack` | `seq, server_time` | the answer to `heartbeat`; the device computes RTT |
@@ -53,10 +53,51 @@ so a reconnecting agent cannot be shadowed by a stale socket.
 | `nack` | `id, fault_code` | a command was refused on the device |
 | `estop_state` | `latched, by, at, robot_id?` | a hardware latch; `robot_id` omitted = every robot the device serves |
 
-`kind` is one of `drive`, `actuator`, `ptz`, `say`, `display`, `halt`. `deadline_ms` is an absolute
-epoch-ms instant and is present on the motion kinds only (`drive`, `actuator`, `ptz`): the device
-**must** stop the motors at that instant if no newer command arrived, and on every disconnect or crash
-path, without asking the network.
+`kind` is one of `drive`, `actuator`, `ptz`, `say`, `display`, `halt`, and a device only ever gets the
+kinds its robot's profile declares (§1.1), with values in the shapes and ranges declared there.
+`deadline_ms` is an absolute epoch-ms instant and is present on the motion kinds only (`drive`,
+`actuator`, `ptz`): the device **must** stop the motors at that instant if no newer command arrived, and
+on every disconnect or crash path, without asking the network. `halt` (value `{}`, no deadline) stops
+everything at once and passes the gate even while the e-stop is latched.
+
+`config.limits` are the **effective** limits — the owner's (`PATCH /robots/:id` `limits`) clamped by the
+profile's — as `{ max_speed, max_turn, max_command_ms, heartbeat_ms }`, the same numbers the gate clamps
+with; `allowed_commands` is what the owner may send: the profile's kinds, cut by the owner's allowlist,
+always with `halt`. Both are re-sent to the connected device the moment the owner changes the limits.
+
+`whip_url` is where the device publishes its camera: OpenRe's WHIP ingest (`POST`, RFC 9725, body
+`application/sdp`) at `<BOT_WHIP_BASE>/<publish_key>`, the base defaulting to
+`https://ingest.openre.stream/whip`. It is built from the device's own publish key (never the owner's
+stream key), so it is a secret like the key: returned only by `pair` / `POST /pair` and by a rotation
+(which issues a new key, so a new URL), never by a read. With `BOT_WHIP_BASE` empty it is `null` and the
+device runs without video.
+
+### 1.1 Command values (the profile's `commands`)
+
+Each profile (`server/profiles/*.json`) declares, per kind, what its device accepts; the gate allows only
+those kinds (plus `halt`) and builds every value from the declaration — only the declared axes and
+names, clamped into the declared ranges and the owner's limits; a value the device would refuse is
+refused here (`bot.invalid_input`, `bot.unknown_actuator`) and never sent.
+
+| kind | profile declares | the device gets |
+|---|---|---|
+| `drive` | `axes: { throttle, steer }` (differential) or `{ x, y, rotation }` (mecanum) → `[min, max]` | every declared axis (an absent one is 0): `{ "throttle": 0.6, "steer": -0.25 }` or `{ "x": 0.5, "y": -0.4, "rotation": 0 }`; `max_speed` caps throttle/x/y, `max_turn` steer/rotation |
+| `ptz` | `axes: { pan, tilt, zoom }` → `[min, max]` | only the axes sent: `{ "pan": 0.2 }` |
+| `actuator` | `names: { <name>: { type, … } }` | `{ "name": "<name>", "value": … }` — `number` in its `range`; `rgb` `{r,g,b}` integers 0–255 (plus `index` < `count` when declared) or `null` (off); `tone` `{ "hz": 440 }` inside its `hz` range (an operator may send `{ "note": "A4" }`) or `null` (off); `bool` `true`/`false` |
+| `say` | `max_chars` | `{ "text": "…" }` |
+| `display` | `modes` of `text`, `face`, `image_png_b64`; `faces`; `max_chars` | exactly one of `{ "text" }`, `{ "face": "happy" }`, `{ "image_png_b64": "…" }` (base64, ≤ 48 KiB) |
+| `halt` | — (every profile) | `{}` |
+
+The shipped profiles and the plugin each one matches (`test/profiles.test.js` checks every panel control
+against these):
+
+| profile | device | commands |
+|---|---|---|
+| `adeept.adr036` | Node plugin `adeept_adr036`, ordinary wheels | `drive {throttle, steer}`; `actuator` `pan`/`tilt` −1..1, `buzzer` tone 220–880 Hz, `lights` rgb (8 LEDs) |
+| `adeept.adr036.mecanum` | Node plugin `adeept_adr036`, mecanum wheels | `drive {x, y, rotation}`; the same actuators |
+| `cozmo` | Node plugin `cozmo` | `drive {throttle, steer}`; `actuator` `head` −1..1, `lift` 0..1, `backpack_lights`/`cube_lights` rgb; `say`; `display` text, face (`neutral happy sad surprised sleepy angry`) or image |
+| `camera.onvif` | server driver `onvif` | `ptz {pan, tilt, zoom}` −1..1 |
+| `sim.rover` | server driver `sim` | `drive {throttle, steer}` |
 
 ### Examples
 
@@ -72,7 +113,8 @@ The answer (the only time the credential appears over the wire):
 
 ```json
 { "v": 1, "seq": 1, "ts": 1738065600000, "type": "paired", "device_id": "dev_01J8Z4…",
-  "credential": "Xb3…", "publish_key": "Vt9…", "robot_ids": ["rob_01J8Z4M2Q0R7T9YV3K6N8P1W2X"],
+  "credential": "Xb3…", "publish_key": "Vt9…", "whip_url": "https://ingest.openre.stream/whip/Vt9…",
+  "robot_ids": ["rob_01J8Z4M2Q0R7T9YV3K6N8P1W2X"],
   "profile_id": "adeept.adr036", "profile": { "id": "adeept.adr036", "limits": { "max_command_ms": 300, "heartbeat_ms": 1000 } } }
 ```
 
@@ -84,7 +126,15 @@ The answer (the only time the credential appears over the wire):
 ```json
 { "v": 1, "seq": 3, "ts": 1738065600000, "type": "config",
   "heartbeat_ms": 1000, "limits": { "max_speed": 1, "max_turn": 1, "max_command_ms": 300, "heartbeat_ms": 1000 },
-  "allowed_commands": ["drive", "actuator", "ptz", "say", "display", "halt"], "estop_latched": false }
+  "allowed_commands": ["drive", "actuator", "halt"], "estop_latched": false }
+```
+
+An actuator command on the Adeept (the pan servo, −1..1):
+
+```json
+{ "v": 1, "seq": 8, "ts": 1738065600000, "type": "command", "id": "cmd_01J8Z4E…", "kind": "actuator",
+  "value": { "name": "pan", "value": -0.4 }, "deadline_ms": 1738065600300,
+  "operator": { "subject": "usr_01J8…", "role": "operator" }, "robot_id": "rob_01J8Z4M2Q0R7T9YV3K6N8P1W2X" }
 ```
 
 A drive command (a held control re-sends every 150 ms with a fresh `id`):
@@ -150,7 +200,7 @@ The gate then applies the **acted-for subject's** role — a service acting for 
 
 | type | fields | notes |
 |---|---|---|
-| `joined` | `robot, role, profile, allowed_commands, state` | the answer to `join` |
+| `joined` | `robot, role, profile, allowed_commands, state` | the answer to `join`; `allowed_commands` is the role's allowlist cut to the profile's kinds, with `halt` for every role that may drive |
 | `robot_state` | `state{robot_id, online, estop{latched,by,at}, latency_ms, battery, telemetry, status, queue}` | on every change and on telemetry, ≤ 2 Hz |
 | `command_result` | `id, result, code?, reason?, latency_ms?, cached?` | `result` is `ack`, `nack`, `refused` or `expired`; a repeated `id` is answered `cached: true` |
 | `error` | `code, detail` | a frame or join the server refused |
@@ -170,7 +220,7 @@ person's `position` is 1-based (0 while they hold the turn).
   "robot": { "id": "rob_01J8Z4M2Q0R7T9YV3K6N8P1W2X", "name": "Rover", "access_policy": "private",
              "estop": { "latched": false, "by": null, "at": null } },
   "role": "operator", "profile": { "id": "adeept.adr036" },
-  "allowed_commands": ["drive", "actuator", "ptz", "say", "display", "halt"],
+  "allowed_commands": ["drive", "actuator", "halt"],
   "state": { "robot_id": "rob_01J8Z4M2Q0R7T9YV3K6N8P1W2X", "online": true, "latency_ms": 63, "battery": 0.72, "queue": null } }
 ```
 
@@ -202,9 +252,12 @@ person's `position` is 1-based (0 while they hold the turn).
 { "v": 1, "seq": 4, "ts": 1738065601001, "type": "error", "code": "bot.forbidden", "detail": "only the owner clears the e-stop" }
 ```
 
-Refusal codes (the gate, in order): `bot.robot_not_found`, `bot.unknown_command`, `bot.estop_latched`,
-`bot.not_an_operator`, `bot.sign_in`, `bot.read_only`, `bot.command_not_allowed`, `bot.device_offline`,
-`bot.cooldown`, `bot.not_your_turn`, `bot.turn_budget`, `bot.unknown_animation`, `bot.invalid_input`.
+Refusal codes (the gate, in order): `bot.robot_not_found`, `bot.unknown_command`, `bot.command_not_allowed`
+(the profile takes no such kind), `bot.estop_latched`, `bot.not_an_operator`, `bot.sign_in`,
+`bot.read_only`, `bot.command_not_allowed` (the role's allowlist), `bot.device_offline`, `bot.cooldown`,
+`bot.not_your_turn`, `bot.turn_budget`, `bot.unknown_actuator`, `bot.invalid_input`, `bot.text_too_long`.
+`halt` is never refused for the e-stop, the allowlist, a cooldown or the turn budget; it still needs a
+role that may drive (a queue robot's turn holder, not someone waiting) and an online device.
 
 ---
 
@@ -220,19 +273,19 @@ shown; a service acts for `X-OV-Subject` / the body's `owner`.
 | `GET /robots` | user, or `bot.robot.read` + `?owner=` | `{ robots[] }` |
 | `POST /robots` | the owner, or `bot.robot.manage` | `201 { robot, pairing{code,expires_at,installer} }` |
 | `GET /robots/:id` | a member, or `bot.robot.read` | `{ robot, role }` |
-| `PATCH /robots/:id` | owner, or `bot.robot.manage` | `{ robot }` |
+| `PATCH /robots/:id` | owner, or `bot.robot.manage` | `{ robot }`; new `limits` re-send `config` to the connected device |
 | `DELETE /robots/:id` | owner, or `bot.robot.manage` | `204` |
 | `POST /robots/:id/pairing-code` | owner, or `bot.robot.manage` | `201 { code, expires_at, installer }` |
 | `GET /robots/:id/operators` | member, or `bot.robot.read` | `{ operators[] }` |
 | `POST /robots/:id/operators` | owner, or `bot.robot.manage` | `201 { operators[] }` |
 | `DELETE /robots/:id/operators/:subject` | owner, or `bot.robot.manage` | `{ operators[] }` |
 | `GET /robots/:id/devices` | member, or `bot.robot.read` | `{ devices[] }` (no hashes, `online`) |
-| `POST /devices/:id/rotate` | the robot's owner, `bot.device.connect` | `{ device, credential, publish_key }` (once) |
+| `POST /devices/:id/rotate` | the robot's owner, `bot.device.connect` | `{ device, credential, publish_key, whip_url }` (once) |
 | `POST /devices/:id/revoke` | the robot's owner, `bot.device.connect` | `{ device }`; the socket closes at once |
 | `POST /robots/:id/estop` | owner/operator, `bot.robot.control` | `{ robot }` |
 | `POST /robots/:id/estop/clear` | **owner only**, `bot.robot.control` | `{ robot }` |
 | `GET /robots/:id/audit?limit=&before=` | owner, or `bot.robot.read` | `{ audit[], next_before }` (newest first) |
-| `POST /pair` | the one-time code is the credential | `201 { device_id, credential, publish_key, robot_id, profile }` |
+| `POST /pair` | the one-time code is the credential | `201 { device_id, credential, publish_key, whip_url, robot_id, profile }` |
 
 Not in `/api/v1`: `GET /api/health`, `GET /api/ready`, `GET /metrics`, `GET /release.json`, the
 `/auth/*` SSO routes, and `GET /` (a one-line text health placeholder).
@@ -245,4 +298,4 @@ Every command — allowed or refused — is written to `command_audit` (robot, d
 principal and its kind, role, kind, the clamped value summary, result `ack|nack|refused|expired`,
 reason, latency, time), kept 30 days. The outbox publishes `bot.robot.online`, `bot.robot.offline`,
 `bot.estop.set`, `bot.estop.cleared` and `bot.command.refused` — small payloads of ids, kinds and
-results, never a credential, a pairing code or a publish key.
+results, never a credential, a pairing code, a publish key or a WHIP URL.

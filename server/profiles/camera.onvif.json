@@ -10,8 +10,11 @@
     "driver": "onvif",
     "credentials": "secret-ref"
   },
+  "commands": {
+    "ptz": { "axes": { "pan": [-1, 1], "tilt": [-1, 1], "zoom": [-1, 1] } }
+  },
   "widgets": [
-    { "type": "ptz", "capability": "ptz", "label": "Pan / tilt / zoom", "order": 1 },
+    { "type": "ptz", "capability": "ptz", "label": "Pan / tilt / zoom", "order": 1, "command": { "kind": "ptz" } },
     { "type": "camera", "capability": "camera", "label": "Camera", "order": 2 },
     { "type": "latency", "label": "Latency", "order": 3 }
   ],

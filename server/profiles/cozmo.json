@@ -4,14 +4,13 @@
   "name": "Cozmo",
   "vendor": "Anki",
   "kind": "bridge",
-  "description": "Anki Cozmo over PyCozmo: differential drive, head and lift, speech and face display, backpack and cube lights, cliff and pick-up sensors, a 320x240 camera and the stock animation set. A bridge computer joins the robot's Wi-Fi on one interface and OpenVibe on another.",
+  "description": "Anki Cozmo over PyCozmo: differential drive, head and lift, speech, a face display (text, eyes or a picture), backpack and cube lights, cliff and pick-up sensors and a 320x240 camera. A bridge computer joins the robot's Wi-Fi on one interface and OpenVibe on another.",
   "capabilities": [
     "drive.differential",
     "head",
     "lift",
     "speaker.say",
     "display.text",
-    "display.animation",
     "lights.backpack",
     "lights.cube",
     "battery",
@@ -21,25 +20,28 @@
   ],
   "mapping": {
     "driver": "cozmo",
-    "animations": [
-      "anim_freeplay_reacttoface_happy_01",
-      "anim_freeplay_reacttoface_sad_01",
-      "anim_eyepose_happy",
-      "anim_eyepose_sad",
-      "anim_eyepose_angry",
-      "anim_eyepose_excited",
-      "anim_blackjack_win",
-      "anim_bored_01",
-      "anim_fistbump_success_01"
-    ]
+    "plugin": "cozmo"
+  },
+  "commands": {
+    "drive": { "axes": { "throttle": [-1, 1], "steer": [-1, 1] } },
+    "actuator": {
+      "names": {
+        "head": { "type": "number", "range": [-1, 1] },
+        "lift": { "type": "number", "range": [0, 1] },
+        "backpack_lights": { "type": "rgb" },
+        "cube_lights": { "type": "rgb" }
+      }
+    },
+    "say": { "max_chars": 200 },
+    "display": { "modes": ["text", "face", "image_png_b64"], "faces": ["neutral", "happy", "sad", "surprised", "sleepy", "angry"], "max_chars": 200 }
   },
   "widgets": [
-    { "type": "drive", "capability": "drive.differential", "label": "Drive", "order": 1 },
-    { "type": "head", "capability": "head", "label": "Head", "order": 2 },
-    { "type": "lift", "capability": "lift", "label": "Lift", "order": 3 },
-    { "type": "speaker", "capability": "speaker.say", "label": "Say", "order": 4 },
-    { "type": "display", "capability": "display.text", "label": "Face", "order": 5 },
-    { "type": "lights", "capability": "lights.backpack", "label": "Lights", "order": 6 },
+    { "type": "drive", "capability": "drive.differential", "label": "Drive", "order": 1, "command": { "kind": "drive" } },
+    { "type": "head", "capability": "head", "label": "Head", "order": 2, "command": { "kind": "actuator", "names": ["head"] } },
+    { "type": "lift", "capability": "lift", "label": "Lift", "order": 3, "command": { "kind": "actuator", "names": ["lift"] } },
+    { "type": "speaker", "capability": "speaker.say", "label": "Say", "order": 4, "command": { "kind": "say" } },
+    { "type": "display", "capability": "display.text", "label": "Face", "order": 5, "command": { "kind": "display" } },
+    { "type": "lights", "capability": "lights.backpack", "label": "Lights", "order": 6, "command": { "kind": "actuator", "names": ["backpack_lights", "cube_lights"] } },
     { "type": "telemetry", "capability": "sensor.cliff", "label": "Cliff / pick-up", "order": 7 },
     { "type": "battery", "capability": "battery", "label": "Battery", "order": 8 },
     { "type": "latency", "label": "Latency", "order": 9 }

@@ -107,6 +107,7 @@ function v1Router({ domain, apiAuth, limits, hub }) {
     r.patch('/robots/:id', manage, wrap(async (req, res) => {
         await owner(req, req.params.id);
         const updated = await domain.robots.update(req.params.id, { name: req.body?.name, access_policy: req.body?.access_policy, limits: req.body?.limits });
+        if (req.body?.limits !== undefined) await hub.refreshConfig(req.params.id);   // the device enforces the new limits at once
         res.json({ robot: domain.present.robot(updated) });
     }));
     r.delete('/robots/:id', manage, wrap(async (req, res) => {
@@ -148,7 +149,7 @@ function v1Router({ domain, apiAuth, limits, hub }) {
         if (!d) fail(404, 'bot.device_not_found', 'no such device');
         await owner(req, json(d.robot_ids, [])[0]);
         const rotated = await domain.devices.rotate(req.params.id);
-        res.json({ device: domain.present.device(rotated.device), credential: rotated.credential, publish_key: rotated.publish_key });
+        res.json({ device: domain.present.device(rotated.device), credential: rotated.credential, publish_key: rotated.publish_key, whip_url: rotated.whip_url });
     }));
     r.post('/devices/:id/revoke', manage, wrap(async (req, res) => {
         const d = await domain.devices.get(req.params.id);
@@ -195,7 +196,7 @@ function v1Router({ domain, apiAuth, limits, hub }) {
             device_kind: req.body?.device_kind || 'onboard', drivers: Array.isArray(req.body?.drivers) ? req.body.drivers : [],
             capabilities: req.body?.capabilities && typeof req.body.capabilities === 'object' ? req.body.capabilities : {}, name: req.body?.name || null,
         });
-        res.status(201).json({ device_id: result.device.id, credential: result.credential, publish_key: result.publish_key, robot_id: json(result.device.robot_ids, [])[0], profile: result.profile });
+        res.status(201).json({ device_id: result.device.id, credential: result.credential, publish_key: result.publish_key, whip_url: result.whip_url, robot_id: json(result.device.robot_ids, [])[0], profile: result.profile });
     }));
 
     return r;

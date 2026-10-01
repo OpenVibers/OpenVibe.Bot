@@ -28,7 +28,7 @@ const { boot, check, done } = require('./helpers/app');
     await check('profiles are public reads; an unknown profile is a problem+json 404', async () => {
         const list = await t.call('GET', '/api/v1/profiles', { token: null });
         assert.strictEqual(list.status, 200);
-        assert.deepStrictEqual(list.json.profiles.map((p) => p.id).sort(), ['adeept.adr036', 'camera.onvif', 'cozmo', 'sim.rover']);
+        assert.deepStrictEqual(list.json.profiles.map((p) => p.id).sort(), ['adeept.adr036', 'adeept.adr036.mecanum', 'camera.onvif', 'cozmo', 'sim.rover']);
         const one = await t.call('GET', '/api/v1/profiles/adeept.adr036', { token: null });
         assert.strictEqual(one.json.profile.limits.max_command_ms, 300);
         const missing = await t.call('GET', '/api/v1/profiles/nope', { token: null });

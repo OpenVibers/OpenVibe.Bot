@@ -101,16 +101,24 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             server_time: iso(now()),
         });
     }
+    /** `config`: the effective limits (the owner's clamped by the profile's) and the kinds the profile takes. */
     async function sendConfig(conn) {
         const robotId = deviceRobotIds(conn.device)[0];
         const robot = robotId ? await domain.robots.get(robotId) : null;
         const profileRow = robot ? await getProfile(domain.db, robot.profile_id, robot.profile_version) : null;
-        const limits = profileRow ? profileRow.profile.limits : { max_command_ms: config.control.maxCommandMs, heartbeat_ms: config.device.heartbeatMs };
-        const allowed = robot ? domain.control.allowedFor(robot, 'owner') : ['drive', 'actuator', 'ptz', 'say', 'display', 'halt'];
+        const profile = profileRow ? profileRow.profile : null;
+        const limits = robot ? domain.control.deviceLimits(robot, profile) : { max_command_ms: config.control.maxCommandMs, heartbeat_ms: config.device.heartbeatMs };
+        const allowed = robot ? domain.control.allowedFor(robot, 'owner', profile) : ['halt'];
         sendFrame(conn, 'config', {
             heartbeat_ms: config.device.heartbeatMs, limits, allowed_commands: allowed,
             estop_latched: robot ? !!robot.estop_latched : false,
         });
+    }
+    /** Re-send `config` to the robot's connected devices (the owner changed its limits). */
+    async function refreshConfig(robotId) {
+        for (const conn of [...deviceConns.values()]) {
+            if (conn.online && deviceRobotIds(conn.device).includes(robotId)) await sendConfig(conn);
+        }
     }
     async function bringOnline(conn) {
         await domain.devices.setOnline(conn.device, true).catch((e) => log.warn(`[Bot] online event: ${e.message}`));
@@ -156,7 +164,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         });
         attachDevice(conn, r.device);
         sendFrame(conn, 'paired', {
-            device_id: r.device.id, credential: r.credential, publish_key: r.publish_key,
+            device_id: r.device.id, credential: r.credential, publish_key: r.publish_key, whip_url: r.whip_url,
             robot_ids: deviceRobotIds(r.device), profile_id: r.profile ? r.profile.id : null, profile: r.profile,
         });
         sendHello(conn);
@@ -250,10 +258,10 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         conn.robotId = robotId; conn.role = role;
         subscribe(conn);
         const profileRow = await getProfile(domain.db, robot.profile_id, robot.profile_version);
+        const profile = profileRow ? profileRow.profile : null;
         sendFrame(conn, 'joined', {
-            robot: domain.present.robot(robot), role,
-            profile: profileRow ? profileRow.profile : null,
-            allowed_commands: domain.control.allowedFor(robot, role === 'viewer' ? 'viewer' : role),
+            robot: domain.present.robot(robot), role, profile,
+            allowed_commands: domain.control.allowedFor(robot, role, profile),
             state: await robotState(robotId, conn.subject),
         });
     }
@@ -382,7 +390,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     return {
         bindDomain(d) { domain = d; },
         handleUpgrade,
-        isOnline, deviceState, sendToDevice, sendToRobotDevices, broadcast, closeDevice, robotState,
+        isOnline, deviceState, sendToDevice, sendToRobotDevices, broadcast, closeDevice, robotState, refreshConfig,
         onlineCount() { let n = 0; for (const c of deviceConns.values()) if (c.online) n++; return n; },
         devices() { return [...deviceConns.values()].map((c) => ({ device_id: c.device.id, online: c.online })); },
         async close() {
