@@ -29,6 +29,13 @@ header; such a socket may only send `pair` until it is answered (anything else �
 `bot.not_paired`). One socket per device: a second connection replaces the first (close code **4000**),
 so a reconnecting agent cannot be shadowed by a stale socket.
 
+Frames sent while authentication is still in progress — right after an upgrade that carries the
+header, or after `pair` until it is answered — are **kept** and handled in arrival order once it
+completes (after `hello` and `config`), so a device may send its first `status` and `estop_state`
+straight after the upgrade. They are never answered `bot.not_paired`. If the credential is refused
+they are discarded with the socket; after a refused `pair` they are answered as on an unpaired socket.
+At most 64 frames wait; any more are answered `error` `bot.not_ready`.
+
 ### Server → device
 
 | type | fields (besides v, seq, ts) | when |
@@ -38,7 +45,7 @@ so a reconnecting agent cannot be shadowed by a stale socket.
 | `config` | `heartbeat_ms, limits, allowed_commands, estop_latched` | right after `hello`, and again whenever the owner changes the robot's limits |
 | `command` | `id, kind, value, deadline_ms, operator{subject,role}, robot_id` | an operator's command passed the gate |
 | `estop` | `latched, by, at` | the e-stop latched or the owner cleared it |
-| `heartbeat_ack` | `seq, server_time` | the answer to `heartbeat`; the device computes RTT |
+| `heartbeat_ack` | `echo, server_time` | the answer to `heartbeat`; `echo` is the heartbeat's `t` (or `null`), so the device computes RTT. The envelope `seq` is Bot's own counter and never echoes the device's |
 | `error` | `code, detail` | a frame the server refused |
 
 ### Device → server
@@ -46,12 +53,12 @@ so a reconnecting agent cannot be shadowed by a stale socket.
 | type | fields (besides v, seq, ts) | notes |
 |---|---|---|
 | `pair` | `robot, code, agent_version, device_kind, drivers[], capabilities{}, name` | the one-time pairing code; `robot` (from the installer command / QR) attributes a wrong try to that robot's code |
-| `heartbeat` | `seq, rtt_ms` | every `heartbeat_ms` (1 s); `rtt_ms` is the device's own measured latency |
-| `telemetry` | `battery, voltage, sensors{}, …` | at most 2 Hz; extra frames are dropped |
+| `heartbeat` | `t, rtt_ms` | every `heartbeat_ms` (1 s); `t` is any correlation value (e.g. the device's send time), returned as `heartbeat_ack.echo`; `rtt_ms` is the device's own measured latency |
+| `telemetry` | `battery, voltage, sensors{}, events[]?, …` | at most 2 Hz; extra frames are dropped — except a frame with a non-empty `events` array (a fault, a bump, low battery), which is always delivered |
 | `status` | `firmware, capabilities, faults[], estop_latched` | on connect and on change |
 | `ack` | `id` | a command ran |
 | `nack` | `id, fault_code` | a command was refused on the device |
-| `estop_state` | `latched, by, at, robot_id?` | a hardware latch; `robot_id` omitted = every robot the device serves |
+| `estop_state` | `latched, by, at, robot_id?` | the device's own latch, a **report**; `robot_id` omitted = every robot the device serves. See below |
 
 `kind` is one of `drive`, `actuator`, `ptz`, `say`, `display`, `halt`, and a device only ever gets the
 kinds its robot's profile declares (§1.1), with values in the shapes and ranges declared there.
@@ -98,6 +105,13 @@ against these):
 | `cozmo` | Node plugin `cozmo` | `drive {throttle, steer}`; `actuator` `head` −1..1, `lift` 0..1, `backpack_lights`/`cube_lights` rgb; `say`; `display` text, face (`neutral happy sad surprised sleepy angry`) or image |
 | `camera.onvif` | server driver `onvif` | `ptz {pan, tilt, zoom}` −1..1 |
 | `sim.rover` | server driver `sim` | `drive {throttle, steer}` |
+
+**A device's `estop_state` is a report, never a clear.** `latched: true` latches each robot the device is
+attached to (if it is not already latched). `latched: false` is recorded as the device's reported state
+only (`robot_state.state.device_estop`); it never clears Bot's latch — clearing is the owner's alone
+(`estop_clear` on `/control`, `POST /robots/:id/estop/clear`), after which Bot sends `estop` with
+`latched: false`. A `robot_id` the device is not attached to is refused with `error` `bot.forbidden`
+and audited (`kind: estop_state`, `result: refused`); nothing changes on that robot.
 
 ### Examples
 
@@ -151,13 +165,14 @@ A drive command (a held control re-sends every 150 ms with a fresh `id`):
 ```
 
 ```json
-{ "v": 1, "seq": 12, "ts": 1738065600500, "type": "heartbeat", "seq": 41, "rtt_ms": 63 }
-{ "v": 1, "seq": 4, "ts": 1738065600501, "type": "heartbeat_ack", "seq": 41, "server_time": "2026-09-29T19:20:00.501Z" }
+{ "v": 1, "seq": 12, "ts": 1738065600500, "type": "heartbeat", "t": 1738065600500, "rtt_ms": 63 }
+{ "v": 1, "seq": 4, "ts": 1738065600501, "type": "heartbeat_ack", "echo": 1738065600500, "server_time": "2026-09-29T19:20:00.501Z" }
 ```
 
 ```json
 { "v": 1, "seq": 13, "ts": 1738065600800, "type": "telemetry", "battery": 0.72, "voltage": 7.41,
   "sensors": { "ultrasonic": 118 }, "rssi": -57 }
+{ "v": 1, "seq": 14, "ts": 1738065600850, "type": "telemetry", "battery": 0.72, "events": [{ "kind": "bump" }] }
 ```
 
 ```json
@@ -201,7 +216,7 @@ The gate then applies the **acted-for subject's** role — a service acting for 
 | type | fields | notes |
 |---|---|---|
 | `joined` | `robot, role, profile, allowed_commands, state` | the answer to `join`; `allowed_commands` is the role's allowlist cut to the profile's kinds, with `halt` for every role that may drive |
-| `robot_state` | `state{robot_id, online, estop{latched,by,at}, latency_ms, battery, telemetry, status, queue}` | on every change and on telemetry, ≤ 2 Hz |
+| `robot_state` | `state{robot_id, online, estop{latched,by,at}, latency_ms, battery, telemetry, status, device_estop{latched,at}, queue}` | on every change and on telemetry, ≤ 2 Hz (a telemetry frame with `events` always); `estop` is Bot's latch, `device_estop` the device's last report (or `null`) |
 | `command_result` | `id, result, code?, reason?, latency_ms?, cached?` | `result` is `ack`, `nack`, `refused` or `expired`; a repeated `id` is answered `cached: true` |
 | `error` | `code, detail` | a frame or join the server refused |
 
@@ -243,7 +258,7 @@ person's `position` is 1-based (0 while they hold the turn).
 { "v": 1, "seq": 3, "ts": 1738065600800, "type": "robot_state",
   "state": { "robot_id": "rob_01J8Z4M2Q0R7T9YV3K6N8P1W2X", "online": true,
              "estop": { "latched": false, "by": null, "at": null }, "latency_ms": 63, "battery": 0.71,
-             "telemetry": { "battery": 0.71, "voltage": 7.4 }, "status": null,
+             "telemetry": { "battery": 0.71, "voltage": 7.4 }, "status": null, "device_estop": null,
              "queue": { "active": false, "position": 3, "turn_ends_at": null, "budget": 50, "used": 0 } } }
 ```
 
