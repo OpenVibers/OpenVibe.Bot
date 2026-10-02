@@ -45,7 +45,7 @@ At most 64 frames wait; any more are answered `error` `bot.not_ready`.
 | `config` | `heartbeat_ms, limits, allowed_commands, estop_latched` | right after `hello`, and again whenever the owner changes the robot's limits (or `allow` lists) and whenever Bot's latch is set or cleared (after the `estop` frame) |
 | `command` | `id, kind, value, deadline_ms, operator{subject,role}, robot_id` | an operator's command passed the gate |
 | `estop` | `latched, by, at` | the e-stop latched or the owner cleared it |
-| `heartbeat_ack` | `echo, server_time` | the answer to `heartbeat`; `echo` is the heartbeat's `t` (or `null`), so the device computes RTT. The envelope `seq` is Bot's own counter and never echoes the device's |
+| `heartbeat_ack` | `echo, t, server_time` | the answer to `heartbeat`; `echo` is the heartbeat's `t` (or `null`), so the device computes RTT, and `t` repeats a finite `t` (device ms) unchanged — the field OpenVibe.Node reads. The envelope `seq` is Bot's own counter and never echoes the device's |
 | `error` | `code, detail` | a frame the server refused |
 
 ### Device → server
@@ -53,8 +53,8 @@ At most 64 frames wait; any more are answered `error` `bot.not_ready`.
 | type | fields (besides v, seq, ts) | notes |
 |---|---|---|
 | `pair` | `robot, code, agent_version, device_kind, drivers[], capabilities{}, name` | the one-time pairing code; `robot` (from the installer command / QR) attributes a wrong try to that robot's code |
-| `heartbeat` | `t, rtt_ms` | every `heartbeat_ms` (1 s); `t` is any correlation value (e.g. the device's send time), returned as `heartbeat_ack.echo`; `rtt_ms` is the device's own measured latency |
-| `telemetry` | `battery, voltage, sensors{}, events[]?, …` | at most 2 Hz; extra frames are dropped — except a frame with a non-empty `events` array (a fault, a bump, low battery), which is always delivered and does not count against the samples' window |
+| `heartbeat` | `t, rtt_ms` | every `heartbeat_ms` (1 s); `t` is the device's send time in unix ms (a finite number), returned as both `heartbeat_ack.echo` and `heartbeat_ack.t`; `rtt_ms` is the device's own measured latency |
+| `telemetry` | `battery, voltage, sensors{}, events[]?, …` | at most 2 Hz; extra frames are dropped — except a frame with a non-empty `events` array (a fault, a bump, low battery), which is always delivered and does not count against the samples' window. `battery` is either a 0..1 fraction or an object `{volts, percent}` with `percent` 0..100 (as OpenVibe.Node sends it); `robot_state.battery` is always the fraction 0..1 (or `null`), while `robot_state.telemetry` keeps the raw frame |
 | `status` | `firmware, capabilities, faults[], estop_latched` | on connect and on change |
 | `ack` | `id` | a command ran |
 | `nack` | `id, fault_code` | a command was refused on the device |
@@ -166,13 +166,14 @@ A drive command (a held control re-sends every 150 ms with a fresh `id`):
 
 ```json
 { "v": 1, "seq": 12, "ts": 1738065600500, "type": "heartbeat", "t": 1738065600500, "rtt_ms": 63 }
-{ "v": 1, "seq": 4, "ts": 1738065600501, "type": "heartbeat_ack", "echo": 1738065600500, "server_time": "2026-09-29T19:20:00.501Z" }
+{ "v": 1, "seq": 4, "ts": 1738065600501, "type": "heartbeat_ack", "echo": 1738065600500, "t": 1738065600500, "server_time": "2026-09-29T19:20:00.501Z" }
 ```
 
 ```json
 { "v": 1, "seq": 13, "ts": 1738065600800, "type": "telemetry", "battery": 0.72, "voltage": 7.41,
   "sensors": { "ultrasonic": 118 }, "rssi": -57 }
 { "v": 1, "seq": 14, "ts": 1738065600850, "type": "telemetry", "battery": 0.72, "events": [{ "kind": "bump" }] }
+{ "v": 1, "seq": 15, "ts": 1738065600900, "type": "telemetry", "battery": { "volts": 7.42, "percent": 59 }, "sensors": { "ultrasonic": 118 } }
 ```
 
 ```json

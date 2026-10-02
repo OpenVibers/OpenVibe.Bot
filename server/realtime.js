@@ -174,10 +174,14 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         }
         conn.lastHeartbeat = now();
         switch (msg.type) {
-            case 'heartbeat':
+            case 'heartbeat': {
                 if (Number.isFinite(msg.rtt_ms)) conn.rttMs = Math.round(msg.rtt_ms);
                 // `echo` carries the device's `t` back for its RTT; the envelope `seq` stays Bot's own counter.
-                return sendFrame(conn, 'heartbeat_ack', { echo: msg.t !== undefined ? msg.t : null, server_time: iso(now()) });
+                const ack = { echo: msg.t !== undefined ? msg.t : null, server_time: iso(now()) };
+                // OpenVibe.Node reads `heartbeat_ack.t` (its RTT is now - t), so echo it as `t` as well.
+                if (Number.isFinite(msg.t)) ack.t = msg.t;
+                return sendFrame(conn, 'heartbeat_ack', ack);
+            }
             case 'telemetry': return onTelemetry(conn, msg);
             case 'status': conn.status = msg; for (const r of deviceRobotIds(conn.device)) broadcast(r); return undefined;
             case 'ack': case 'nack': return onAck(conn, msg);
@@ -401,6 +405,14 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     function closeDevice(deviceId, reason = 'revoked') { const c = deviceConns.get(deviceId); if (c) { try { c.ws.close(4003, reason); } catch { /* gone */ } dropDevice(c); } }
     function deviceState(deviceId) { const c = deviceConns.get(deviceId); return c ? { online: c.online, rtt_ms: c.rttMs, telemetry: c.telemetry, status: c.status } : { online: false, rtt_ms: null, telemetry: null, status: null }; }
 
+    // A device may report battery the legacy way (a 0..1 fraction) or as OpenVibe.Node does ({volts, percent}).
+    function batteryFraction(telemetry) {
+        const b = telemetry ? telemetry.battery : null;
+        if (Number.isFinite(b)) return b;
+        if (b && typeof b === 'object' && Number.isFinite(b.percent)) return Math.min(1, Math.max(0, b.percent / 100));
+        return null;
+    }
+
     async function robotState(robotId, subjectForQueue = null) {
         // The device's state is read before the first await, so each broadcast carries the frame that caused it
         // (two telemetry frames with events back to back are both delivered, not the second one twice).
@@ -409,7 +421,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         const telemetry = online && conn.telemetry ? conn.telemetry : null;
         const live = {
             latency_ms: online ? (conn.rttMs != null ? conn.rttMs : null) : null,
-            battery: telemetry ? (telemetry.battery != null ? telemetry.battery : null) : null,
+            battery: batteryFraction(telemetry),
             telemetry,
             status: online && conn.status ? conn.status : null,
             device_estop: online ? (conn.deviceEstop.get(robotId) || null) : null,
