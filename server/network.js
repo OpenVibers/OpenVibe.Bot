@@ -6,8 +6,9 @@
  *   keys      the Network's RS256 public key (OV_NETWORK_PUBLIC_KEY, else GET /api/.well-known/jwks,
  *             refreshed every 6 h and retried every 30 s until it loads). It verifies service tokens
  *             (audience openvibe.bot) and the browser's Network user JWT, both offline.
- *   nodes     Network's node principals (machines paired for Bot): GET /internal/node-principals/:id and
- *             POST …/:id/revoke with Bot's own svc:bot token (audience openvibe.network, network.node.manage).
+ *   nodes     Network's node principals (machines paired for Bot): POST /internal/node-pairings (a pairing
+ *             code, BOT_PAIRING_AUTHORITY=network), GET /internal/node-principals/:id and POST …/:id/revoke with
+ *             Bot's own svc:bot token (audience openvibe.network, network.node.manage).
  */
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
@@ -75,6 +76,8 @@ function createUserAuth(config, keys) {
  * { principal, node_id, name, owner{kind,subject}, home_cell, status, paired_for{service,ref}|null, … }.
  * get(id) → that view, or null when Network knows no such principal paired by Bot (it answers 404, never 403).
  * revoke(id) → the revoked view, or null for the same 404; idempotent on Network's side.
+ * pair({subject, ref}) → { pairing_id, code, expires_at }: a one-time code for the person `subject` to pair a
+ * machine for robot `ref` (POST /internal/node-pairings; Network keeps one live code per ref).
  * Any other failure throws 503 bot.network_unavailable.
  */
 function createNodePrincipals(config, { fetchImpl = globalThis.fetch } = {}) {
@@ -82,21 +85,28 @@ function createNodePrincipals(config, { fetchImpl = globalThis.fetch } = {}) {
         tokenUrl: `${config.network.internalUrl}/oauth/token`, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret,
         audience: 'openvibe.network', scope: 'network.node.manage', fetchImpl,
     });
-    async function call(method, id) {
-        const path = `/internal/node-principals/${encodeURIComponent(id)}${method === 'POST' ? '/revoke' : ''}`;
+    async function call(method, path, body) {
         let res;
         try {
-            res = await fetchImpl(`${config.network.internalUrl}${path}`, { method, headers: { ...(await tokens.authHeaders()), Accept: 'application/json' }, signal: AbortSignal.timeout(8000) });
+            res = await fetchImpl(`${config.network.internalUrl}${path}`, {
+                method, headers: { ...(await tokens.authHeaders()), Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) },
+                ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(8000),
+            });
         } catch (e) {
             throw new BotError(503, 'bot.network_unavailable', `Network did not answer for the machine: ${e.message}`);
         }
         if (res.status === 401) tokens.invalidate();
-        if (res.status === 404) return null;
-        const body = await res.json().catch(() => null);
-        if (!res.ok || !body) throw new BotError(503, 'bot.network_unavailable', `Network answered ${res.status} for the machine`);
-        return body;
+        if (res.status === 404 && !body) return null;
+        const out = await res.json().catch(() => null);
+        if (!res.ok || !out) throw new BotError(503, 'bot.network_unavailable', `Network answered ${res.status} for the machine`);
+        return out;
     }
-    return { get: (id) => call('GET', id), revoke: (id) => call('POST', id) };
+    const principal = (id) => `/internal/node-principals/${encodeURIComponent(id)}`;
+    return {
+        get: (id) => call('GET', principal(id)),
+        revoke: (id) => call('POST', `${principal(id)}/revoke`),
+        pair: ({ subject, ref }) => call('POST', '/internal/node-pairings', { owner: { kind: 'user', subject }, ref }),
+    };
 }
 
 module.exports = { createKeyProvider, createUserAuth, createNodePrincipals };

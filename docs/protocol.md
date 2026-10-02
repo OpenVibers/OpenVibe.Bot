@@ -29,6 +29,14 @@ header; such a socket may only send `pair` until it is answered (anything else �
 `bot.not_paired`). One socket per device: a second connection replaces the first (close code **4000**),
 so a reconnecting agent cannot be shadowed by a stale socket.
 
+**Pairing authority** (`BOT_PAIRING_AUTHORITY`, `bot` by default, or `network`). With `network` the
+pairing code is minted by OpenVibe.Network (Bot calls `POST /internal/node-pairings` with its own service
+token, `{owner: {kind: 'user', subject}, ref: <robot id>}`) and Bot stores none; the installer command
+carries `--network <Network URL> --pairing pair_… --code XXXX-XXXX`, and the machine pairs on Network and
+connects with a node token (below). The `pair` frame is then answered `error` `bot.pairing_moved` (its
+`detail` names the Network URL) and the socket stays unpaired. Devices that already hold a Bot credential
+keep connecting with it either way.
+
 **A Network-paired machine** (a node principal `nod_…`, paired on OpenVibe.Network for one of its
 owner's robots) carries `Authorization: Bearer <node token>` instead: a Network JWT with `actor_type`
 `node`, `sub` `node:nod_…` and audience `openvibe.bot`. Bot binds it to a device on first use (from
@@ -64,7 +72,7 @@ At most 64 frames wait; any more are answered `error` `bot.not_ready`.
 
 | type | fields (besides v, seq, ts) | notes |
 |---|---|---|
-| `pair` | `robot, code, agent_version, device_kind, drivers[], capabilities{}, name` | the one-time pairing code; `robot` (from the installer command / QR) attributes a wrong try to that robot's code |
+| `pair` | `robot, code, agent_version, device_kind, drivers[], capabilities{}, name` | the one-time pairing code; `robot` (from the installer command / QR) attributes a wrong try to that robot's code. With `BOT_PAIRING_AUTHORITY=network` → `error` `bot.pairing_moved` |
 | `heartbeat` | `t, rtt_ms` | every `heartbeat_ms` (1 s); `t` is the device's send time in unix ms (a finite number), returned as both `heartbeat_ack.echo` and `heartbeat_ack.t`; `rtt_ms` is the device's own measured latency |
 | `telemetry` | `battery, voltage, sensors{}, events[]?, …` | at most 2 Hz; extra frames are dropped — except a frame with a non-empty `events` array (a fault, a bump, low battery), which is always delivered and does not count against the samples' window. `battery` is either a 0..1 fraction or an object `{volts, percent}` with `percent` 0..100 (as OpenVibe.Node sends it); `robot_state.battery` is always the fraction 0..1 (or `null`), while `robot_state.telemetry` keeps the raw frame |
 | `status` | `firmware, capabilities, faults[], estop_latched, device_kind?, drivers[]?, agent_version?` | on connect and on change. See below |
@@ -302,19 +310,24 @@ role that may drive (a queue robot's turn holder, not someone waiting) and an on
 Every error is RFC 9457 `application/problem+json`. Authenticate with a Network **user token**
 (`Authorization: Bearer`, people act on their own things) or a **service token** with the capability
 shown; a service acts for `X-OV-Subject` / the body's `owner`. A person acts only as themself: naming
-anyone else (`?owner=`, the body's `owner`, `X-OV-Subject`) is `403 bot.forbidden`. Without a token, a
-route that acts for an owner answers `401 bot.sign_in`; a node token gets `403 bot.forbidden` everywhere
-but `POST /devices/bind`.
+anyone else (`?owner=`, the body's `owner`, `X-OV-Subject`) is `403 bot.forbidden`; `?owner=` is refused,
+never ignored, on both `GET /robots` and `POST /robots` (a service's `?owner=` on `POST /robots` must name
+the subject it acts for). Without a token, every route but `GET /profiles`, `GET /profiles/:id`, `POST /pair`
+and `POST /devices/bind` answers `401 bot.sign_in`: `GET|POST /robots`, `GET|PATCH|DELETE /robots/:id`,
+`POST /robots/:id/pairing-code`, `GET|POST /robots/:id/operators`, `DELETE /robots/:id/operators/:subject`,
+`GET /robots/:id/devices`, `POST /devices/:id/rotate|revoke`, `POST /robots/:id/estop`,
+`POST /robots/:id/estop/clear` and `GET /robots/:id/audit`. A node token gets `403 bot.forbidden` on the same
+routes. Both come before any lookup, so a real robot or device id answers exactly as a made-up one.
 
 | Method & path | Auth (capability) | Answer |
 |---|---|---|
 | `GET /profiles`, `GET /profiles/:id` | public | `{ profiles[] }` / `{ profile }` |
 | `GET /robots` | user (own robots), or `bot.robot.read` + `?owner=` | `{ robots[] }` |
-| `POST /robots` | the owner, or `bot.robot.manage` | `201 { robot, pairing{code,expires_at,installer} }` |
+| `POST /robots` | the owner, or `bot.robot.manage` | `201 { robot, pairing{code,expires_at,installer} }`; with `BOT_PAIRING_AUTHORITY=network` the pairing is Network's and also carries `pairing_id`, and `503 bot.network_unavailable` if Network did not answer (no robot is created) |
 | `GET /robots/:id` | a member, or `bot.robot.read` | `{ robot, role }` |
 | `PATCH /robots/:id` | owner, or `bot.robot.manage` | `{ robot }`; new `limits` (including `allow`) re-send `config` to the connected device |
 | `DELETE /robots/:id` | owner, or `bot.robot.manage` | `204` |
-| `POST /robots/:id/pairing-code` | owner, or `bot.robot.manage` | `201 { code, expires_at, installer }` |
+| `POST /robots/:id/pairing-code` | owner, or `bot.robot.manage` | `201 { code, expires_at, installer }`; with `BOT_PAIRING_AUTHORITY=network` `201 { code, expires_at, pairing_id, installer }` minted by Network for the robot's owner, or `503 bot.network_unavailable` |
 | `GET /robots/:id/operators` | member, or `bot.robot.read` | `{ operators[] }` |
 | `POST /robots/:id/operators` | owner, or `bot.robot.manage` | `201 { operators[] }` |
 | `DELETE /robots/:id/operators/:subject` | owner, or `bot.robot.manage` | `{ operators[] }` |
@@ -325,7 +338,7 @@ but `POST /devices/bind`.
 | `POST /robots/:id/estop` | owner/operator, `bot.robot.control` | `{ robot }` |
 | `POST /robots/:id/estop/clear` | **owner only**, `bot.robot.control` | `{ robot }` |
 | `GET /robots/:id/audit?limit=&before=` | owner, or `bot.robot.read` | `{ audit[], next_before }` (newest first) |
-| `POST /pair` | the one-time code is the credential | `201 { device_id, credential, publish_key, whip_url, robot_id, profile }` |
+| `POST /pair` | the one-time code is the credential | `201 { device_id, credential, publish_key, whip_url, robot_id, profile }`; with `BOT_PAIRING_AUTHORITY=network` always `410 bot.pairing_moved` (the `detail` names the Network URL) |
 
 Not in `/api/v1`: `GET /api/health`, `GET /api/ready`, `GET /metrics`, `GET /release.json`, the
 `/auth/*` SSO routes, and `GET /` (a one-line text health placeholder).

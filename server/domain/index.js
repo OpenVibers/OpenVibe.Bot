@@ -115,6 +115,8 @@ function createDomain({ db, config, outbox, link = null, nodes = null, now = () 
         if (!['private', 'invite', 'queue'].includes(access_policy)) fail(422, 'bot.invalid_policy', 'access_policy must be private, invite or queue');
         const id = prefixedId('rob', now());
         const at = iso(now());
+        // A Network-minted code comes first, so a Network that does not answer leaves no robot behind.
+        const minted = networkPairing() ? await mintOnNetwork(id, owner, installerUrl) : null;
         const created = await db.tx(async (t) => {
             await t.query(`INSERT INTO robots (id, owner_subject, name, profile_id, profile_version, access_policy, limits, created_at, updated_at)
                 VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $8)`,
@@ -122,7 +124,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, now = () 
             await t.query(`INSERT INTO robot_operators (robot_id, subject, role, added_by, created_at) VALUES ($1, $2, 'owner', $2, $3)`, [id, owner, at]);
             return t.maybe('SELECT * FROM robots WHERE id = $1', [id]);
         });
-        const pairing = await createPairingCode(id, owner, installerUrl);
+        const pairing = minted || await createPairingCode(id, owner, installerUrl);
         return { robot: created, pairing };
     }
     function cleanLimits(limits = {}) {
@@ -155,7 +157,9 @@ function createDomain({ db, config, outbox, link = null, nodes = null, now = () 
     }
 
     // ── Pairing (ADR-043 decision 2) ──────────────────────────────────────────────────────────────
+    const networkPairing = () => config.pairing.authority === 'network';
     async function createPairingCode(robotId, createdBy, installerUrl) {
+        if (networkPairing()) return mintOnNetwork(robotId, (await getRobot(robotId)).owner_subject, installerUrl);
         const code = newCode();
         const at = iso(now());
         const expires = iso(now() + config.pairing.ttlMs);
@@ -172,12 +176,28 @@ function createDomain({ db, config, outbox, link = null, nodes = null, now = () 
         return `curl -fsSL ${url} | sh -s -- --robot ${robotId} --code ${code}`;
     }
     /**
+     * BOT_PAIRING_AUTHORITY=network (plan T15 B2): Network mints the code for the robot's owner (POST
+     * /internal/node-pairings, ref = the robot) and Bot stores none. The machine redeems it on Network and
+     * reaches Bot with a node token (bindNode). A Network that does not answer is 503 bot.network_unavailable.
+     */
+    async function mintOnNetwork(robotId, ownerSubject, installerUrl) {
+        if (!nodes) fail(503, 'bot.network_unavailable', 'Network pairing is not configured here');
+        const p = await nodes.pair({ subject: ownerSubject, ref: robotId });
+        if (!p || typeof p.pairing_id !== 'string' || typeof p.code !== 'string') fail(503, 'bot.network_unavailable', 'Network answered no pairing code');
+        const url = installerUrl || config.installer.scriptUrl;
+        return {
+            code: p.code, expires_at: p.expires_at, pairing_id: p.pairing_id,
+            installer: `curl -fsSL ${url} | sh -s -- --network ${config.network.url} --pairing ${p.pairing_id} --code ${p.code}`,
+        };
+    }
+    /**
      * Redeem a pairing code. `robot` (from the installer command/QR) attributes a wrong code to that
      * robot's live code and counts the try (5 end it); without it the code is matched by hash across
      * every live code. On success the credential and the publish key are returned once, never stored in
      * the clear.
      */
     async function redeem({ robot = null, code, agent_version = null, device_kind = 'onboard', drivers = [], capabilities = {}, name = null }) {
+        if (networkPairing()) fail(410, 'bot.pairing_moved', `pairing moved to OpenVibe.Network: pair this machine on ${config.network.url}`);
         const normal = normaliseCode(code);
         if (!isCodeShape(normal)) fail(422, 'bot.invalid_pairing_code', 'the pairing code must be 8 characters (XXXX-XXXX)');
         const hash = hashSecret(normal);

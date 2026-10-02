@@ -8,6 +8,8 @@ Production runs the Node process under systemd as `openvibe-bot.service` (unit r
 
 To run the schema migrations before the service serves, start it once with the direct owner connection in `/etc/openvibe/bot.env` (`DATABASE_DIRECT_URL`); the boot applies `migrations/` and then serves on the pooled `DATABASE_URL`.
 
+Set `BOT_PAIRING_AUTHORITY` to `bot` (the default) or `network`; any other value refuses to boot.
+
 Set `BOT_WHIP_BASE` in `/etc/openvibe/bot.env` to the WHIP ingest base each device publishes to (`whip_url = <base>/<publish key>`, sent once with the pairing); leave it unset to pair devices without video.
 
 `/install` is proxied to the app; the installer script itself ships with the T15 device-agent job.
