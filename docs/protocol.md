@@ -42,7 +42,7 @@ At most 64 frames wait; any more are answered `error` `bot.not_ready`.
 |---|---|---|
 | `paired` | `device_id, credential, publish_key, whip_url, robot_ids, profile_id, profile` | the answer to `pair`; `credential`/`publish_key`/`whip_url` are shown **once** |
 | `hello` | `session_id, device_id, robot_ids, server_time` | on every authenticated connection |
-| `config` | `heartbeat_ms, limits, allowed_commands, estop_latched` | right after `hello`, and again whenever the owner changes the robot's limits |
+| `config` | `heartbeat_ms, limits, allowed_commands, estop_latched` | right after `hello`, and again whenever the owner changes the robot's limits (or `allow` lists) and whenever Bot's latch is set or cleared (after the `estop` frame) |
 | `command` | `id, kind, value, deadline_ms, operator{subject,role}, robot_id` | an operator's command passed the gate |
 | `estop` | `latched, by, at` | the e-stop latched or the owner cleared it |
 | `heartbeat_ack` | `echo, server_time` | the answer to `heartbeat`; `echo` is the heartbeat's `t` (or `null`), so the device computes RTT. The envelope `seq` is Bot's own counter and never echoes the device's |
@@ -54,7 +54,7 @@ At most 64 frames wait; any more are answered `error` `bot.not_ready`.
 |---|---|---|
 | `pair` | `robot, code, agent_version, device_kind, drivers[], capabilities{}, name` | the one-time pairing code; `robot` (from the installer command / QR) attributes a wrong try to that robot's code |
 | `heartbeat` | `t, rtt_ms` | every `heartbeat_ms` (1 s); `t` is any correlation value (e.g. the device's send time), returned as `heartbeat_ack.echo`; `rtt_ms` is the device's own measured latency |
-| `telemetry` | `battery, voltage, sensors{}, events[]?, …` | at most 2 Hz; extra frames are dropped — except a frame with a non-empty `events` array (a fault, a bump, low battery), which is always delivered |
+| `telemetry` | `battery, voltage, sensors{}, events[]?, …` | at most 2 Hz; extra frames are dropped — except a frame with a non-empty `events` array (a fault, a bump, low battery), which is always delivered and does not count against the samples' window |
 | `status` | `firmware, capabilities, faults[], estop_latched` | on connect and on change |
 | `ack` | `id` | a command ran |
 | `nack` | `id, fault_code` | a command was refused on the device |
@@ -288,7 +288,7 @@ shown; a service acts for `X-OV-Subject` / the body's `owner`.
 | `GET /robots` | user, or `bot.robot.read` + `?owner=` | `{ robots[] }` |
 | `POST /robots` | the owner, or `bot.robot.manage` | `201 { robot, pairing{code,expires_at,installer} }` |
 | `GET /robots/:id` | a member, or `bot.robot.read` | `{ robot, role }` |
-| `PATCH /robots/:id` | owner, or `bot.robot.manage` | `{ robot }`; new `limits` re-send `config` to the connected device |
+| `PATCH /robots/:id` | owner, or `bot.robot.manage` | `{ robot }`; new `limits` (including `allow`) re-send `config` to the connected device |
 | `DELETE /robots/:id` | owner, or `bot.robot.manage` | `204` |
 | `POST /robots/:id/pairing-code` | owner, or `bot.robot.manage` | `201 { code, expires_at, installer }` |
 | `GET /robots/:id/operators` | member, or `bot.robot.read` | `{ operators[] }` |

@@ -4,6 +4,8 @@
 // a viewer. Every decision is audited.
 const assert = require('assert');
 const { boot, check, done } = require('./helpers/app');
+const { loadProfiles } = require('../server/profiles');
+const plugins = require('./helpers/plugins');
 
 (async () => {
     const t = await boot();
@@ -136,6 +138,63 @@ const { boot, check, done } = require('./helpers/app');
         assert.strictEqual(m4.code, 'bot.command_not_allowed', 'the adeept plugin has no speech');
         a.close();
     });
+
+    // Over the socket, every Adeept (ordinary and mecanum) and Cozmo control reaches the device in the exact
+    // shape its Node plugin takes (test/helpers/plugins.js transcribes the plugins).
+    const PLUGIN_COMMANDS = {
+        'adeept.adr036': [
+            ['drive', { throttle: 0.5, steer: -2 }, { throttle: 0.5, steer: -1 }],
+            ['actuator', { name: 'pan', value: 0.4 }, { name: 'pan', value: 0.4 }],
+            ['actuator', { name: 'tilt', value: -3 }, { name: 'tilt', value: -1 }],
+            ['actuator', { name: 'buzzer', value: { note: 'A4' } }, { name: 'buzzer', value: { hz: 440 } }],
+            ['actuator', { name: 'buzzer', value: { hz: 5000 } }, { name: 'buzzer', value: { hz: 880 } }],
+            ['actuator', { name: 'buzzer', value: null }, { name: 'buzzer', value: null }],
+            ['actuator', { name: 'lights', value: { r: 300, g: 12.4, b: -5 } }, { name: 'lights', value: { r: 255, g: 12, b: 0 } }],
+            ['actuator', { name: 'lights', value: null }, { name: 'lights', value: null }],
+            ['halt', {}, {}],
+        ],
+        'adeept.adr036.mecanum': [
+            ['drive', { x: 0.2, y: -0.7, rotation: 0.3 }, { x: 0.2, y: -0.7, rotation: 0.3 }],
+            ['drive', { y: 1 }, { x: 0, y: 1, rotation: 0 }],
+            ['actuator', { name: 'pan', value: -0.25 }, { name: 'pan', value: -0.25 }],
+            ['actuator', { name: 'tilt', value: 1 }, { name: 'tilt', value: 1 }],
+            ['actuator', { name: 'buzzer', value: { note: 'C5' } }, { name: 'buzzer', value: { hz: 523.25 } }],
+            ['actuator', { name: 'lights', value: { r: 0, g: 128, b: 255 } }, { name: 'lights', value: { r: 0, g: 128, b: 255 } }],
+        ],
+        cozmo: [
+            ['drive', { throttle: -0.4, steer: 0.2 }, { throttle: -0.4, steer: 0.2 }],
+            ['actuator', { name: 'head', value: 0.5 }, { name: 'head', value: 0.5 }],
+            ['actuator', { name: 'lift', value: -0.5 }, { name: 'lift', value: 0 }],
+            ['actuator', { name: 'lift', value: 2 }, { name: 'lift', value: 1 }],
+            ['actuator', { name: 'backpack_lights', value: { r: 1, g: 2, b: 3 } }, { name: 'backpack_lights', value: { r: 1, g: 2, b: 3 } }],
+            ['say', { text: 'hello' }, { text: 'hello' }],
+            ['display', { face: 'happy' }, { face: 'happy' }],
+        ],
+    };
+    const shipped = loadProfiles();
+    for (const [profileId, cases] of Object.entries(PLUGIN_COMMANDS)) {
+        await check(`${profileId}: the commands the device gets over the socket are the ones its plugin accepts`, async () => {
+            const contract = plugins.contractFor(shipped.get(profileId));
+            const { robot, pairing } = await t.robot(alex, { profile_id: profileId });
+            const dev = await deviceFor(robot.id, pairing.code);
+            const a = await op(alex);
+            await joinResult(a, robot.id);
+            for (const [i, [kind, value, expected]] of cases.entries()) {
+                const id = `${profileId}-${i}`;
+                cmd(a, { id, kind, value });
+                const got = await Promise.race([
+                    dev.waitFor((m) => m.type === 'command' && m.ref === id),
+                    a.waitFor((m) => m.type === 'command_result' && m.id === id).then((r) => assert.fail(`${kind} ${JSON.stringify(value)}: ${r.result} ${r.code || ''} ${r.reason || ''}`)),
+                ]);
+                assert.strictEqual(got.kind, kind);
+                assert.deepStrictEqual(got.value, expected, `${kind} ${JSON.stringify(value)}`);
+                assert.strictEqual(contract.accepts(kind, got.value), null, `${contract.name} accepts ${kind} ${JSON.stringify(got.value)}`);
+                dev.send({ type: 'ack', id: got.id });
+                assert.strictEqual((await result(a, id)).result, 'ack');
+            }
+            a.close(); dev.close();
+        });
+    }
 
     await check('config carries the effective limits and is re-sent to the device when the owner changes them', async () => {
         const { robot, pairing } = await t.robot(alex, { profile_id: 'cozmo', limits: { max_speed: 0.9, max_turn: 0.5 } });
