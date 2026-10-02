@@ -73,11 +73,11 @@ with; `allowed_commands` is what the owner may send: the profile's kinds, cut by
 always with `halt`. Both are re-sent to the connected device the moment the owner changes the limits.
 
 `whip_url` is where the device publishes its camera: OpenRe's WHIP ingest (`POST`, RFC 9725, body
-`application/sdp`) at `<BOT_WHIP_BASE>/<publish_key>`, the base defaulting to
-`https://ingest.openre.stream/whip`. It is built from the device's own publish key (never the owner's
-stream key), so it is a secret like the key: returned only by `pair` / `POST /pair` and by a rotation
-(which issues a new key, so a new URL), never by a read. With `BOT_WHIP_BASE` empty it is `null` and the
-device runs without video.
+`application/sdp`) at `<BOT_WHIP_BASE>/<publish_key>`, any trailing slash on the base trimmed. It is built
+from the device's own publish key (never the owner's stream key), so it is a secret like the key: returned
+only by `pair` / `POST /pair` and by a rotation (which issues a new key, so a new URL), never by a read.
+With `BOT_WHIP_BASE` unset or empty the field is left out of the answer entirely and the device runs
+without video.
 
 ### 1.1 Command values (the profile's `commands`)
 

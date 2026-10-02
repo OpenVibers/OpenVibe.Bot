@@ -214,15 +214,19 @@ function createDomain({ db, config, outbox, link = null, now = () => Date.now(),
         });
         if (result.error) fail(result.error[0], result.error[1], result.error[2]);
         const profile = await getProfile(db, (await getRobot(result.robot_id)).profile_id);
-        return { device: result.device, credential: result.credential, publish_key: result.publishKey, whip_url: whipUrl(result.publishKey), profile: profile ? profile.profile : null };
+        const whUrl = whipUrl(result.publishKey);
+        return { device: result.device, credential: result.credential, publish_key: result.publishKey, ...(whUrl ? { whip_url: whUrl } : {}), profile: profile ? profile.profile : null };
     }
     /**
      * Where the device publishes its camera: OpenRe's WHIP ingest (`POST <base>/<key>`, RFC 9725) with
      * this device's publish key as the stream key. It carries the key, so it is shown once, with the key.
+     * The base's trailing slashes are trimmed; with no base (BOT_WHIP_BASE unset or empty) it is null, and
+     * the caller omits the field entirely rather than sending null or an empty string.
      */
     function whipUrl(publishKey) {
         const base = config.media && config.media.whipBase;
-        return base && publishKey ? `${base}/${encodeURIComponent(publishKey)}` : null;
+        const clean = base ? String(base).replace(/\/+$/, '') : '';
+        return clean && publishKey ? `${clean}/${encodeURIComponent(publishKey)}` : null;
     }
     async function prunePairingCodes() {
         await db.query('DELETE FROM pairing_codes WHERE expires_at < $1', [iso(now() - 24 * 3600 * 1000)]);
@@ -250,7 +254,8 @@ function createDomain({ db, config, outbox, link = null, now = () => Date.now(),
             `UPDATE devices SET credential_hash = $2, credential_prev_hash = $3, prev_valid_until = $4, publish_key_hash = $5, updated_at = $6
              WHERE id = $1 RETURNING *`,
             [id, hashSecret(credential), d.credential_hash, iso(now() + config.device.rotateGraceMs), hashSecret(publishKey), at]);
-        return { device: updated, credential, publish_key: publishKey, whip_url: whipUrl(publishKey) };
+        const whUrl = whipUrl(publishKey);
+        return { device: updated, credential, publish_key: publishKey, ...(whUrl ? { whip_url: whUrl } : {}) };
     }
     async function revokeDevice(id) {
         const d = await getDevice(id);
