@@ -1,0 +1,31 @@
+[Unit]
+Description=OpenVibe.Bot — the open control panel for robots (robots, devices, pairing, the operator and device WebSockets)
+# Network (sign-in, JWKS, OAuth) should be up first, and Bot's own PostgreSQL (pooled runtime role plus the
+# direct owner role for migrations) and Valkey (state shared between processes) are required to serve; the
+# events relay waits in the outbox. Bot degrades honestly without Events: routes that need it answer 503
+# (see /api/ready).
+After=network.target postgresql.service pgbouncer.service valkey-server.service
+Wants=openvibe-network.service postgresql.service pgbouncer.service valkey-server.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/openvibe.bot
+EnvironmentFile=/etc/openvibe/bot.env
+Environment=NODE_ENV=production
+Environment=PORT=4630
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/env node /opt/openvibe.bot/server/index.js
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# Bot's own database is PostgreSQL on the host's data role; the code tree stays read-only.
+
+[Install]
+WantedBy=multi-user.target
