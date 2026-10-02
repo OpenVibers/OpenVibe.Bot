@@ -24,6 +24,8 @@
  * | POST   /robots/:id/estop/clear                  | bot.robot.control      | the owner only                      |
  * | GET    /robots/:id/audit                        | bot.robot.read         | owner (paged)                       |
  * | POST   /pair                                    | — (one-time code)      | the agent (code is the credential)  |
+ *
+ * With BOT_PAIRING_AUTHORITY=network the pairing codes are Network's and POST /pair answers 410 bot.pairing_moved.
  */
 const express = require('express');
 const { http } = require('openvibe-contracts');
@@ -69,7 +71,10 @@ function v1Router({ domain, apiAuth, limits, hub }) {
     const requireRead = (req) => { fence(req); if (req.principal.kind === 'service' && !apiAuth.granted(req.principal, CAP.read)) fail(403, 'capability.denied', `${CAP.read} not granted`); };
     const requireControlCap = (req) => { if (req.principal.kind === 'service' && !apiAuth.granted(req.principal, CAP.control)) fail(403, 'capability.denied', `${CAP.control} not granted`); };
 
+    // Both fence before the lookup: without a token (or with a node token) a real robot id and a made-up one
+    // get the same answer.
     async function member(req, robotId, roles = ['owner', 'operator', 'viewer']) {
+        fence(req);
         const robot = await domain.robots.get(robotId);
         if (!robot) fail(404, 'bot.robot_not_found', 'no such robot');
         if (req.principal.kind === 'service') { requireRead(req); return { robot, role: 'service' }; }
@@ -79,6 +84,7 @@ function v1Router({ domain, apiAuth, limits, hub }) {
         return { robot, role };
     }
     async function owner(req, robotId) {
+        fence(req);
         const robot = await domain.robots.get(robotId);
         if (!robot) fail(404, 'bot.robot_not_found', 'no such robot');
         if (req.principal.kind === 'service') { requireManage(req); return robot; }
@@ -107,6 +113,8 @@ function v1Router({ domain, apiAuth, limits, hub }) {
     }));
     r.post('/robots', manage, wrap(async (req, res) => {
         const ownerSubject = requireManage(req, req.body?.owner);
+        // ?owner= is refused, never ignored: as on GET /robots it may name only the subject the call acts for.
+        if (req.query.owner != null && req.query.owner !== '' && req.query.owner !== ownerSubject) fail(403, 'bot.forbidden', 'you may only act for yourself');
         const { robot, pairing } = await domain.robots.create({
             owner: ownerSubject, name: req.body?.name, profile_id: req.body?.profile_id,
             access_policy: req.body?.access_policy, limits: req.body?.limits || {},
@@ -158,6 +166,7 @@ function v1Router({ domain, apiAuth, limits, hub }) {
         res.json({ devices: rows.map((d) => ({ ...domain.present.device(d), online: hub.isOnline(d.id) })) });
     }));
     r.post('/devices/:id/rotate', manage, wrap(async (req, res) => {
+        fence(req);
         const d = await domain.devices.get(req.params.id);
         if (!d) fail(404, 'bot.device_not_found', 'no such device');
         await owner(req, json(d.robot_ids, [])[0]);
@@ -171,6 +180,7 @@ function v1Router({ domain, apiAuth, limits, hub }) {
         res.json({ device: domain.present.device(rotated.device), credential: rotated.credential, publish_key: rotated.publish_key, ...(rotated.whip_url ? { whip_url: rotated.whip_url } : {}) });
     }));
     r.post('/devices/:id/revoke', manage, wrap(async (req, res) => {
+        fence(req);
         const d = await domain.devices.get(req.params.id);
         if (!d) fail(404, 'bot.device_not_found', 'no such device');
         await owner(req, json(d.robot_ids, [])[0]);

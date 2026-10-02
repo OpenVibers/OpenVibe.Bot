@@ -14,6 +14,7 @@ const int = (v, d) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n
 const bool = (v, d = false) => (v == null || v === '' ? d : ['1', 'true', 'yes', 'on'].includes(String(v).toLowerCase()));
 const trim = (u) => String(u || '').replace(/\/+$/, '');
 const list = (v) => String(v || '').split(',').map((s) => s.trim()).filter(Boolean);
+const PAIRING_AUTHORITIES = ['bot', 'network'];
 
 function loadConfig(env = process.env) {
     const nodeEnv = env.NODE_ENV || 'development';
@@ -21,6 +22,10 @@ function loadConfig(env = process.env) {
     const port = int(env.PORT, 4630);
     const networkUrl = trim(env.OV_NETWORK_URL || 'https://openvibe.network');
     const baseUrl = trim(env.BASE_URL || (isProduction ? 'https://openvibe.bot' : `http://localhost:${port}`));
+    const pairingAuthority = env.BOT_PAIRING_AUTHORITY == null || env.BOT_PAIRING_AUTHORITY === '' ? 'bot' : env.BOT_PAIRING_AUTHORITY;
+    if (!PAIRING_AUTHORITIES.includes(pairingAuthority)) {
+        throw new Error(`BOT_PAIRING_AUTHORITY must be ${PAIRING_AUTHORITIES.join(' or ')}, not ${JSON.stringify(pairingAuthority)}`);
+    }
     return {
         nodeEnv,
         isProduction,
@@ -64,8 +69,11 @@ function loadConfig(env = process.env) {
         },
 
         // Pairing (ADR-043 decision 2): an 8-character Crockford base32 code, XXXX-XXXX, 10 minutes,
-        // single use, 5 wrong tries end it. Only the hash is stored.
+        // single use, 5 wrong tries end it. Only the hash is stored. `authority` network (plan T15 B2): the
+        // code is minted by Network (POST /internal/node-pairings), Bot stores none, and POST /pair and the
+        // `pair` frame answer 410 bot.pairing_moved. An unknown value refuses to boot.
         pairing: {
+            authority: pairingAuthority,
             ttlMs: int(env.BOT_PAIRING_TTL_MS, 10 * 60 * 1000),
             maxTries: int(env.BOT_PAIRING_MAX_TRIES, 5),
         },

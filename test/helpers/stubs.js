@@ -63,6 +63,12 @@ async function startNetwork() {
         return r.claims.sub.replace(/^svc:/, '');
     }
 
+    // Node pairings (POST /internal/node-pairings): every call is kept; failPairings(status) answers that status
+    // instead (null: mint again).
+    const pairings = [];
+    let pairingFailure = null;
+    const failPairings = (status) => { pairingFailure = status; };
+
     function newUser(username) {
         return { subject: ids.newId('user'), username, display_name: username[0].toUpperCase() + username.slice(1) };
     }
@@ -75,6 +81,16 @@ async function startNetwork() {
             if (body.client_secret !== 'shh') return send(res, 401, { error: 'invalid_client' });
             const cap = String(body.scope || '').split(/\s+/).filter(Boolean);
             return send(res, 200, { access_token: signService({ sub: `svc:${body.client_id}`, aud: [body.audience || 'openvibe.bot'], cap }), token_type: 'Bearer', expires_in: 300 });
+        }
+        if (req.url === '/internal/node-pairings' && req.method === 'POST') {
+            const service = nodeManager(req);
+            if (!service) return send(res, 401, { code: 'token.invalid' });
+            if (pairingFailure) return send(res, pairingFailure, { code: 'registry.failed' });
+            const body = JSON.parse(await readBody(req) || '{}');
+            const code = crypto.randomBytes(4).toString('hex').toUpperCase().replace(/^(.{4})/, '$1-');
+            const out = { pairing_id: `pair_${ids.ulid()}`, code, expires_at: new Date(Date.now() + 600000).toISOString() };
+            pairings.push({ service, body, ...out });
+            return send(res, 201, out);
         }
         const np = /^\/internal\/node-principals\/([^/]+)(\/revoke)?$/.exec(req.url);
         if (np && (req.method === (np[2] ? 'POST' : 'GET'))) {
@@ -92,7 +108,7 @@ async function startNetwork() {
     });
     const url = await listen(server);
     issuer = url;
-    return { url, publicPem, signService, signUser, newUser, addNode, signNode, nodes, revokes, close: () => new Promise((r) => server.close(r)) };
+    return { url, publicPem, signService, signUser, newUser, addNode, signNode, nodes, revokes, pairings, failPairings, close: () => new Promise((r) => server.close(r)) };
 }
 
 async function startEvents() {
