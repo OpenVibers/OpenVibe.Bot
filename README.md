@@ -8,9 +8,11 @@ Production runs the Node process under systemd as `openvibe-bot.service` (unit r
 
 To run the schema migrations before the service serves, start it once with the direct owner connection in `/etc/openvibe/bot.env` (`DATABASE_DIRECT_URL`); the boot applies `migrations/` and then serves on the pooled `DATABASE_URL`.
 
+`/install` is proxied to the app; the installer script itself ships with the T15 device-agent job.
+
 ## Deploy files
 
 - `deploy/systemd/openvibe-bot.service` — systemd unit (`EnvironmentFile=/etc/openvibe/bot.env`, `PORT=4630`, hardening and `Restart=always`).
 - `deploy/nginx/openvibe.bot.conf` — nginx reference site for openvibe.bot: TLS, www→apex, rate limits, and WebSocket upgrade headers for the device (`/device`) and operator (`/control`) sockets, passing the `Authorization` header through. It serves the existing Sites page from `/opt/openvibe.sites/dist/openvibe.bot` and shared assets from `/opt/openvibe.sites/dist/_shared`.
 
-Before installing this vhost, the OpenVibe.Sites owner must stop its catalog and deploy pipeline from generating or replacing `/etc/nginx/sites-available/openvibe.bot.conf`, while continuing to publish the page and shared assets at the paths above. Coordinate the single vhost handoff with that owner; then install this config, validate nginx, and reload it after `openvibe-bot.service` is ready. A later Sites deploy must not overwrite Bot's `/device` and `/control` routes.
+OpenVibe.Sites keeps building the front page, legal pages and `/shared/` assets under `/opt/openvibe.sites/dist/`, but no longer generates `deploy/nginx/openvibe.bot.conf` (sites.json marks the vhost as owned by OpenVibe.Bot). A Sites deploy leaves an installed vhost it no longer generates in place, so the current Sites vhost keeps serving openvibe.bot until Bot's first deploy installs this file over it; nothing has to be removed by hand, and later Sites deploys never overwrite Bot's `/device` and `/control` routes.
