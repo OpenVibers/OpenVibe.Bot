@@ -106,6 +106,56 @@ const { boot, check, done } = require('./helpers/app');
         op.close(); dev.close();
     });
 
+    await check('an event does not use up the sensor window: the next sample is judged against the last sample', async () => {
+        const { robot, dev } = await connected();
+        const op = await ownerJoined(robot.id);
+        const sample = (battery) => op.waitFor((m) => m.type === 'robot_state' && m.state.telemetry && m.state.telemetry.battery === battery);
+        // The injected clock moves the window; a heartbeat just before each step keeps the device online.
+        const beat = async (n) => { dev.send({ type: 'heartbeat', t: n }); await dev.waitFor((m) => m.type === 'heartbeat_ack' && m.echo === n); };
+        try {
+            dev.send({ type: 'telemetry', battery: 0.9 });
+            await sample(0.9);
+            await beat(1);
+            t.clock.offset += 300;
+            dev.send({ type: 'telemetry', battery: 0.8, events: [{ kind: 'bump' }] });
+            await sample(0.8);
+            dev.send({ type: 'telemetry', battery: 0.7 });   // 300 ms after the last sample: dropped
+            await beat(2);
+            t.clock.offset += 250;
+            dev.send({ type: 'telemetry', battery: 0.6 });   // 550 ms after the last sample, 250 after the event: delivered
+            await sample(0.6);
+            assert.ok(!op.messages.some((m) => m.type === 'robot_state' && m.state.telemetry && m.state.telemetry.battery === 0.7), 'a second sample inside the window is dropped');
+        } finally {
+            t.clock.offset -= 550;
+        }
+        op.close(); dev.close();
+    });
+
+    await check('setting or clearing the latch re-sends config with estop_latched, from the owner, REST and the device', async () => {
+        const { robot, dev } = await connected();
+        const first = dev.messages.find((m) => m.type === 'config');
+        assert.strictEqual(first.estop_latched, false);
+        const op = await ownerJoined(robot.id);
+        const nextConfig = (after, latched) => dev.waitFor((m) => m.type === 'config' && m.seq > after && m.estop_latched === latched);
+        op.send({ type: 'estop' });
+        const estop = await dev.waitFor((m) => m.type === 'estop' && m.latched === true);
+        const c1 = await nextConfig(first.seq, true);
+        assert.ok(c1.seq > estop.seq, 'the estop frame comes first');
+        assert.deepStrictEqual(c1.limits, first.limits);
+        assert.deepStrictEqual(c1.allowed_commands, first.allowed_commands);
+        op.send({ type: 'estop_clear' });
+        const c2 = await nextConfig(c1.seq, false);
+        const r = await t.call('POST', `/api/v1/robots/${robot.id}/estop`, { user: alex });
+        assert.strictEqual(r.status, 200, r.text);
+        const c3 = await nextConfig(c2.seq, true);
+        const cleared = await t.call('POST', `/api/v1/robots/${robot.id}/estop/clear`, { user: alex });
+        assert.strictEqual(cleared.status, 200, cleared.text);
+        const c4 = await nextConfig(c3.seq, false);
+        dev.send({ type: 'estop_state', latched: true });   // the device's own latch moves Bot's
+        await nextConfig(c4.seq, true);
+        op.close(); dev.close();
+    });
+
     await check('heartbeat_ack echoes t; Bot\'s envelope seq stays strictly increasing', async () => {
         const { dev } = await connected();
         for (let i = 1; i <= 4; i++) dev.send({ type: 'heartbeat', seq: 1, t: 1000 + i, rtt_ms: 10 });

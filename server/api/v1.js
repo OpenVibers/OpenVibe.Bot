@@ -107,7 +107,7 @@ function v1Router({ domain, apiAuth, limits, hub }) {
     r.patch('/robots/:id', manage, wrap(async (req, res) => {
         await owner(req, req.params.id);
         const updated = await domain.robots.update(req.params.id, { name: req.body?.name, access_policy: req.body?.access_policy, limits: req.body?.limits });
-        if (req.body?.limits !== undefined) await hub.refreshConfig(req.params.id);   // the device enforces the new limits at once
+        if (req.body?.limits !== undefined) await hub.refreshConfig(req.params.id);   // the device enforces the new limits and allowlist at once
         res.json({ robot: domain.present.robot(updated) });
     }));
     r.delete('/robots/:id', manage, wrap(async (req, res) => {
@@ -165,14 +165,14 @@ function v1Router({ domain, apiAuth, limits, hub }) {
         const { robot } = await member(req, req.params.id, ['owner', 'operator']);
         if (req.principal.kind === 'service') requireControlCap(req);
         if (!robot.estop_latched) await domain.estop.set(req.params.id, { latched: true, by: me(req) || req.principal.sub, principalKind: req.principal.kind });
-        hub.sendToRobotDevices(req.params.id, { type: 'estop', latched: true, by: me(req) || req.principal.sub, at: new Date().toISOString() });
+        await hub.pushEstop(req.params.id, true, me(req) || req.principal.sub);
         hub.broadcast(req.params.id);
         res.json({ robot: domain.present.robot(await domain.robots.get(req.params.id)) });
     }));
     r.post('/robots/:id/estop/clear', control, wrap(async (req, res) => {
         const robot = await owner(req, req.params.id);
         await domain.estop.clear(req.params.id, robot.owner_subject);
-        hub.sendToRobotDevices(req.params.id, { type: 'estop', latched: false, by: robot.owner_subject, at: new Date().toISOString() });
+        await hub.pushEstop(req.params.id, false, robot.owner_subject);
         hub.broadcast(req.params.id);
         res.json({ robot: domain.present.robot(await domain.robots.get(req.params.id)) });
     }));

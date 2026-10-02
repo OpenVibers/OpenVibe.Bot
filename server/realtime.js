@@ -138,11 +138,16 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             estop_latched: robot ? !!robot.estop_latched : false,
         });
     }
-    /** Re-send `config` to the robot's connected devices (the owner changed its limits). */
+    /** Re-send `config` to the robot's connected devices (the owner changed its limits or allowlist, or the latch moved). */
     async function refreshConfig(robotId) {
         for (const conn of [...deviceConns.values()]) {
             if (conn.online && deviceRobotIds(conn.device).includes(robotId)) await sendConfig(conn);
         }
+    }
+    /** Tell the robot's devices the latch moved: the `estop` frame acts at once, then `config` carries the new state. */
+    async function pushEstop(robotId, latched, by) {
+        sendToRobotDevices(robotId, { type: 'estop', latched, by, at: iso(now()) });
+        await refreshConfig(robotId);
     }
     async function bringOnline(conn) {
         await domain.devices.setOnline(conn.device, true).catch((e) => log.warn(`[Bot] online event: ${e.message}`));
@@ -202,10 +207,13 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     }
 
     async function onTelemetry(conn, msg) {
-        // ≤ 2 Hz, except a frame carrying events (a fault, a bump, a low battery), which is never dropped
+        // Sensor samples ≤ 2 Hz. A frame carrying events (a fault, a bump, a low battery) is never dropped and
+        // does not use up the samples' window, so the next sample is judged against the last sample only.
         const urgent = Array.isArray(msg.events) && msg.events.length > 0;
-        if (!urgent && now() - conn.lastTelemetry < Math.floor(1000 / config.control.telemetryHz)) return;
-        conn.lastTelemetry = now();
+        if (!urgent) {
+            if (now() - conn.lastTelemetry < Math.floor(1000 / config.control.telemetryHz)) return;
+            conn.lastTelemetry = now();
+        }
         conn.telemetry = msg;
         for (const robotId of deviceRobotIds(conn.device)) broadcast(robotId);
     }
@@ -237,7 +245,10 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             conn.deviceEstop.set(robotId, { latched, at: iso(now()) });
             if (latched) {
                 const robot = await domain.robots.get(robotId);
-                if (robot && !robot.estop_latched) await domain.estop.set(robotId, { latched: true, by: conn.device.id, principalKind: 'device' });
+                if (robot && !robot.estop_latched) {
+                    await domain.estop.set(robotId, { latched: true, by: conn.device.id, principalKind: 'device' });
+                    await refreshConfig(robotId);
+                }
             }
             broadcast(robotId);
         }
@@ -371,7 +382,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
                 await domain.estop.clear(robotId, conn.subject);   // owner only; throws otherwise
             }
         } catch (e) { return sendError(conn, e.code || 'bot.forbidden', e.detail || e.message); }
-        sendToRobotDevices(robotId, { type: 'estop', latched, by: conn.subject, at: iso(now()) });
+        await pushEstop(robotId, latched, conn.subject);
         broadcast(robotId);
     }
 
@@ -437,7 +448,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     return {
         bindDomain(d) { domain = d; },
         handleUpgrade,
-        isOnline, deviceState, sendToDevice, sendToRobotDevices, broadcast, closeDevice, robotState, refreshConfig,
+        isOnline, deviceState, sendToDevice, sendToRobotDevices, broadcast, closeDevice, robotState, refreshConfig, pushEstop,
         onlineCount() { let n = 0; for (const c of deviceConns.values()) if (c.online) n++; return n; },
         devices() { return [...deviceConns.values()].map((c) => ({ device_id: c.device.id, online: c.online })); },
         async close() {
