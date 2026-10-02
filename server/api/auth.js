@@ -5,6 +5,8 @@
  *
  *   { kind: 'service', sub: 'svc:live', cap: [...] }   a Network client-credentials token for audience
  *                                                       openvibe.bot; each route checks ONE capability
+ *   { kind: 'node', principal: 'nod_…', sub: 'node:nod_…' }   a Network node token (actor_type node, audience
+ *                                                       openvibe.bot): a machine paired for Bot; it may only bind
  *   { kind: 'user', subject: 'usr_…', username, name, avatar, role }
  *   { kind: 'anonymous' }
  *
@@ -12,7 +14,8 @@
  */
 const { serviceAuth, capabilities, http, ids } = require('openvibe-contracts');
 
-const PRINCIPAL_SUB = /^(svc|app|mod):/;
+const PRINCIPAL_SUB = /^(svc|app|mod|node):/;
+const NODE_SUB = /^node:(nod_[0-9A-HJKMNP-TV-Z]{26})$/;
 const ANON = Object.freeze({ kind: 'anonymous' });
 
 function decodePayload(token) {
@@ -42,6 +45,25 @@ function verifyService(token, { publicKey, issuer, audience }) {
     return { ok: true, claims: r.claims };
 }
 
+/** A Bearer that claims to be a node token (actor_type node); verifyNode decides whether it is one. */
+function isNodeToken(token) {
+    const payload = decodePayload(token);
+    return !!payload && payload.actor_type === 'node';
+}
+
+/**
+ * Verify a node token: signed by Network, audience openvibe.bot, actor_type node, sub node:nod_…
+ * Returns { ok, principal: 'nod_…', claims } or { ok:false, code, reason }.
+ */
+function verifyNode(token, { publicKey, issuer, audience }) {
+    if (!publicKey) return { ok: false, code: 'identity.unavailable', reason: 'the Network signing key is not loaded yet' };
+    const r = serviceAuth.verifyServiceToken(token, { publicKey, issuer, audience });
+    if (!r.ok) return { ok: false, code: r.code, reason: r.reason };
+    const m = NODE_SUB.exec(String(r.claims.sub || ''));
+    if (r.claims.actor_type !== 'node' || !m) return { ok: false, code: 'token.invalid', reason: 'not a node token' };
+    return { ok: true, principal: m[1], claims: r.claims };
+}
+
 function createApiAuth({ config, keys, userAuth }) {
     function resolve(req) {
         const header = String(req.headers.authorization || '');
@@ -50,6 +72,11 @@ function createApiAuth({ config, keys, userAuth }) {
         const publicKey = keys.get();
         if (!publicKey) return { error: [503, 'identity.unavailable', 'the Network signing key is not loaded yet'] };
         const payload = decodePayload(token);
+        if (payload && payload.actor_type === 'node') {
+            const r = verifyNode(token, { publicKey, issuer: config.network.issuer, audience: config.audience });
+            if (!r.ok) return { error: [401, r.code, r.reason] };
+            return { principal: { kind: 'node', principal: r.principal, sub: r.claims.sub, jti: r.claims.jti } };
+        }
         if (payload && typeof payload.sub === 'string' && PRINCIPAL_SUB.test(payload.sub)) {
             const r = serviceAuth.verifyServiceToken(token, { publicKey, issuer: config.network.issuer, audience: config.audience });
             if (!r.ok) return { error: [401, r.code, r.reason] };
@@ -74,4 +101,4 @@ function createApiAuth({ config, keys, userAuth }) {
     return { middleware, resolve, granted };
 }
 
-module.exports = { createApiAuth, userPrincipal, verifyService, decodePayload, PRINCIPAL_SUB };
+module.exports = { createApiAuth, userPrincipal, verifyService, verifyNode, isNodeToken, decodePayload, PRINCIPAL_SUB };

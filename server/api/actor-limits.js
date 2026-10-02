@@ -9,7 +9,7 @@ const { createActorLimiter, createValkeyLimitStore, defaultActor } = require('op
 
 function actor(req) {
     const p = req.principal;
-    if (p && p.kind === 'service' && p.sub) return p.sub;
+    if (p && (p.kind === 'service' || p.kind === 'node') && p.sub) return p.sub;
     if (p && p.kind === 'user' && p.subject) return `user:${p.subject}`;
     return defaultActor(req);
 }

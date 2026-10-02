@@ -6,10 +6,14 @@
  *   keys      the Network's RS256 public key (OV_NETWORK_PUBLIC_KEY, else GET /api/.well-known/jwks,
  *             refreshed every 6 h and retried every 30 s until it loads). It verifies service tokens
  *             (audience openvibe.bot) and the browser's Network user JWT, both offline.
+ *   nodes     Network's node principals (machines paired for Bot): GET /internal/node-principals/:id and
+ *             POST …/:id/revoke with Bot's own svc:bot token (audience openvibe.network, network.node.manage).
  */
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const { OpenVibeAuthClient } = require('openvibe-shared/auth-client');
+const { serviceAuth } = require('openvibe-contracts');
+const { BotError } = require('./util');
 
 function createKeyProvider(config, { fetchImpl = globalThis.fetch, log = console } = {}) {
     let pem = config.network.publicKey ? crypto.createPublicKey(config.network.publicKey).export({ type: 'spki', format: 'pem' }) : null;
@@ -59,11 +63,40 @@ function createUserAuth(config, keys) {
         let claims;
         try { claims = jwt.verify(token, key, { algorithms: ['RS256'], issuer: config.network.issuer }); } catch { return null; }
         if (!claims || typeof claims !== 'object') return null;
-        if (typeof claims.sub === 'string' && /^(svc|app|mod):/.test(claims.sub)) return null;
-        if (claims.actor_type === 'service') return null;
+        if (typeof claims.sub === 'string' && /^(svc|app|mod|node):/.test(claims.sub)) return null;
+        if (claims.actor_type === 'service' || claims.actor_type === 'node') return null;
         return claims;
     }
     return { client, verify };
 }
 
-module.exports = { createKeyProvider, createUserAuth };
+/**
+ * Network's view of a node principal (OpenVibe.Network server/registry/node-principals.js principalView):
+ * { principal, node_id, name, owner{kind,subject}, home_cell, status, paired_for{service,ref}|null, … }.
+ * get(id) → that view, or null when Network knows no such principal paired by Bot (it answers 404, never 403).
+ * revoke(id) → the revoked view, or null for the same 404; idempotent on Network's side.
+ * Any other failure throws 503 bot.network_unavailable.
+ */
+function createNodePrincipals(config, { fetchImpl = globalThis.fetch } = {}) {
+    const tokens = serviceAuth.createTokenClient({
+        tokenUrl: `${config.network.internalUrl}/oauth/token`, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret,
+        audience: 'openvibe.network', scope: 'network.node.manage', fetchImpl,
+    });
+    async function call(method, id) {
+        const path = `/internal/node-principals/${encodeURIComponent(id)}${method === 'POST' ? '/revoke' : ''}`;
+        let res;
+        try {
+            res = await fetchImpl(`${config.network.internalUrl}${path}`, { method, headers: { ...(await tokens.authHeaders()), Accept: 'application/json' }, signal: AbortSignal.timeout(8000) });
+        } catch (e) {
+            throw new BotError(503, 'bot.network_unavailable', `Network did not answer for the machine: ${e.message}`);
+        }
+        if (res.status === 401) tokens.invalidate();
+        if (res.status === 404) return null;
+        const body = await res.json().catch(() => null);
+        if (!res.ok || !body) throw new BotError(503, 'bot.network_unavailable', `Network answered ${res.status} for the machine`);
+        return body;
+    }
+    return { get: (id) => call('GET', id), revoke: (id) => call('POST', id) };
+}
+
+module.exports = { createKeyProvider, createUserAuth, createNodePrincipals };

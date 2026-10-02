@@ -15,7 +15,7 @@
  * stop is never refused to someone who may drive. Every decision — allowed or refused — is audited.
  */
 const {
-    BotError, fail, prefixedId, iso, token, hashSecret, secretEquals, json, text, storable,
+    BotError, fail, prefixedId, iso, token, hashSecret, secretEquals, json, text, storable, isRobotId,
 } = require('../util');
 const { getProfile } = require('../profiles');
 const { ENVELOPE } = require('../events/outbox');
@@ -59,7 +59,7 @@ function noteToHz(note) {
     return 440 * 2 ** ((12 * (Number(m[3]) + 1) + semis - 69) / 12);
 }
 
-function createDomain({ db, config, outbox, link = null, now = () => Date.now(), log = console }) {
+function createDomain({ db, config, outbox, link = null, nodes = null, now = () => Date.now(), log = console }) {
     // ── Presenters ────────────────────────────────────────────────────────────────────────────────
     const presentRobot = (r) => (r ? {
         id: r.id, name: r.name, profile_id: r.profile_id, profile_version: r.profile_version,
@@ -264,6 +264,68 @@ function createDomain({ db, config, outbox, link = null, now = () => Date.now(),
         const updated = await db.maybe('UPDATE devices SET revoked_at = $2, credential_prev_hash = NULL, prev_valid_until = NULL, updated_at = $2 WHERE id = $1 RETURNING *', [id, at]);
         return updated;
     }
+
+    // ── Network-paired devices (node principals, T2 §9.2 B1) ──────────────────────────────────────
+    /**
+     * The live device bound to Network node principal `principalId`, creating it on first use. Idempotent:
+     * a live row is returned as it is. Otherwise Network's record decides (GET /internal/node-principals/:id
+     * with Bot's service token): the principal must be active, paired for Bot, for a robot of the principal's
+     * own owner; anything else is 403 bot.node_not_bound. A principal whose device the owner revoked here
+     * never binds again. The row starts from Network's record and safe values only; what the device declares
+     * arrives later in its `status` frames.
+     */
+    async function bindNode(principalId) {
+        const known = await db.maybe(
+            'SELECT * FROM devices WHERE node_principal = $1 ORDER BY (revoked_at IS NULL) DESC, created_at DESC LIMIT 1', [principalId]);
+        if (known && !known.revoked_at) return known;
+        const refuse = (why) => fail(403, 'bot.node_not_bound', why);
+        if (known) refuse('this machine was revoked on Bot; pair it again');
+        if (!nodes) refuse('Network-paired machines are not configured here');
+        const p = await nodes.get(principalId);
+        if (!p || p.principal !== principalId) refuse('Network knows no such machine paired for Bot');
+        if (p.status !== 'active') refuse(`the machine is ${p.status} on Network`);
+        if (!p.paired_for || p.paired_for.service !== 'bot') refuse('the machine was not paired for Bot');
+        const robot = isRobotId(p.paired_for.ref) ? await getRobot(p.paired_for.ref) : null;
+        if (!robot || !p.owner || p.owner.kind !== 'user' || p.owner.subject !== robot.owner_subject) refuse("the machine was not paired for one of its owner's robots");
+        const at = iso(now());
+        const name = typeof p.name === 'string' ? storable(p.name).trim().slice(0, 80) || null : null;
+        // Two first connections at once: the unique index lets one insert win, and the other reads it.
+        const inserted = await db.maybe(
+            `INSERT INTO devices (id, robot_ids, name, kind, agent_version, drivers, capabilities, credential_hash, node_principal, created_at, updated_at)
+             VALUES ($1, $2::jsonb, $3, 'onboard', NULL, '[]'::jsonb, '{}'::jsonb, NULL, $4, $5, $5)
+             ON CONFLICT (node_principal) WHERE node_principal IS NOT NULL AND revoked_at IS NULL DO NOTHING RETURNING *`,
+            [prefixedId('dev', now()), JSON.stringify([robot.id]), name, principalId, at]);
+        return inserted || db.maybe('SELECT * FROM devices WHERE node_principal = $1 AND revoked_at IS NULL', [principalId]);
+    }
+    /**
+     * Issue (or re-issue) a device's WHIP publish key: the new key replaces the old one, which stops working.
+     * → { device, publish_key, whip_url?, profile }, the key shown this once.
+     */
+    async function issuePublishKey(id) {
+        const publishKey = token(32);
+        const device = await db.maybe('UPDATE devices SET publish_key_hash = $2, updated_at = $3 WHERE id = $1 AND revoked_at IS NULL RETURNING *',
+            [id, hashSecret(publishKey), iso(now())]);
+        if (!device) fail(404, 'bot.device_not_found', 'no live device');
+        const robot = await getRobot(json(device.robot_ids, [])[0]);
+        const profile = robot ? await getProfile(db, robot.profile_id) : null;
+        const whUrl = whipUrl(publishKey);
+        return { device, publish_key: publishKey, ...(whUrl ? { whip_url: whUrl } : {}), profile: profile ? profile.profile : null };
+    }
+    /** Persist what a Network-paired device declares (kind, drivers, capabilities, agent_version): only the given fields. */
+    async function updateDeclared(id, { kind, drivers, capabilities, agent_version: agentVersion }) {
+        return db.maybe(
+            `UPDATE devices SET kind = COALESCE($2, kind), drivers = COALESCE($3::jsonb, drivers), capabilities = COALESCE($4::jsonb, capabilities),
+                agent_version = CASE WHEN $5 THEN $6 ELSE agent_version END, updated_at = $7
+             WHERE id = $1 AND revoked_at IS NULL RETURNING *`,
+            [id, kind ?? null, drivers ? JSON.stringify(drivers) : null, capabilities ? JSON.stringify(capabilities) : null,
+                agentVersion !== undefined, agentVersion ?? null, iso(now())]);
+    }
+    /** Revoke a Network-paired device's principal on Network too (null: Network no longer knows it). */
+    async function revokeNode(principalId) {
+        if (!nodes) fail(503, 'bot.network_unavailable', 'Network-paired machines are not configured here');
+        return nodes.revoke(principalId);
+    }
+
     async function touchSeen(id) { await db.query('UPDATE devices SET last_seen = $2 WHERE id = $1', [id, iso(now())]); }
 
     async function setOnline(device, online) {
@@ -591,7 +653,7 @@ function createDomain({ db, config, outbox, link = null, now = () => Date.now(),
         robots: { create: createRobot, list: listRobots, get: getRobot, update: updateRobot, remove: removeRobot },
         members: { roleOf, add: addOperator, remove: removeOperator, list: listOperators },
         pairing: { create: createPairingCode, redeem, prune: prunePairingCodes, installerCommand, whipUrl },
-        devices: { byCredential, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, touchSeen, setOnline },
+        devices: { byCredential, bindNode, issuePublishKey, updateDeclared, revokeNode, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, touchSeen, setOnline },
         estop: { set: setEstop, clear: clearEstop },
         queue: { join: joinQueue, state: queueState, currentTurn, consume: consumeTurn, sweep: sweepQueues },
         audit: { record: auditCommand, list: listAudit, listPage: listAuditPage, prune: pruneAudit },

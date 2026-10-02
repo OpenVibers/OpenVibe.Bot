@@ -2,7 +2,9 @@
 /**
  * Stand-ins for the services Bot talks to, each on a random port.
  *
- *   startNetwork()  JWKS and user/service JWTs (signUser, signService, newUser)
+ *   startNetwork()  JWKS and user/service JWTs (signUser, signService, newUser); node principals as
+ *                   GET /internal/node-principals/:id and POST …/:id/revoke answer them (addNode, signNode,
+ *                   nodes, revokes), scoped to the calling service like Network's own routes
  *   startEvents()   POST /api/v1/events recording what Bot's outbox relays; GET /api/health
  */
 const http = require('http');
@@ -33,6 +35,34 @@ async function startNetwork() {
         return jwt.sign({ sub: String(u.networkId || ++n), subject_id: u.subject, username: u.username, display_name: u.display_name || u.username, role: u.role || 'user' },
             privatePem, { algorithm: 'RS256', issuer, expiresIn: '1h' });
     }
+    // Node principals: the view Network's principalView answers (server/registry/node-principals.js).
+    // `unscoped: true` answers a principal to any service, so Bot's own paired_for check is exercised too.
+    const nodes = new Map();
+    const revokes = [];
+    function addNode({ owner, ref, service = 'bot', status = 'active', name = 'garage-pi', unscoped = false } = {}) {
+        const id = ids.newId('node');
+        nodes.set(id, {
+            unscoped,
+            view: {
+                principal: id, node_id: `n-${id.slice(4).toLowerCase()}`, name, owner: { kind: 'user', subject: owner },
+                home_cell: 'cell-eu-1', status, paired_for: service ? { service, ref } : null,
+                last_seen_at: null, created_at: new Date().toISOString(), revoked_at: status === 'revoked' ? new Date().toISOString() : null,
+            },
+        });
+        return id;
+    }
+    function signNode(principal, { aud = ['openvibe.bot'], expSec = 300 } = {}) {
+        const now = Math.floor(Date.now() / 1000);
+        return serviceAuth.signServiceToken({ iss: issuer, sub: `node:${principal}`, actor_type: 'node', aud, cap: [], iat: now, exp: now + expSec, jti: `tok_${crypto.randomBytes(12).toString('hex')}` }, privatePem);
+    }
+    /** The calling service (svc:<id> → <id>) of a valid network.node.manage token for openvibe.network, or null. */
+    function nodeManager(req) {
+        const h = String(req.headers.authorization || '');
+        const r = serviceAuth.verifyServiceToken(h.slice(7), { publicKey: publicPem, issuer, audience: 'openvibe.network' });
+        if (!h.startsWith('Bearer ') || !r.ok || !(r.claims.cap || []).includes('network.node.manage')) return null;
+        return r.claims.sub.replace(/^svc:/, '');
+    }
+
     function newUser(username) {
         return { subject: ids.newId('user'), username, display_name: username[0].toUpperCase() + username.slice(1) };
     }
@@ -46,11 +76,23 @@ async function startNetwork() {
             const cap = String(body.scope || '').split(/\s+/).filter(Boolean);
             return send(res, 200, { access_token: signService({ sub: `svc:${body.client_id}`, aud: [body.audience || 'openvibe.bot'], cap }), token_type: 'Bearer', expires_in: 300 });
         }
+        const np = /^\/internal\/node-principals\/([^/]+)(\/revoke)?$/.exec(req.url);
+        if (np && (req.method === (np[2] ? 'POST' : 'GET'))) {
+            const service = nodeManager(req);
+            if (!service) return send(res, 401, { code: 'token.invalid' });
+            const n = nodes.get(decodeURIComponent(np[1]));
+            if (!n || (!n.unscoped && (!n.view.paired_for || n.view.paired_for.service !== service))) return send(res, 404, { code: 'registry.unknown_node' });
+            if (np[2]) {
+                revokes.push(n.view.principal);
+                if (n.view.status !== 'revoked') Object.assign(n.view, { status: 'revoked', revoked_at: new Date().toISOString() });
+            }
+            return send(res, 200, n.view);
+        }
         send(res, 404, { error: 'not found' });
     });
     const url = await listen(server);
     issuer = url;
-    return { url, publicPem, signService, signUser, newUser, close: () => new Promise((r) => server.close(r)) };
+    return { url, publicPem, signService, signUser, newUser, addNode, signNode, nodes, revokes, close: () => new Promise((r) => server.close(r)) };
 }
 
 async function startEvents() {

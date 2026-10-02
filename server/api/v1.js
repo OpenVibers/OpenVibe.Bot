@@ -19,6 +19,7 @@
  * | DELETE /robots/:id/operators/:subject          | bot.robot.manage       | owner                               |
  * | GET    /robots/:id/devices                     | bot.robot.read         | a member                            |
  * | POST   /devices/:id/rotate, /revoke            | bot.device.connect     | the robot's owner                   |
+ * | POST   /devices/bind                            | — (a node token)       | a machine paired for Bot on Network |
  * | POST   /robots/:id/estop                        | bot.robot.control      | owner or operator                   |
  * | POST   /robots/:id/estop/clear                  | bot.robot.control      | the owner only                      |
  * | GET    /robots/:id/audit                        | bot.robot.read         | owner (paged)                       |
@@ -148,6 +149,12 @@ function v1Router({ domain, apiAuth, limits, hub }) {
         const d = await domain.devices.get(req.params.id);
         if (!d) fail(404, 'bot.device_not_found', 'no such device');
         await owner(req, json(d.robot_ids, [])[0]);
+        if (d.node_principal) {
+            // A Network-paired machine rotates its credential with Network itself; Bot only asks it to.
+            if (d.revoked_at) fail(404, 'bot.device_not_found', 'no live device');
+            const sent = hub.sendToDevice(d.id, { type: 'rotate' });
+            return res.json({ device: domain.present.device(d), sent });
+        }
         const rotated = await domain.devices.rotate(req.params.id);
         res.json({ device: domain.present.device(rotated.device), credential: rotated.credential, publish_key: rotated.publish_key, ...(rotated.whip_url ? { whip_url: rotated.whip_url } : {}) });
     }));
@@ -156,7 +163,11 @@ function v1Router({ domain, apiAuth, limits, hub }) {
         if (!d) fail(404, 'bot.device_not_found', 'no such device');
         await owner(req, json(d.robot_ids, [])[0]);
         const revoked = await domain.devices.revoke(req.params.id);
+        // A Network-paired machine is revoked on Network too (Bot never binds that principal again either way).
+        let networkError = null;
+        if (d.node_principal) await domain.devices.revokeNode(d.node_principal).catch((e) => { networkError = e; });
         hub.closeDevice(req.params.id, 'revoked');   // revocation disconnects the device at once
+        if (networkError) throw networkError;          // revoked here; the owner retries for Network
         res.json({ device: domain.present.device(revoked) });
     }));
 
@@ -197,6 +208,17 @@ function v1Router({ domain, apiAuth, limits, hub }) {
             capabilities: req.body?.capabilities && typeof req.body.capabilities === 'object' ? req.body.capabilities : {}, name: req.body?.name || null,
         });
         res.status(201).json({ device_id: result.device.id, credential: result.credential, publish_key: result.publish_key, ...(result.whip_url ? { whip_url: result.whip_url } : {}), robot_id: json(result.device.robot_ids, [])[0], profile: result.profile });
+    }));
+
+    // ── Bootstrap of a Network-paired machine (its node token, once after pairing) ────────────────
+    // Binds the machine to its robot and issues its WHIP publish key; calling again re-issues the key (the
+    // old one stops working) for the same device. POST /pair's answer without a credential.
+    r.post('/devices/bind', pair, wrap(async (req, res) => {
+        if (req.principal.kind !== 'node') fail(401, 'bot.node_token_required', 'a Network node token (audience openvibe.bot) is required');
+        const device = await domain.devices.bindNode(req.principal.principal);
+        const issued = await domain.devices.issuePublishKey(device.id);
+        res.setHeader('Cache-Control', 'no-store');
+        res.status(201).json({ device_id: issued.device.id, publish_key: issued.publish_key, ...(issued.whip_url ? { whip_url: issued.whip_url } : {}), robot_id: json(issued.device.robot_ids, [])[0], profile: issued.profile });
     }));
 
     return r;
