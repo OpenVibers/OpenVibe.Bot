@@ -17,6 +17,7 @@ const { openDb, migrate } = require('./db');
 const { seedProfiles } = require('./profiles');
 const { createApp } = require('./app');
 const { createValkey } = require('openvibe-sdk/valkey');
+const { gracefulStop } = require('openvibe-sdk/service');
 const { createRegistry } = require('openvibe-shared/metrics');
 
 async function main() {
@@ -48,26 +49,37 @@ async function main() {
     server.keepAliveTimeout = 65_000;
     server.on('upgrade', (req, socket, head) => hub.handleUpgrade(req, socket, head));
 
-    let closing = false;
-    async function shutdown(signal) {
-        if (closing) return;
-        closing = true;
-        console.log(`[Bot] ${signal} — closing`);
-        setTimeout(() => process.exit(0), 5000).unref();
-        timers.forEach(clearInterval);
-        keys.stop();
-        await hub.close().catch(() => {});
-        await outbox.stop();
-        await new Promise((resolve) => server.close(resolve));
-        await db.close().catch(() => {});
-        if (valkey) await valkey.close().catch(() => {});
-        process.exit(0);
-    }
-    process.on('SIGTERM', async () => { await shutdown('SIGTERM'); });
-    process.on('SIGINT', async () => { await shutdown('SIGINT'); });
+    // systemd sends SIGTERM (SIGINT by hand); openvibe-sdk/service's gracefulStop takes the signal, runs the stop
+    // steps in order (nothing new starts), drains the HTTP server, runs the close steps, then exits. The stop steps
+    // keep the old hand-written shutdown's exact order, and hub.close stays a stop step BEFORE the drain: upgraded
+    // WebSocket sockets are not tracked by server.close. drainMs bounds the drain; deadlineMs 5000 keeps the old 5 s
+    // hard timer and deadlineExitCode 0 its exit 0. Bot's manifest declares no lifecycle.shutdown deadline, so the
+    // kit's 5000 ms default is the right value.
+    const { stop: shutdown } = gracefulStop({
+        name: 'Bot',
+        server,
+        drainMs: 4000,
+        deadlineMs: 5000,
+        deadlineExitCode: 0,
+        stop: [
+            () => timers.forEach(clearInterval),
+            () => keys.stop(),
+            () => hub.close().catch(() => {}),
+            () => outbox.stop(),
+        ],
+        close: [
+            () => db.close().catch(() => {}),
+            () => valkey && valkey.close().catch(() => {}),
+        ],
+    });
+    return { app, server, shutdown };
 }
 
-main().catch((e) => {
-    console.error(`[Bot] could not start: ${e.message}`);
-    process.exit(1);
-});
+if (require.main === module) {
+    main().catch((e) => {
+        console.error(`[Bot] could not start: ${e.message}`);
+        process.exit(1);
+    });
+}
+
+module.exports = { main };
