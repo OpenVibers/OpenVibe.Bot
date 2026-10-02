@@ -149,7 +149,7 @@ function v1Router({ domain, apiAuth, limits, hub }) {
         if (!d) fail(404, 'bot.device_not_found', 'no such device');
         await owner(req, json(d.robot_ids, [])[0]);
         const rotated = await domain.devices.rotate(req.params.id);
-        res.json({ device: domain.present.device(rotated.device), credential: rotated.credential, publish_key: rotated.publish_key, whip_url: rotated.whip_url });
+        res.json({ device: domain.present.device(rotated.device), credential: rotated.credential, publish_key: rotated.publish_key, ...(rotated.whip_url ? { whip_url: rotated.whip_url } : {}) });
     }));
     r.post('/devices/:id/revoke', manage, wrap(async (req, res) => {
         const d = await domain.devices.get(req.params.id);
@@ -196,7 +196,7 @@ function v1Router({ domain, apiAuth, limits, hub }) {
             device_kind: req.body?.device_kind || 'onboard', drivers: Array.isArray(req.body?.drivers) ? req.body.drivers : [],
             capabilities: req.body?.capabilities && typeof req.body.capabilities === 'object' ? req.body.capabilities : {}, name: req.body?.name || null,
         });
-        res.status(201).json({ device_id: result.device.id, credential: result.credential, publish_key: result.publish_key, whip_url: result.whip_url, robot_id: json(result.device.robot_ids, [])[0], profile: result.profile });
+        res.status(201).json({ device_id: result.device.id, credential: result.credential, publish_key: result.publish_key, ...(result.whip_url ? { whip_url: result.whip_url } : {}), robot_id: json(result.device.robot_ids, [])[0], profile: result.profile });
     }));
 
     return r;
