@@ -51,6 +51,17 @@ const { boot, check, done } = require('./helpers/app');
         dev.close();
     });
 
+    await check("a heartbeat's t comes back as heartbeat_ack.t too, next to echo and server_time", async () => {
+        const { robot, pairing } = await t.robot(alex);
+        const { dev } = await pairOverWs(robot.id, pairing.code);
+        dev.send({ type: 'heartbeat', t: 1738065600500 });
+        const ack = await dev.waitFor((m) => m.type === 'heartbeat_ack');
+        assert.strictEqual(ack.t, 1738065600500, 'OpenVibe.Node reads ack.t for its RTT');
+        assert.strictEqual(ack.echo, 1738065600500, 'the existing echo field is unchanged');
+        assert.ok(ack.server_time);
+        dev.close();
+    });
+
     await check('a device that stops heartbeating goes offline; bot.robot.offline is written', async () => {
         const { robot, pairing } = await t.robot(alex);
         const { dev, paired } = await pairOverWs(robot.id, pairing.code);
@@ -133,6 +144,37 @@ const { boot, check, done } = require('./helpers/app');
         assert.strictEqual(state.state.battery, 0.7);
         const audit = await t.domain.audit.list(robot.id, { limit: 5 });
         assert.ok(audit.some((a) => a.result === 'ack' && a.kind === 'drive' && a.latency_ms != null), 'the command was audited with its latency');
+        op.close(); dev.close();
+    });
+
+    await check('a Node-style battery object becomes a 0..1 fraction, raw frame kept in telemetry', async () => {
+        const { robot, pairing } = await t.robot(alex);
+        const { dev } = await pairOverWs(robot.id, pairing.code);
+        const op = await ownerJoined(robot.id);
+        dev.send({ type: 'telemetry', battery: { volts: 7.42, percent: 59 }, sensors: { ultrasonic: 118 } });
+        const state = await op.waitFor((m) => m.type === 'robot_state' && m.state && m.state.telemetry && m.state.telemetry.battery && m.state.telemetry.battery.percent === 59);
+        assert.strictEqual(state.state.battery, 0.59);
+        assert.deepStrictEqual(state.state.telemetry.battery, { volts: 7.42, percent: 59 }, 'the raw object is unchanged in telemetry');
+        op.close(); dev.close();
+    });
+
+    await check('a legacy fractional battery is passed through unchanged', async () => {
+        const { robot, pairing } = await t.robot(alex);
+        const { dev } = await pairOverWs(robot.id, pairing.code);
+        const op = await ownerJoined(robot.id);
+        dev.send({ type: 'telemetry', battery: 0.72, voltage: 7.41, sensors: { ultrasonic: 119 } });
+        const state = await op.waitFor((m) => m.type === 'robot_state' && m.state && m.state.telemetry && m.state.telemetry.battery === 0.72);
+        assert.strictEqual(state.state.battery, 0.72);
+        op.close(); dev.close();
+    });
+
+    await check('a battery object without a finite percent yields a null fraction', async () => {
+        const { robot, pairing } = await t.robot(alex);
+        const { dev } = await pairOverWs(robot.id, pairing.code);
+        const op = await ownerJoined(robot.id);
+        dev.send({ type: 'telemetry', battery: { volts: 7.4 }, sensors: { ultrasonic: 121 } });
+        const state = await op.waitFor((m) => m.type === 'robot_state' && m.state && m.state.telemetry && m.state.telemetry.sensors && m.state.telemetry.sensors.ultrasonic === 121);
+        assert.strictEqual(state.state.battery, null);
         op.close(); dev.close();
     });
 
