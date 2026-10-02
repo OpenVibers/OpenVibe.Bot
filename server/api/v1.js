@@ -9,7 +9,7 @@
  * | Method & path                                  | Capability (services)  | People                              |
  * |------------------------------------------------|------------------------|-------------------------------------|
  * | GET    /profiles, /profiles/:id                | — (public)             | anyone                              |
- * | GET    /robots                                 | bot.robot.read         | own robots (or ?owner=usr_… if the owner) |
+ * | GET    /robots                                 | bot.robot.read         | own robots (?owner= only themself)  |
  * | POST   /robots                                 | bot.robot.manage       | the owner (new robot + pairing code)|
  * | GET    /robots/:id                             | bot.robot.read         | a member (owner/operator/viewer)    |
  * | PATCH  /robots/:id                             | bot.robot.manage       | owner                               |
@@ -46,15 +46,27 @@ function v1Router({ domain, apiAuth, limits, hub }) {
 
     const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
     const me = (req) => (req.principal.kind === 'user' ? req.principal.subject : null);
+    /** Only a person or a service acts for an owner: no token → 401, any other kind (a node token) → 403. */
+    const fence = (req) => {
+        if (req.principal.kind === 'anonymous') fail(401, 'bot.sign_in', 'sign in to do that');
+        if (req.principal.kind !== 'user' && req.principal.kind !== 'service') fail(403, 'bot.forbidden', 'this token may not act for an owner');
+    };
+    /** A person acts only as themself: naming anyone else (owner / X-OV-Subject) is refused, never ignored. */
+    const self = (req, ...named) => {
+        const subject = req.principal.subject;
+        if (named.some((s) => s != null && s !== '' && s !== subject)) fail(403, 'bot.forbidden', 'you may only act for yourself');
+        return subject;
+    };
     /** The subject a call acts for: a person's own subject, or a service's X-OV-Subject / body.owner. */
     const actedFor = (req, extra) => {
-        if (req.principal.kind === 'user') return req.principal.subject;
-        const s = req.principal.subject || extra || req.headers['x-ov-subject'] || req.body?.owner;
+        fence(req);
+        if (req.principal.kind === 'user') return self(req, extra, req.headers['x-ov-subject'], req.body?.owner);
+        const s = extra || req.headers['x-ov-subject'] || req.body?.owner;
         if (!s) fail(422, 'bot.invalid_input', 'a service must act for a subject (X-OV-Subject or owner)');
         return userSubject(s, 'subject');
     };
     const requireManage = (req, extra) => { if (req.principal.kind === 'service' && !apiAuth.granted(req.principal, CAP.manage)) fail(403, 'capability.denied', `${CAP.manage} not granted`); return actedFor(req, extra); };
-    const requireRead = (req) => { if (req.principal.kind === 'service' && !apiAuth.granted(req.principal, CAP.read)) fail(403, 'capability.denied', `${CAP.read} not granted`); };
+    const requireRead = (req) => { fence(req); if (req.principal.kind === 'service' && !apiAuth.granted(req.principal, CAP.read)) fail(403, 'capability.denied', `${CAP.read} not granted`); };
     const requireControlCap = (req) => { if (req.principal.kind === 'service' && !apiAuth.granted(req.principal, CAP.control)) fail(403, 'capability.denied', `${CAP.control} not granted`); };
 
     async function member(req, robotId, roles = ['owner', 'operator', 'viewer']) {
@@ -87,9 +99,9 @@ function v1Router({ domain, apiAuth, limits, hub }) {
 
     // ── Robots ────────────────────────────────────────────────────────────────────────────────────
     r.get('/robots', wrap(async (req, res) => {
-        const ownerSubject = req.principal.kind === 'service' ? null : me(req);
-        if (req.principal.kind === 'service') requireRead(req);
-        const target = ownerSubject || (req.query.owner ? userSubject(req.query.owner, 'owner') : null);
+        requireRead(req);
+        const target = req.principal.kind === 'user' ? self(req, req.query.owner, req.headers['x-ov-subject'])
+            : (req.query.owner ? userSubject(req.query.owner, 'owner') : null);
         if (!target) fail(422, 'bot.invalid_input', 'owner is required');
         res.json({ robots: (await domain.robots.list(target)).map(domain.present.robot) });
     }));

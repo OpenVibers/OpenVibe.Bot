@@ -301,12 +301,15 @@ role that may drive (a queue robot's turn holder, not someone waiting) and an on
 
 Every error is RFC 9457 `application/problem+json`. Authenticate with a Network **user token**
 (`Authorization: Bearer`, people act on their own things) or a **service token** with the capability
-shown; a service acts for `X-OV-Subject` / the body's `owner`.
+shown; a service acts for `X-OV-Subject` / the body's `owner`. A person acts only as themself: naming
+anyone else (`?owner=`, the body's `owner`, `X-OV-Subject`) is `403 bot.forbidden`. Without a token, a
+route that acts for an owner answers `401 bot.sign_in`; a node token gets `403 bot.forbidden` everywhere
+but `POST /devices/bind`.
 
 | Method & path | Auth (capability) | Answer |
 |---|---|---|
 | `GET /profiles`, `GET /profiles/:id` | public | `{ profiles[] }` / `{ profile }` |
-| `GET /robots` | user, or `bot.robot.read` + `?owner=` | `{ robots[] }` |
+| `GET /robots` | user (own robots), or `bot.robot.read` + `?owner=` | `{ robots[] }` |
 | `POST /robots` | the owner, or `bot.robot.manage` | `201 { robot, pairing{code,expires_at,installer} }` |
 | `GET /robots/:id` | a member, or `bot.robot.read` | `{ robot, role }` |
 | `PATCH /robots/:id` | owner, or `bot.robot.manage` | `{ robot }`; new `limits` (including `allow`) re-send `config` to the connected device |
