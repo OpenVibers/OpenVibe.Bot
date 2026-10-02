@@ -76,6 +76,9 @@ function loadConfig(env = process.env) {
             offlineMisses: int(env.BOT_OFFLINE_MISSES, 2),
             offlineGraceMs: int(env.BOT_OFFLINE_GRACE_MS, 3000),
             rotateGraceMs: int(env.BOT_ROTATE_GRACE_MS, 60 * 1000),
+            // A Network-paired machine's node token lives 300 s; with no valid `reauth` within 330 s of the
+            // last token the socket closes 4002.
+            nodeReauthMs: int(env.BOT_NODE_REAUTH_MS, 330 * 1000),
         },
         // Control gate (ADR-043 decision 5/6/8). maxCommandMs is the absolute deadline cap; the queue is
         // the only way a stranger drives a robot.

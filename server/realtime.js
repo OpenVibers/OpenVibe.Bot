@@ -5,7 +5,8 @@
  *
  *   wss://…/device    one outbound connection per device. Auth by `Authorization: Bearer <credential>`
  *                     on the upgrade, never a query string; an unauthenticated socket may only send
- *                     `pair`. Heartbeats every 1 s; offline after 2 missed + 3 s grace. Commands are
+ *                     `pair`. A Network-paired machine presents its node token instead (bound on first
+ *                     use) and renews it with `reauth` before the 330 s deadline, else close 4002. Heartbeats every 1 s; offline after 2 missed + 3 s grace. Commands are
  *                     never queued for an offline device and never replayed after a reconnect.
  *   wss://…/control   a signed-in person (Network session cookie or Bearer) or a service token holding
  *                     `bot.robot.control` acting for `X-OV-Subject`. Joins a robot, sends commands; the
@@ -17,12 +18,14 @@
 const { WebSocketServer } = require('ws');
 const { capabilities, ids } = require('openvibe-contracts');
 const { json, iso, prefixedId } = require('./util');
-const { userPrincipal, verifyService, PRINCIPAL_SUB, decodePayload } = require('./api/auth');
+const { userPrincipal, verifyService, verifyNode, isNodeToken, PRINCIPAL_SUB, decodePayload } = require('./api/auth');
 const { getProfile } = require('./profiles');
 
 const OPEN = 1;
 const MAX_BACKLOG = 64;   // frames a device may send before its authentication completes
 const ACCESS_COOKIE = 'ov_token';
+const DEVICE_KINDS = new Set(['onboard', 'bridge', 'server']);
+const MAX_AGENT_VERSION = 40;
 
 function parseCookies(header) {
     const out = {};
@@ -79,7 +82,8 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         if (cred) {
             conn.backlog = [];
             try {
-                await authenticateDevice(conn, cred);
+                if (isNodeToken(cred)) await authenticateNode(conn, cred);
+                else await authenticateDevice(conn, cred);
                 sendHello(conn);
                 await sendConfig(conn);
                 await bringOnline(conn);
@@ -110,6 +114,48 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         const device = await domain.devices.byCredential(credential);
         if (!device) throw new Error('unknown or revoked credential');
         attachDevice(conn, device);
+    }
+
+    /** A node token: verified offline, then bound to its device (created on first use from Network's record). */
+    async function authenticateNode(conn, nodeToken) {
+        const r = verifyNode(nodeToken, { publicKey: keys.get(), issuer: config.network.issuer, audience: config.audience });
+        if (!r.ok) throw new Error(`node token refused: ${r.code}`);
+        const device = await domain.devices.bindNode(r.principal);
+        conn.node = { principal: r.principal, reauthBy: now() + config.device.nodeReauthMs };
+        attachDevice(conn, device);
+    }
+    /** `reauth`: a fresh node token for the same principal moves the deadline; anything else leaves it. */
+    function onReauth(conn, msg) {
+        const r = verifyNode(typeof msg.token === 'string' ? msg.token : '', { publicKey: keys.get(), issuer: config.network.issuer, audience: config.audience });
+        if (!r.ok) return sendError(conn, 'bot.reauth_refused', r.reason);
+        if (r.principal !== conn.node.principal) return sendError(conn, 'bot.reauth_refused', 'the token is for another machine');
+        conn.node.reauthBy = now() + config.device.nodeReauthMs;
+        return undefined;
+    }
+
+    /**
+     * `status` of a Network-paired device: device_kind, drivers, capabilities and agent_version are persisted
+     * when they differ from the row. Any invalid one → bot.bad_frame and the row unchanged.
+     */
+    async function persistDeclared(conn, msg) {
+        const d = conn.device;
+        const has = (k) => msg[k] !== undefined;
+        if ((has('device_kind') && !DEVICE_KINDS.has(msg.device_kind))
+            || (has('drivers') && !(Array.isArray(msg.drivers) && msg.drivers.every((x) => typeof x === 'string')))
+            || (has('capabilities') && !(msg.capabilities && typeof msg.capabilities === 'object' && !Array.isArray(msg.capabilities)))
+            || (has('agent_version') && !(typeof msg.agent_version === 'string' && msg.agent_version.length <= MAX_AGENT_VERSION))) {
+            return sendError(conn, 'bot.bad_frame', `device_kind must be one of ${[...DEVICE_KINDS].join('|')}, drivers an array of strings, capabilities an object, agent_version a string of at most ${MAX_AGENT_VERSION}`);
+        }
+        const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+        const change = {};
+        if (has('device_kind') && msg.device_kind !== d.kind) change.kind = msg.device_kind;
+        if (has('drivers') && !same(msg.drivers, json(d.drivers, []))) change.drivers = msg.drivers;
+        if (has('capabilities') && !same(msg.capabilities, json(d.capabilities, {}))) change.capabilities = msg.capabilities;
+        if (has('agent_version') && msg.agent_version !== (d.agent_version ?? null)) change.agent_version = msg.agent_version;
+        if (!Object.keys(change).length) return undefined;
+        const updated = await domain.devices.updateDeclared(d.id, change);
+        if (updated) conn.device = updated;
+        return undefined;
     }
 
     function attachDevice(conn, device) {
@@ -183,7 +229,11 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
                 return sendFrame(conn, 'heartbeat_ack', ack);
             }
             case 'telemetry': return onTelemetry(conn, msg);
-            case 'status': conn.status = msg; for (const r of deviceRobotIds(conn.device)) broadcast(r); return undefined;
+            case 'status':
+                conn.status = msg;
+                for (const r of deviceRobotIds(conn.device)) broadcast(r);
+                return conn.device.node_principal ? persistDeclared(conn, msg) : undefined;
+            case 'reauth': if (conn.node) return onReauth(conn, msg); return sendError(conn, 'bot.unknown_message', `unknown type ${msg.type}`);
             case 'ack': case 'nack': return onAck(conn, msg);
             case 'estop_state': return onEstopState(conn, msg);
             default: return sendError(conn, 'bot.unknown_message', `unknown type ${msg.type}`);
@@ -446,6 +496,12 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
 
     function checkHeartbeats() {
         for (const conn of [...deviceConns.values()]) {
+            if (conn.node && now() > conn.node.reauthBy) {
+                // The node token lapsed with no valid reauth: the machine must authenticate again.
+                try { conn.ws.close(4002, 'reauth required'); } catch { /* gone */ }
+                dropDevice(conn);
+                continue;
+            }
             if (conn.online && now() - conn.lastHeartbeat > offlineAfterMs) {
                 conn.online = false;
                 domain.devices.setOnline(conn.device, false).catch((e) => log.warn(`[Bot] offline event: ${e.message}`));

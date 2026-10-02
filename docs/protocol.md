@@ -29,6 +29,17 @@ header; such a socket may only send `pair` until it is answered (anything else �
 `bot.not_paired`). One socket per device: a second connection replaces the first (close code **4000**),
 so a reconnecting agent cannot be shadowed by a stale socket.
 
+**A Network-paired machine** (a node principal `nod_…`, paired on OpenVibe.Network for one of its
+owner's robots) carries `Authorization: Bearer <node token>` instead: a Network JWT with `actor_type`
+`node`, `sub` `node:nod_…` and audience `openvibe.bot`. Bot binds it to a device on first use (from
+Network's record: the robot the machine was paired for, which must be one of the principal's owner's
+robots, and the principal must be `active`), then speaks first exactly as for a credential — `hello`,
+`config` — with **no** `paired` frame. A refused node token, or a principal Bot will not bind (revoked,
+paired for another service, for someone else's robot, or revoked here), closes the socket with **4002**.
+A node token lives 300 s: the machine sends `reauth` with a fresh one before it expires; with no valid
+`reauth` within 330 s of the last token Bot closes the socket with **4002**. Any other Bearer is a device
+credential, as above.
+
 Frames sent while authentication is still in progress — right after an upgrade that carries the
 header, or after `pair` until it is answered — are **kept** and handled in arrival order once it
 completes (after `hello` and `config`), so a device may send its first `status` and `estop_state`
@@ -46,6 +57,7 @@ At most 64 frames wait; any more are answered `error` `bot.not_ready`.
 | `command` | `id, kind, value, deadline_ms, operator{subject,role}, robot_id` | an operator's command passed the gate |
 | `estop` | `latched, by, at` | the e-stop latched or the owner cleared it |
 | `heartbeat_ack` | `echo, t, server_time` | the answer to `heartbeat`; `echo` is the heartbeat's `t` (or `null`), so the device computes RTT, and `t` repeats a finite `t` (device ms) unchanged — the field OpenVibe.Node reads. The envelope `seq` is Bot's own counter and never echoes the device's |
+| `rotate` | — | the owner forced a rotation of a Network-paired machine (`POST /devices/:id/rotate`); the machine rotates its credential with Network itself |
 | `error` | `code, detail` | a frame the server refused |
 
 ### Device → server
@@ -55,7 +67,8 @@ At most 64 frames wait; any more are answered `error` `bot.not_ready`.
 | `pair` | `robot, code, agent_version, device_kind, drivers[], capabilities{}, name` | the one-time pairing code; `robot` (from the installer command / QR) attributes a wrong try to that robot's code |
 | `heartbeat` | `t, rtt_ms` | every `heartbeat_ms` (1 s); `t` is the device's send time in unix ms (a finite number), returned as both `heartbeat_ack.echo` and `heartbeat_ack.t`; `rtt_ms` is the device's own measured latency |
 | `telemetry` | `battery, voltage, sensors{}, events[]?, …` | at most 2 Hz; extra frames are dropped — except a frame with a non-empty `events` array (a fault, a bump, low battery), which is always delivered and does not count against the samples' window. `battery` is either a 0..1 fraction or an object `{volts, percent}` with `percent` 0..100 (as OpenVibe.Node sends it); `robot_state.battery` is always the fraction 0..1 (or `null`), while `robot_state.telemetry` keeps the raw frame |
-| `status` | `firmware, capabilities, faults[], estop_latched` | on connect and on change |
+| `status` | `firmware, capabilities, faults[], estop_latched, device_kind?, drivers[]?, agent_version?` | on connect and on change. See below |
+| `reauth` | `token` | a Network-paired machine only: a fresh node token for the same principal, before the last one expires (300 s); a refused one is answered `error` `bot.reauth_refused` and moves nothing |
 | `ack` | `id` | a command ran |
 | `nack` | `id, fault_code` | a command was refused on the device |
 | `estop_state` | `latched, by, at, robot_id?` | the device's own latch, a **report**; `robot_id` omitted = every robot the device serves. See below |
@@ -66,6 +79,13 @@ kinds its robot's profile declares (§1.1), with values in the shapes and ranges
 `actuator`, `ptz`): the device **must** stop the motors at that instant if no newer command arrived, and
 on every disconnect or crash path, without asking the network. `halt` (value `{}`, no deadline) stops
 everything at once and passes the gate even while the e-stop is latched.
+
+`status` of a Network-paired machine also says what it is: `device_kind` (`onboard` \| `bridge` \|
+`server`), `drivers` (an array of strings), `capabilities` (an object) and `agent_version` (a string of at
+most 40 characters), each optional. Bot stores them on the device row when they differ from it (the row
+starts as `onboard`, no drivers, `{}`, no version); if any of them is invalid the frame is answered `error`
+`bot.bad_frame` and the row is left unchanged. For a credential device these fields are not stored: what
+it declared at pairing stays.
 
 `config.limits` are the **effective** limits — the owner's (`PATCH /robots/:id` `limits`) clamped by the
 profile's — as `{ max_speed, max_turn, max_command_ms, heartbeat_ms }`, the same numbers the gate clamps
@@ -296,8 +316,9 @@ shown; a service acts for `X-OV-Subject` / the body's `owner`.
 | `POST /robots/:id/operators` | owner, or `bot.robot.manage` | `201 { operators[] }` |
 | `DELETE /robots/:id/operators/:subject` | owner, or `bot.robot.manage` | `{ operators[] }` |
 | `GET /robots/:id/devices` | member, or `bot.robot.read` | `{ devices[] }` (no hashes, `online`) |
-| `POST /devices/:id/rotate` | the robot's owner, `bot.device.connect` | `{ device, credential, publish_key, whip_url }` (once) |
-| `POST /devices/:id/revoke` | the robot's owner, `bot.device.connect` | `{ device }`; the socket closes at once |
+| `POST /devices/:id/rotate` | the robot's owner, `bot.device.connect` | `{ device, credential, publish_key, whip_url }` (once); for a Network-paired machine `{ device, sent }` — the machine is sent `rotate`, no credential is answered |
+| `POST /devices/:id/revoke` | the robot's owner, `bot.device.connect` | `{ device }`; the socket closes at once. A Network-paired machine's principal is revoked on Network too (`503 bot.network_unavailable` if Network did not answer: revoked here, retry) and never binds again |
+| `POST /devices/bind` | a Network node token (audience `openvibe.bot`), no body | `201 { device_id, publish_key, whip_url, robot_id, profile }` — `POST /pair`'s answer without `credential`; again → the same device and a new publish key (the old one stops working). Refused: `401 bot.node_token_required`, `403 bot.node_not_bound` |
 | `POST /robots/:id/estop` | owner/operator, `bot.robot.control` | `{ robot }` |
 | `POST /robots/:id/estop/clear` | **owner only**, `bot.robot.control` | `{ robot }` |
 | `GET /robots/:id/audit?limit=&before=` | owner, or `bot.robot.read` | `{ audit[], next_before }` (newest first) |
