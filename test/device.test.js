@@ -43,9 +43,9 @@ const { boot, check, done } = require('./helpers/app');
     await check('a paired device gets hello + config; heartbeats are acknowledged with the RTT', async () => {
         const { robot, pairing } = await t.robot(alex);
         const { dev, paired } = await pairOverWs(robot.id, pairing.code);
-        dev.send({ type: 'heartbeat', seq: 1, rtt_ms: 42 });
+        dev.send({ type: 'heartbeat', t: 1738065600500, rtt_ms: 42 });
         const ack = await dev.waitFor((m) => m.type === 'heartbeat_ack');
-        assert.strictEqual(ack.seq, 1);
+        assert.strictEqual(ack.echo, 1738065600500);
         assert.ok(ack.server_time);
         assert.strictEqual(t.hub.deviceState(paired.device_id).rtt_ms, 42);
         dev.close();

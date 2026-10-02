@@ -21,6 +21,7 @@ const { userPrincipal, verifyService, PRINCIPAL_SUB, decodePayload } = require('
 const { getProfile } = require('./profiles');
 
 const OPEN = 1;
+const MAX_BACKLOG = 64;   // frames a device may send before its authentication completes
 const ACCESS_COOKIE = 'ov_token';
 
 function parseCookies(header) {
@@ -66,20 +67,43 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
 
     // ── Device side ───────────────────────────────────────────────────────────────────────────────
     async function onDeviceSocket(ws, req) {
-        const conn = { ws, seq: 0, pending: true, device: null, online: false, rttMs: null, telemetry: null, status: null, lastHeartbeat: now(), lastTelemetry: 0, sessionId: prefixedId('sess', now()) };
+        // backlog: while authentication (credential or pair) is in progress, frames wait here and are handled
+        // in order once it resolves, so a device's first status/estop_state is never lost or answered not_paired.
+        // deviceEstop: robot_id → the device's own last estop_state report (a report only, never a clear).
+        const conn = { ws, seq: 0, pending: true, device: null, online: false, rttMs: null, telemetry: null, status: null, deviceEstop: new Map(), backlog: null, lastHeartbeat: now(), lastTelemetry: 0, sessionId: prefixedId('sess', now()) };
         ws.conn = conn;
-        ws.on('message', (raw) => handleDeviceMessage(conn, raw).catch((e) => { log.warn(`[Bot] device ${conn.device ? conn.device.id : '?'}: ${e.message}`); sendError(conn, e.code || 'bot.internal', e.detail || e.message); }));
-        ws.on('close', () => dropDevice(conn));
+        ws.on('message', (raw) => onDeviceFrame(conn, raw));
+        ws.on('close', () => { conn.backlog = null; dropDevice(conn); });
         ws.on('error', () => { /* the close event does the work */ });
         const cred = bearer(req);   // the query string is never read
         if (cred) {
+            conn.backlog = [];
             try {
                 await authenticateDevice(conn, cred);
                 sendHello(conn);
                 await sendConfig(conn);
                 await bringOnline(conn);
-            } catch (e) { log.warn(`[Bot] device auth: ${e.message}`); ws.close(4002, 'invalid credential'); }
+            } catch (e) { log.warn(`[Bot] device auth: ${e.message}`); conn.backlog = null; ws.close(4002, 'invalid credential'); return; }
+            await drainBacklog(conn);
         }
+    }
+
+    function deviceFailed(conn, e) {
+        log.warn(`[Bot] device ${conn.device ? conn.device.id : '?'}: ${e.message}`);
+        sendError(conn, e.code || 'bot.internal', e.detail || e.message);
+    }
+    function onDeviceFrame(conn, raw) {
+        if (!conn.backlog) return handleDeviceMessage(conn, raw).catch((e) => deviceFailed(conn, e));
+        if (conn.backlog.length < MAX_BACKLOG) return conn.backlog.push(raw);
+        return sendError(conn, 'bot.not_ready', 'too many frames before authentication completed');
+    }
+    /** Handles the frames that arrived during authentication, in arrival order (later ones join the queue). */
+    async function drainBacklog(conn) {
+        while (conn.backlog && conn.backlog.length) {
+            const raw = conn.backlog.shift();
+            await handleDeviceMessage(conn, raw).catch((e) => deviceFailed(conn, e));
+        }
+        conn.backlog = null;
     }
 
     async function authenticateDevice(conn, credential) {
@@ -147,7 +171,8 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         switch (msg.type) {
             case 'heartbeat':
                 if (Number.isFinite(msg.rtt_ms)) conn.rttMs = Math.round(msg.rtt_ms);
-                return sendFrame(conn, 'heartbeat_ack', { seq: msg.seq, server_time: iso(now()) });
+                // `echo` carries the device's `t` back for its RTT; the envelope `seq` stays Bot's own counter.
+                return sendFrame(conn, 'heartbeat_ack', { echo: msg.t !== undefined ? msg.t : null, server_time: iso(now()) });
             case 'telemetry': return onTelemetry(conn, msg);
             case 'status': conn.status = msg; for (const r of deviceRobotIds(conn.device)) broadcast(r); return undefined;
             case 'ack': case 'nack': return onAck(conn, msg);
@@ -157,23 +182,29 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     }
 
     async function handlePair(conn, msg) {
-        const r = await domain.pairing.redeem({
-            robot: msg.robot || null, code: msg.code, agent_version: msg.agent_version || null,
-            device_kind: msg.device_kind || 'onboard', drivers: Array.isArray(msg.drivers) ? msg.drivers : [],
-            capabilities: msg.capabilities && typeof msg.capabilities === 'object' ? msg.capabilities : {}, name: msg.name || null,
-        });
-        attachDevice(conn, r.device);
-        sendFrame(conn, 'paired', {
-            device_id: r.device.id, credential: r.credential, publish_key: r.publish_key, whip_url: r.whip_url,
-            robot_ids: deviceRobotIds(r.device), profile_id: r.profile ? r.profile.id : null, profile: r.profile,
-        });
-        sendHello(conn);
-        await sendConfig(conn);
-        await bringOnline(conn);
+        conn.backlog = [];
+        try {
+            const r = await domain.pairing.redeem({
+                robot: msg.robot || null, code: msg.code, agent_version: msg.agent_version || null,
+                device_kind: msg.device_kind || 'onboard', drivers: Array.isArray(msg.drivers) ? msg.drivers : [],
+                capabilities: msg.capabilities && typeof msg.capabilities === 'object' ? msg.capabilities : {}, name: msg.name || null,
+            });
+            attachDevice(conn, r.device);
+            sendFrame(conn, 'paired', {
+                device_id: r.device.id, credential: r.credential, publish_key: r.publish_key, whip_url: r.whip_url,
+                robot_ids: deviceRobotIds(r.device), profile_id: r.profile ? r.profile.id : null, profile: r.profile,
+            });
+            sendHello(conn);
+            await sendConfig(conn);
+            await bringOnline(conn);
+        } catch (e) { deviceFailed(conn, e); }
+        await drainBacklog(conn);   // after a failed pair the socket is still unpaired and the queue is answered as such
     }
 
     async function onTelemetry(conn, msg) {
-        if (now() - conn.lastTelemetry < Math.floor(1000 / config.control.telemetryHz)) return;   // ≤ 2 Hz
+        // ≤ 2 Hz, except a frame carrying events (a fault, a bump, a low battery), which is never dropped
+        const urgent = Array.isArray(msg.events) && msg.events.length > 0;
+        if (!urgent && now() - conn.lastTelemetry < Math.floor(1000 / config.control.telemetryHz)) return;
         conn.lastTelemetry = now();
         conn.telemetry = msg;
         for (const robotId of deviceRobotIds(conn.device)) broadcast(robotId);
@@ -193,12 +224,21 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         sendFrame(p.conn, 'command_result', { id: p.opId, result, reason: msg.fault_code || null, latency_ms: latency });
     }
 
+    // A device reports its own latch. It may latch a robot it is attached to; it never clears one — latched:false
+    // is recorded as the device's report only, and the owner's latch stands until the owner clears it.
     async function onEstopState(conn, msg) {
-        const robotIds = msg.robot_id ? [msg.robot_id] : deviceRobotIds(conn.device);
-        for (const robotId of robotIds) {
-            const robot = await domain.robots.get(robotId);
-            if (!robot || !!robot.estop_latched === !!msg.latched) continue;
-            await domain.estop.set(robotId, { latched: !!msg.latched, by: 'device', principalKind: 'device' });
+        const attached = deviceRobotIds(conn.device);
+        const latched = !!msg.latched;
+        if (msg.robot_id != null && !attached.includes(msg.robot_id)) {
+            await domain.audit.record({ robotId: String(msg.robot_id).slice(0, 64), deviceId: conn.device.id, operatorKind: 'device', kind: 'estop_state', value: { latched }, result: 'refused', reason: 'bot.forbidden' });
+            return sendError(conn, 'bot.forbidden', 'this device is not attached to that robot');
+        }
+        for (const robotId of msg.robot_id != null ? [msg.robot_id] : attached) {
+            conn.deviceEstop.set(robotId, { latched, at: iso(now()) });
+            if (latched) {
+                const robot = await domain.robots.get(robotId);
+                if (robot && !robot.estop_latched) await domain.estop.set(robotId, { latched: true, by: conn.device.id, principalKind: 'device' });
+            }
             broadcast(robotId);
         }
     }
@@ -351,16 +391,23 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     function deviceState(deviceId) { const c = deviceConns.get(deviceId); return c ? { online: c.online, rtt_ms: c.rttMs, telemetry: c.telemetry, status: c.status } : { online: false, rtt_ms: null, telemetry: null, status: null }; }
 
     async function robotState(robotId, subjectForQueue = null) {
-        const robot = await domain.robots.get(robotId);
+        // The device's state is read before the first await, so each broadcast carries the frame that caused it
+        // (two telemetry frames with events back to back are both delivered, not the second one twice).
         const conn = deviceForRobot(robotId);
         const online = !!(conn && conn.online);
+        const telemetry = online && conn.telemetry ? conn.telemetry : null;
+        const live = {
+            latency_ms: online ? (conn.rttMs != null ? conn.rttMs : null) : null,
+            battery: telemetry ? (telemetry.battery != null ? telemetry.battery : null) : null,
+            telemetry,
+            status: online && conn.status ? conn.status : null,
+            device_estop: online ? (conn.deviceEstop.get(robotId) || null) : null,
+        };
+        const robot = await domain.robots.get(robotId);
         const state = {
             robot_id: robotId, online,
             estop: robot ? { latched: !!robot.estop_latched, by: robot.estop_by || null, at: robot.estop_at ? iso(new Date(robot.estop_at).getTime()) : null } : null,
-            latency_ms: online ? (conn.rttMs != null ? conn.rttMs : null) : null,
-            battery: online && conn.telemetry ? (conn.telemetry.battery != null ? conn.telemetry.battery : null) : null,
-            telemetry: online && conn.telemetry ? conn.telemetry : null,
-            status: online && conn.status ? conn.status : null,
+            ...live,
             queue: null,
         };
         if (robot && robot.access_policy === 'queue') state.queue = await domain.queue.state(robotId, subjectForQueue);

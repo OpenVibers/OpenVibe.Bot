@@ -274,7 +274,13 @@ function createDomain({ db, config, outbox, link = null, now = () => Date.now(),
     }
 
     // ── E-stop (ADR-043 decision 6) ───────────────────────────────────────────────────────────────
+    // `estop.set` only latches: a clear goes through clearEstop (owner only), so no device report and no other
+    // caller can ever lift an owner's latch.
     async function setEstop(robotId, { latched, by, principalKind = 'device' }) {
+        if (!latched) fail(403, 'bot.forbidden', 'only the owner clears the e-stop');
+        return writeEstop(robotId, { latched: true, by, principalKind });
+    }
+    async function writeEstop(robotId, { latched, by, principalKind }) {
         const robot = await getRobot(robotId);
         if (!robot) fail(404, 'bot.robot_not_found', 'no such robot');
         const at = iso(now());
@@ -291,7 +297,7 @@ function createDomain({ db, config, outbox, link = null, now = () => Date.now(),
         const robot = await getRobot(robotId);
         if (!robot) fail(404, 'bot.robot_not_found', 'no such robot');
         if (robot.owner_subject !== owner) fail(403, 'bot.forbidden', 'only the owner clears the e-stop');
-        return setEstop(robotId, { latched: false, by: owner, principalKind: 'user' });
+        return writeEstop(robotId, { latched: false, by: owner, principalKind: 'user' });
     }
 
     // ── Turn queue (ADR-043 decision 8) ───────────────────────────────────────────────────────────
