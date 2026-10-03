@@ -1,0 +1,41 @@
+{
+  "repository": "OpenVibers/OpenVibe.Bot",
+  "stage": "alpha",
+  "code": true,
+  "runtime": "node 22, express 4, ws; PostgreSQL 18 via openvibe-sdk/db (pg, or embedded PGlite in tests); Valkey optional; no build step",
+  "port": 4630,
+  "domain": "openvibe.bot (www -> apex; /device and /control WebSockets; /install)",
+  "contracts": "openvibe-contracts v0.85.0",
+  "packages": [
+    "openvibe-contracts v0.85.0",
+    "openvibe-sdk v0.26.0",
+    "openvibe-shared v2.5.0"
+  ],
+  "capabilities": [
+    "bot.robot.read",
+    "bot.robot.manage",
+    "bot.robot.control",
+    "bot.device.connect"
+  ],
+  "events": [
+    "bot.robot.online",
+    "bot.robot.offline",
+    "bot.estop.set",
+    "bot.estop.cleared",
+    "bot.command.refused"
+  ],
+  "deployed": true,
+  "deployment": "Production at https://openvibe.bot on openvibe-ovh since 2026-10-02: release layout /opt/openvibe.bot, unit openvibe-bot.service (WorkingDirectory /opt/openvibe.bot, EnvironmentFile /etc/openvibe/bot.env, PORT 4630, TimeoutStopSec 10), behind the nginx vhost deploy/nginx/openvibe.bot.conf, deployed with `ov deploy bot`. Liveness /api/health and readiness /api/ready are loopback-only.",
+  "features": [
+    "device WebSocket /device: one outbound socket per machine, credential or Network node token, heartbeat and telemetry, commands never replayed after a reconnect",
+    "operator WebSocket /control and the REST API (/api/v1) over one command gate: roles, per-robot limits and allowlists, cooldowns and the turn budget",
+    "pairing with one-time codes, minted by Bot or delegated to OpenVibe.Network (BOT_PAIRING_AUTHORITY=network); a node machine binds on first use and reauths every 300 s",
+    "device credentials hashed at rest and rotatable; revoke closes the socket at once and revokes the Network principal for a node machine",
+    "profiles instead of per-robot rows: adeept.adr036 (+ mecanum variant), cozmo, camera.onvif, sim.rover, seeded from server/profiles/*.json",
+    "a latched e-stop only the owner clears, with halt always allowed, and a device-side deadman deadline on the motion kinds",
+    "command audit kept 30 days, and the bot.robot.online/offline, bot.estop.set/cleared and bot.command.refused outbox events",
+    "public robot-profile catalogue (GET /profiles, /profiles/:id); robots are private to their owner, with public control only as a timed turn queue",
+    "per-actor limits on capability-boundary writes (openvibe-sdk/limits; shared through Valkey when VALKEY_URL is set)"
+  ],
+  "updated": "2026-10-03"
+}
