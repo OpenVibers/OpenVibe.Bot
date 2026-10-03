@@ -94,17 +94,18 @@ const { boot, check, done } = require('./helpers/app');
         const { robot, pairing } = await t.robot(alex, { limits: { max_command_ms: 200 } });
         const { dev } = await pairOverWs(robot.id, pairing.code);
         const op = await ownerJoined(robot.id);
-        const before = Date.now() + t.clock.offset;
         op.send({ type: 'command', id: 'd1', kind: 'drive', value: { throttle: 1, steer: 0 }, ms: 5000 });
         const c1 = await dev.waitFor((m) => m.type === 'command' && m.ref === 'd1');
-        const d1 = c1.deadline_ms - before;
-        assert.ok(d1 > 100 && d1 <= 200 + 60, `capped to <=200 (was ${d1})`);
+        // Both fields are stamped by the server, so a loaded client cannot inflate the span; a client-side
+        // Date.now() would add the send/schedule delay and make this flaky on a busy machine.
+        const d1 = c1.deadline_ms - c1.ts;
+        assert.ok(d1 > 100 && d1 <= 200, `capped to <=200 (was ${d1})`);
         dev.send({ type: 'ack', id: c1.id });
         await op.waitFor((m) => m.type === 'command_result' && m.id === 'd1');
-        const before2 = Date.now() + t.clock.offset;
         op.send({ type: 'command', id: 'd2', kind: 'drive', value: { throttle: 1, steer: 0 }, ms: 100 });
         const c2 = await dev.waitFor((m) => m.type === 'command' && m.ref === 'd2');
-        assert.ok(c2.deadline_ms - before2 <= 100 + 60, `a shorter request is honoured (was ${c2.deadline_ms - before2})`);
+        const d2 = c2.deadline_ms - c2.ts;
+        assert.ok(d2 > 0 && d2 <= 100, `a shorter request is honoured (was ${d2})`);
         dev.send({ type: 'ack', id: c2.id });
         op.close(); dev.close();
     });
