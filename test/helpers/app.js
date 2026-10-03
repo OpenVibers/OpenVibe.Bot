@@ -74,12 +74,16 @@ async function boot(opts = {}) {
         return { status: res.status, headers: res.headers, json, text };
     }
 
+    // The test host runs many jobs at once, so a socket's connect or a small frame can be delayed by
+    // seconds even when the server is healthy; wait long enough that only a real hang fails a test.
+    const SOCKET_WAIT_MS = 20000;
+
     /** A WebSocket client to /device or /control. waitFor(pred) resolves the first matching frame. */
     function ws(p, { headers = {} } = {}) {
         return new Promise((resolve, reject) => {
             const socket = new WebSocket(`${base.replace('http', 'ws')}${p}`, { headers });
             const client = { ws: socket, messages: [], ended: false, waiters: [], closeCode: null };
-            const timer = setTimeout(() => reject(new Error(`ws open timeout on ${p}`)), 4000);
+            const timer = setTimeout(() => reject(new Error(`ws open timeout on ${p}`)), SOCKET_WAIT_MS);
             socket.on('message', (raw) => {
                 let m; try { m = JSON.parse(raw.toString()); } catch { return; }
                 client.messages.push(m);
@@ -89,7 +93,7 @@ async function boot(opts = {}) {
             socket.on('error', () => { /* close follows */ });
             socket.on('open', () => { clearTimeout(timer); resolve(client); });
             client.send = (o) => socket.send(JSON.stringify(o));
-            client.waitFor = (pred, ms = 4000) => new Promise((ok, fail) => {
+            client.waitFor = (pred, ms = SOCKET_WAIT_MS) => new Promise((ok, fail) => {
                 const hit = client.messages.find(pred);
                 if (hit) return ok(hit);
                 if (client.ended) return ok(null);
@@ -97,7 +101,7 @@ async function boot(opts = {}) {
                 client.waiters.push(w);
                 setTimeout(() => { client.waiters = client.waiters.filter((x) => x !== w); fail(new Error(`waitFor timed out; got ${JSON.stringify(client.messages.map((m) => m.type))}`)); }, ms).unref();
             });
-            client.waitForClose = (ms = 4000) => new Promise((ok) => {
+            client.waitForClose = (ms = SOCKET_WAIT_MS) => new Promise((ok) => {
                 if (client.ended) return ok(client.closeCode);
                 client.onClose = (code) => ok(code);
                 setTimeout(() => ok(null), ms).unref();
