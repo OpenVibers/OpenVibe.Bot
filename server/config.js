@@ -110,8 +110,9 @@ function loadConfig(env = process.env) {
             intervalMs: int(env.BOT_JOBS_INTERVAL_MS, 5000),
         },
         // Video: a device publishes its camera to the WHIP ingest at <whipBase>/<its publish key>, returned
-        // as `whip_url` by the pairing and rotation answers only. Unset or empty (the default) means no
-        // whip_url at all, so devices pair without video until the operator names an ingest base.
+        // as `whip_url` by the pairing and rotation answers only. The O30 value is OpenRe.Stream's WHIP
+        // ingest, https://ingest.openre.stream/whip. Unset or empty (the default) means no whip_url at all,
+        // so devices pair without video until the operator names an ingest base.
         media: {
             whipBase: trim(env.BOT_WHIP_BASE || ''),
         },
