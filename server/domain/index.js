@@ -48,6 +48,11 @@ function newCode() {
 const formatCode = (s) => `${s.slice(0, 4)}-${s.slice(4)}`;
 const isCodeShape = (s) => /^[0-9A-HJKMNP-TV-Z]{8}$/.test(s);
 
+// The installer driver a robot's profile needs (OpenVibe.Node install/install.sh --driver). Simulated,
+// camera and unknown profiles get `none`, the dry-run plugin, which is also the installer's default.
+const DRIVER_BY_PROFILE = Object.freeze({ 'adeept.adr036': 'adeept', 'adeept.adr036.mecanum': 'adeept-mecanum', cozmo: 'cozmo' });
+const driverForProfile = (profileId) => (Object.hasOwn(DRIVER_BY_PROFILE, profileId) ? DRIVER_BY_PROFILE[profileId] : 'none');
+
 const clampNum = (v, lo, hi, d = 0) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
 
 // Scientific pitch: 'A4' is 440 Hz; a sharp (#) or flat (b) after the letter.
@@ -116,7 +121,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, now = () 
         const id = prefixedId('rob', now());
         const at = iso(now());
         // A Network-minted code comes first, so a Network that does not answer leaves no robot behind.
-        const minted = networkPairing() ? await mintOnNetwork(id, owner, installerUrl) : null;
+        const minted = networkPairing() ? await mintOnNetwork(id, owner, installerUrl, driverForProfile(profile.id)) : null;
         const created = await db.tx(async (t) => {
             await t.query(`INSERT INTO robots (id, owner_subject, name, profile_id, profile_version, access_policy, limits, created_at, updated_at)
                 VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $8)`,
@@ -124,7 +129,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, now = () 
             await t.query(`INSERT INTO robot_operators (robot_id, subject, role, added_by, created_at) VALUES ($1, $2, 'owner', $2, $3)`, [id, owner, at]);
             return t.maybe('SELECT * FROM robots WHERE id = $1', [id]);
         });
-        const pairing = minted || await createPairingCode(id, owner, installerUrl);
+        const pairing = minted || await createPairingCode(id, owner, installerUrl, created);
         return { robot: created, pairing };
     }
     function cleanLimits(limits = {}) {
@@ -158,8 +163,10 @@ function createDomain({ db, config, outbox, link = null, nodes = null, now = () 
 
     // ── Pairing (ADR-043 decision 2) ──────────────────────────────────────────────────────────────
     const networkPairing = () => config.pairing.authority === 'network';
-    async function createPairingCode(robotId, createdBy, installerUrl) {
-        if (networkPairing()) return mintOnNetwork(robotId, (await getRobot(robotId)).owner_subject, installerUrl);
+    async function createPairingCode(robotId, createdBy, installerUrl, robotRow = null) {
+        const robot = robotRow || await getRobot(robotId);
+        const driver = driverForProfile(robot && robot.profile_id);
+        if (networkPairing()) return mintOnNetwork(robotId, robot.owner_subject, installerUrl, driver);
         const code = newCode();
         const at = iso(now());
         const expires = iso(now() + config.pairing.ttlMs);
@@ -169,25 +176,27 @@ function createDomain({ db, config, outbox, link = null, nodes = null, now = () 
             await t.query('INSERT INTO pairing_codes (id, robot_id, code_hash, created_by, expires_at, created_at) VALUES ($1, $2, $3, $4, $5, $6)',
                 [prefixedId('pair', now()), robotId, hashSecret(code), createdBy || null, expires, at]);
         });
-        return { code: formatCode(code), expires_at: expires, installer: installerCommand(robotId, formatCode(code), installerUrl) };
+        return { code: formatCode(code), expires_at: expires, installer: installerCommand(robotId, formatCode(code), installerUrl, driver) };
     }
-    function installerCommand(robotId, code, installerUrl) {
+    /** ` --driver <kind>` for a profile that needs a real driver; nothing for `none` (the installer's default). */
+    const driverFlag = (driver) => (driver && driver !== 'none' ? ` --driver ${driver}` : '');
+    function installerCommand(robotId, code, installerUrl, driver = 'none') {
         const url = installerUrl || config.installer.scriptUrl;
-        return `curl -fsSL ${url} | sh -s -- --robot ${robotId} --code ${code}`;
+        return `curl -fsSL ${url} | sh -s -- --robot ${robotId} --code ${code}${driverFlag(driver)}`;
     }
     /**
      * BOT_PAIRING_AUTHORITY=network (plan T15 B2): Network mints the code for the robot's owner (POST
      * /internal/node-pairings, ref = the robot) and Bot stores none. The machine redeems it on Network and
      * reaches Bot with a node token (bindNode). A Network that does not answer is 503 bot.network_unavailable.
      */
-    async function mintOnNetwork(robotId, ownerSubject, installerUrl) {
+    async function mintOnNetwork(robotId, ownerSubject, installerUrl, driver = 'none') {
         if (!nodes) fail(503, 'bot.network_unavailable', 'Network pairing is not configured here');
         const p = await nodes.pair({ subject: ownerSubject, ref: robotId });
         if (!p || typeof p.pairing_id !== 'string' || typeof p.code !== 'string') fail(503, 'bot.network_unavailable', 'Network answered no pairing code');
         const url = installerUrl || config.installer.scriptUrl;
         return {
             code: p.code, expires_at: p.expires_at, pairing_id: p.pairing_id,
-            installer: `curl -fsSL ${url} | sh -s -- --network ${config.network.url} --pairing ${p.pairing_id} --code ${p.code}`,
+            installer: `curl -fsSL ${url} | sh -s -- --network ${config.network.url} --pairing ${p.pairing_id} --code ${p.code}${driverFlag(driver)}`,
         };
     }
     /**
@@ -672,7 +681,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, now = () 
         present: { robot: presentRobot, device: presentDevice },
         robots: { create: createRobot, list: listRobots, get: getRobot, update: updateRobot, remove: removeRobot },
         members: { roleOf, add: addOperator, remove: removeOperator, list: listOperators },
-        pairing: { create: createPairingCode, redeem, prune: prunePairingCodes, installerCommand, whipUrl },
+        pairing: { create: createPairingCode, redeem, prune: prunePairingCodes, installerCommand, driverForProfile, whipUrl },
         devices: { byCredential, bindNode, issuePublishKey, updateDeclared, revokeNode, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, touchSeen, setOnline },
         estop: { set: setEstop, clear: clearEstop },
         queue: { join: joinQueue, state: queueState, currentTurn, consume: consumeTurn, sweep: sweepQueues },
@@ -681,4 +690,4 @@ function createDomain({ db, config, outbox, link = null, nodes = null, now = () 
     };
 }
 
-module.exports = { createDomain, DEFAULT_ALLOW, KINDS, normaliseCode, formatCode, newCode, isCodeShape, noteToHz };
+module.exports = { createDomain, DEFAULT_ALLOW, DRIVER_BY_PROFILE, driverForProfile, KINDS, normaliseCode, formatCode, newCode, isCodeShape, noteToHz };

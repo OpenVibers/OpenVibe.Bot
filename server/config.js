@@ -15,6 +15,18 @@ const bool = (v, d = false) => (v == null || v === '' ? d : ['1', 'true', 'yes',
 const trim = (u) => String(u || '').replace(/\/+$/, '');
 const list = (v) => String(v || '').split(',').map((s) => s.trim()).filter(Boolean);
 const PAIRING_AUTHORITIES = ['bot', 'network'];
+// Where GET /install may send the client: OpenVibe.Node's canonical script lives on GitHub (raw, a release
+// asset) or on openvibe.bot itself. Anything else refuses to boot.
+const INSTALLER_SOURCE_HOSTS = ['raw.githubusercontent.com', 'github.com', 'objects.githubusercontent.com', 'openvibe.bot'];
+
+/** BOT_INSTALLER_SOURCE_URL must be https on an allow-listed host, so /install can never become an open redirect. */
+function checkInstallerSource(sourceUrl) {
+    let u = null;
+    try { u = new URL(sourceUrl); } catch { /* reported below */ }
+    if (!u || u.protocol !== 'https:' || !INSTALLER_SOURCE_HOSTS.includes(u.hostname)) {
+        throw new Error(`BOT_INSTALLER_SOURCE_URL must be an https URL on ${INSTALLER_SOURCE_HOSTS.join(', ')}, not ${JSON.stringify(sourceUrl)}`);
+    }
+}
 
 function loadConfig(env = process.env) {
     const nodeEnv = env.NODE_ENV || 'development';
@@ -26,6 +38,8 @@ function loadConfig(env = process.env) {
     if (!PAIRING_AUTHORITIES.includes(pairingAuthority)) {
         throw new Error(`BOT_PAIRING_AUTHORITY must be ${PAIRING_AUTHORITIES.join(' or ')}, not ${JSON.stringify(pairingAuthority)}`);
     }
+    const installerSource = String(env.BOT_INSTALLER_SOURCE_URL || 'https://raw.githubusercontent.com/OpenVibers/OpenVibe.Node/main/install/install.sh').trim();
+    checkInstallerSource(installerSource);
     return {
         nodeEnv,
         isProduction,
@@ -115,9 +129,14 @@ function loadConfig(env = process.env) {
         media: {
             whipBase: trim(env.BOT_WHIP_BASE || ''),
         },
-        // The one-line installer the owner copies next to the pairing code (the agent job builds it).
+        // The one-line installer the owner copies next to the pairing code. scriptUrl is what the command
+        // prints; sourceUrl is where GET /install sends the client (302). Bot keeps no copy of the script:
+        // it redirects to OpenVibe.Node's canonical one, and only this config (never a query parameter)
+        // chooses the target.
         installer: {
             scriptUrl: trim(env.BOT_INSTALLER_URL || 'https://openvibe.bot/install'),
+            sourceUrl: installerSource,
+            sourceHosts: INSTALLER_SOURCE_HOSTS,
         },
     };
 }
