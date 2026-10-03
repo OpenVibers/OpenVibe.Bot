@@ -12,7 +12,7 @@ Set `BOT_PAIRING_AUTHORITY` to `bot` (the default) or `network`; any other value
 
 Set `BOT_WHIP_BASE` in `/etc/openvibe/bot.env` to the WHIP ingest base each device publishes to (`whip_url = <base>/<publish key>`, sent once with the pairing); leave it unset to pair devices without video.
 
-`/install` is proxied to the app; the installer script itself ships with the T15 device-agent job.
+`/install` is proxied to the app, which serves/redirects the installer; the script itself ships in OpenVibe.Node's release assets (`install.sh` in each OpenVibe.Node release), so `/install` needs a published OpenVibe.Node release tag.
 
 ## Deploy files
 
