@@ -12,7 +12,7 @@ Set `BOT_PAIRING_AUTHORITY` to `bot` (the default) or `network`; any other value
 
 Set `BOT_WHIP_BASE` in `/etc/openvibe/bot.env` to the WHIP ingest base each device publishes to (`whip_url = <base>/<publish key>`, sent once with the pairing); leave it unset to pair devices without video.
 
-`/install` is proxied to the app; the installer script itself ships with the T15 device-agent job.
+`/install` is proxied to the app, which answers a 302 to OpenVibe.Node's installer script (`BOT_INSTALLER_SOURCE_URL`, by default `install/install.sh` on OpenVibe.Node's `main`; https on an allow-listed GitHub or openvibe.bot host, checked at boot, and no query parameter changes the target). The pairing's installer command adds `--driver adeept|adeept-mecanum|cozmo` for those profiles and nothing for the others (the dry-run `none`).
 
 ## Deploy files
 

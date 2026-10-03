@@ -32,10 +32,15 @@ so a reconnecting agent cannot be shadowed by a stale socket.
 **Pairing authority** (`BOT_PAIRING_AUTHORITY`, `bot` by default, or `network`). With `network` the
 pairing code is minted by OpenVibe.Network (Bot calls `POST /internal/node-pairings` with its own service
 token, `{owner: {kind: 'user', subject}, ref: <robot id>}`) and Bot stores none; the installer command
-carries `--network <Network URL> --pairing pair_… --code XXXX-XXXX`, and the machine pairs on Network and
+carries `--network <Network URL> --pairing pair_… --code XXXX-XXXX` (plus `--driver <kind>`, as below), and the machine pairs on Network and
 connects with a node token (below). The `pair` frame is then answered `error` `bot.pairing_moved` (its
 `detail` names the Network URL) and the socket stays unpaired. Devices that already hold a Bot credential
 keep connecting with it either way.
+
+**The installer command** is `curl -fsSL <BOT_INSTALLER_URL> | sh -s -- --robot rob_… --code XXXX-XXXX` (or the
+Network form above), plus `--driver adeept`, `adeept-mecanum` or `cozmo` for the `adeept.adr036`,
+`adeept.adr036.mecanum` and `cozmo` profiles; any other profile gets no `--driver` (the installer's dry-run
+`none`). `GET /install` answers a 302 to `BOT_INSTALLER_SOURCE_URL` (OpenVibe.Node's `install/install.sh`).
 
 **A Network-paired machine** (a node principal `nod_…`, paired on OpenVibe.Network for one of its
 owner's robots) carries `Authorization: Bearer <node token>` instead: a Network JWT with `actor_type`

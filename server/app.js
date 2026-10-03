@@ -80,7 +80,7 @@ function createApp(opts = {}) {
     app.use('/api/v1', express.json({ limit: '64kb' }), (req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); }, apiAuth.middleware, v1Router({ domain, apiAuth, limits, hub }));
     app.use('/auth', createSessionRoutes(config, userAuth, { fetchImpl }));
     app.use(viewerMiddleware(userAuth));
-    app.use(createWebRoutes());
+    app.use(createWebRoutes(config));
 
     app.use((req, res) => {
         if (req.path.startsWith('/api/') || req.path.startsWith('/internal/')) return http.sendProblem(res, 404, 'not_found', { ctx: req.ov });
