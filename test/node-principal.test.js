@@ -4,11 +4,9 @@
 // as for a credential, `status` persists what the machine declares, `reauth` keeps the socket, and revoke
 // and rotate reach Network and the machine. Credential devices keep today's behaviour.
 const assert = require('assert');
-const crypto = require('crypto');
 const { boot, check, done } = require('./helpers/app');
 
 const WHIP_BASE = 'https://whip.test/ingest';
-const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 
 (async () => {
     const t = await boot({ env: { BOT_WHIP_BASE: WHIP_BASE } });
@@ -44,7 +42,9 @@ const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex'
         assert.strictEqual(d.agent_version, null);
         assert.strictEqual(d.credential_hash, null);
         assert.strictEqual(d.node_principal, principal);
-        assert.strictEqual(d.publish_key_hash, sha256(r.json.publish_key));
+        assert.strictEqual(d.publish_key_hint, r.json.publish_key.slice(-4), 'only the hint of the OpenRe key is kept');
+        assert.strictEqual(d.publish_key_hash, null, 'Bot mints and hashes no key of its own');
+        assert.ok(t.openre.admits(r.json.publish_key), 'the publish key is one OpenRe admits');
     });
 
     await check('bind twice answers the same device and a new publish key; the old key stops working', async () => {
@@ -55,8 +55,9 @@ const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex'
         assert.strictEqual(second.json.device_id, first.json.device_id);
         assert.notStrictEqual(second.json.publish_key, first.json.publish_key);
         const d = await deviceRow(first.json.device_id);
-        assert.strictEqual(d.publish_key_hash, sha256(second.json.publish_key));
-        assert.notStrictEqual(d.publish_key_hash, sha256(first.json.publish_key));
+        assert.strictEqual(d.publish_key_hint, second.json.publish_key.slice(-4));
+        assert.ok(t.openre.admits(second.json.publish_key), 'the new key is admitted');
+        assert.ok(!t.openre.admits(first.json.publish_key), 'the old key stops working');
         assert.strictEqual(Number((await t.db.maybe('SELECT count(*) AS n FROM devices WHERE node_principal = $1', [principal])).n), 1);
     });
 
@@ -82,7 +83,7 @@ const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex'
         assert.deepStrictEqual(hello.robot_ids, [robot.id]);
         const d = await deviceRow(hello.device_id);
         assert.strictEqual(d.node_principal, principal);
-        assert.strictEqual(d.publish_key_hash, null, 'no publish key until the machine calls bind');
+        assert.strictEqual(d.publish_key_hint, null, 'no publish key until the machine calls bind');
         assert.ok(t.hub.isOnline(d.id));
         // A later bind finds the same device.
         const b = await bind(t.network.signNode(principal));

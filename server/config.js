@@ -129,6 +129,15 @@ function loadConfig(env = process.env) {
         media: {
             whipBase: trim(env.BOT_WHIP_BASE || ''),
         },
+        // OpenRe.Stream (T15 R5): the publish key is the ingest key of the robot's OpenRe stream, the only kind
+        // OpenRe's WHIP worker admits. token is a Network service token holding openre.stream.read (the lookup
+        // by external ref), openre.stream.write and openre.key.rotate; it is never logged or returned. Either unset: devices pair without video (no
+        // publish_key, `video: "not_configured"`) and Bot mints no key of its own.
+        openre: {
+            url: trim(env.BOT_OPENRE_URL || ''),
+            token: String(env.BOT_OPENRE_TOKEN || '').trim(),
+            timeoutMs: Math.max(100, int(env.BOT_OPENRE_TIMEOUT_MS, 8000)),
+        },
         // The one-line installer the owner copies next to the pairing code. scriptUrl is what the command
         // prints; sourceUrl is where GET /install sends the client (302). Bot keeps no copy of the script:
         // it redirects to OpenVibe.Node's canonical one, and only this config (never a query parameter)

@@ -9,7 +9,7 @@
  *   /auth/*      Network SSO session for people (the control WS accepts the ov_token cookie)
  *   GET  /       a one-line text placeholder; the panel and the site are designed separately
  *
- * createApp({ config, db, valkey, registry, keys, hub, outbox, nodes, now, fetchImpl, log }) — everything
+ * createApp({ config, db, valkey, registry, keys, hub, outbox, nodes, openre, now, fetchImpl, log }) — everything
  * injectable. `db` is an openvibe-sdk/db handle with the schema migrated; `hub` the realtime WebSocket
  * hub (server/realtime.js), whose handleUpgrade the caller attaches to the HTTP server.
  */
@@ -21,6 +21,7 @@ const { isLoopbackDirect } = require('openvibe-shared/metrics');
 const { loadConfig } = require('./config');
 const { openDb } = require('./db');
 const { createKeyProvider, createUserAuth, createNodePrincipals } = require('./network');
+const { createOpenRe } = require('./openre/client');
 const { createBotOutbox } = require('./events/outbox');
 const { createDomain } = require('./domain');
 const { createRealtime } = require('./realtime');
@@ -46,7 +47,8 @@ function createApp(opts = {}) {
     const outbox = opts.outbox || createBotOutbox({ db, config, fetchImpl: opts.eventsFetch, now, log });
     const hub = opts.hub || createRealtime({ config, keys, userAuth, log, now });
     const nodes = opts.nodes || createNodePrincipals(config, { fetchImpl });
-    const domain = createDomain({ db, config, outbox, link: hub, nodes, now, log });
+    const openre = opts.openre !== undefined ? opts.openre : createOpenRe(config, { fetchImpl });
+    const domain = createDomain({ db, config, outbox, link: hub, nodes, openre, now, log });
     hub.bindDomain(domain);
     const apiAuth = createApiAuth({ config, keys, userAuth });
     const release = require('openvibe-shared/release').createRelease({ service: 'bot', root: path.join(__dirname, '..') });

@@ -6,6 +6,11 @@
  *                   GET /internal/node-principals/:id and POST …/:id/revoke answer them (addNode, signNode,
  *                   nodes, revokes), scoped to the calling service like Network's own routes
  *   startEvents()   POST /api/v1/events recording what Bot's outbox relays; GET /api/health
+ *   startOpenRe()   OpenRe.Stream's stream routes Bot calls (server/api/v1.js there): GET /api/v1/streams?external_ref=,
+ *                   POST /api/v1/streams, POST …/:id/keys/rotate, DELETE …/:id (409 while live), behind one bearer
+ *                   token whose capabilities OpenRe's guards check (setCaps(list) to narrow them; 403
+ *                   capability.denied). streams, calls (every request, its token and X-OV-Subject), admits(key)
+ *                   (OpenRe's resolveIngestKey: an active key or one in grace), failNext(status | 'hang')
  */
 const http = require('http');
 const crypto = require('crypto');
@@ -128,4 +133,87 @@ async function startEvents() {
     return { url, events, close: () => new Promise((r) => server.close(r)) };
 }
 
-module.exports = { startNetwork, startEvents };
+// The capabilities BOT_OPENRE_TOKEN must hold: GET /streams is openre.stream.read, POST and DELETE
+// openre.stream.write, keys/rotate openre.key.rotate (OpenRe server/api/v1.js guards).
+const OPENRE_CAPS = ['openre.stream.read', 'openre.stream.write', 'openre.key.rotate'];
+
+async function startOpenRe({ token = `ovt_${crypto.randomBytes(16).toString('hex')}`, caps = OPENRE_CAPS } = {}) {
+    let granted = [...caps];
+    // OpenRe's hasCap: the exact capability or a `.*` grant covering it.
+    const hasCap = (id) => granted.some((g) => g === id || (g.endsWith('.*') && id.startsWith(g.slice(0, -1))));
+    const streams = new Map();
+    const calls = [];
+    let failure = null;
+    let n = 0;
+    const newKey = () => {
+        const key = `ork_${crypto.randomBytes(32).toString('base64url')}`;
+        return { id: `key_${++n}`, key, hint: key.slice(-4), status: 'active', grace_until: null };
+    };
+    const view = (st) => ({ id: st.id, owner: { type: 'user', id: st.owner }, protocols: st.protocols, state: st.state, external_refs: st.refs,
+        keys: st.keys.filter((k) => k.status !== 'revoked').map((k) => ({ id: k.id, hint: k.hint, status: k.status })) });
+    const problem = (res, status, code, detail) => { res.writeHead(status, { 'Content-Type': 'application/problem+json' }); res.end(JSON.stringify({ type: 'about:blank', status, code, detail })); };
+    function admits(key) {
+        for (const st of streams.values()) {
+            const k = st.keys.find((x) => x.key === key);
+            if (k) return st.state === 'active' && (k.status === 'active' || (k.status === 'grace' && k.grace_until > Date.now()));
+        }
+        return false;
+    }
+    const server = http.createServer(async (req, res) => {
+        const raw = await readBody(req);
+        let body = null; try { body = raw ? JSON.parse(raw) : null; } catch { body = null; }
+        const subject = req.headers['x-ov-subject'] || null;
+        const url = new URL(req.url, 'http://openre.test');
+        calls.push({ method: req.method, path: url.pathname, query: url.search, body, subject, authorization: req.headers.authorization || null });
+        if (failure === 'hang') return;   // never answered: the client's timeout ends it
+        if (failure) { const status = failure; failure = null; return problem(res, status, status >= 500 ? 'openre.internal' : 'openre.forbidden', `stubbed ${status}`); }
+        if (req.headers.authorization !== `Bearer ${token}`) return problem(res, 401, 'token.invalid', 'a service token is required');
+        const m = /^\/api\/v1\/streams(?:\/([^/]+)(\/keys\/rotate)?)?$/.exec(url.pathname);
+        const need = m && (m[2] ? 'openre.key.rotate' : req.method === 'GET' ? 'openre.stream.read' : 'openre.stream.write');
+        if (need && !hasCap(need)) return problem(res, 403, 'capability.denied', `${need} not granted`);
+        if (!subject || !/^usr_/.test(subject)) return problem(res, 400, 'subject.invalid', 'X-OV-Subject must be a usr_… subject id');
+        const mine = (id) => { const st = streams.get(id); return st && st.state !== 'archived' && st.owner === subject ? st : null; };
+        if (url.pathname === '/api/v1/streams' && req.method === 'GET') {
+            const [service, type, ...rest] = String(url.searchParams.get('external_ref') || '').split(':');
+            const st = [...streams.values()].find((x) => x.state !== 'archived' && x.owner === subject && x.refs.some((r) => r.service === service && r.type === type && r.id === rest.join(':')));
+            return send(res, 200, { streams: st ? [view(st)] : [] });
+        }
+        if (url.pathname === '/api/v1/streams' && req.method === 'POST') {
+            const refs = (body && body.external_refs) || [];
+            if (refs.some((r) => [...streams.values()].some((x) => x.state !== 'archived' && x.refs.some((y) => y.service === r.service && y.type === r.type && y.id === r.id)))) {
+                return problem(res, 409, 'openre.ref_taken', 'already belongs to another stream definition');
+            }
+            const st = { id: `str_${++n}`, owner: subject, protocols: body.protocols, refs, state: 'active', live: false, keys: [newKey()] };
+            streams.set(st.id, st);
+            const k = st.keys[0];
+            return send(res, 201, { stream: view(st), key: { id: k.id, key: k.key, hint: k.hint, shown_once: true } });
+        }
+        const st = m && m[1] && mine(decodeURIComponent(m[1]));
+        if (m && m[1] && !st) return problem(res, 404, 'openre.stream_not_found', 'no such stream definition');
+        if (st && m[2] && req.method === 'POST') {
+            const grace = Math.max(0, Number(body && body.grace_seconds) || 0);
+            const old = st.keys.filter((k) => k.status === 'active');
+            for (const k of old) Object.assign(k, grace ? { status: 'grace', grace_until: Date.now() + grace * 1000 } : { status: 'revoked' });
+            const k = newKey();
+            st.keys.push(k);
+            const ending = body && body.end_sessions && st.live ? 1 : 0;
+            return send(res, 200, { key: { id: k.id, key: k.key, hint: k.hint, shown_once: true }, retired: old.map((x) => ({ id: x.id, hint: x.hint, status: x.status })), grace_until: null, sessions_ending: ending });
+        }
+        if (st && !m[2] && req.method === 'DELETE') {
+            if (st.live) return problem(res, 409, 'openre.stream_live', 'end the live session before archiving this stream');
+            st.state = 'archived';
+            for (const k of st.keys) k.status = 'revoked';
+            res.writeHead(204); return res.end();
+        }
+        problem(res, 404, 'not_found', 'not found');
+    });
+    const url = await listen(server);
+    return {
+        url, token, streams, calls, admits,
+        failNext: (what) => { failure = what; },
+        setCaps: (list) => { granted = [...(list || caps)]; },
+        close: () => { server.closeAllConnections(); return new Promise((r) => server.close(r)); },
+    };
+}
+
+module.exports = { startNetwork, startEvents, startOpenRe };

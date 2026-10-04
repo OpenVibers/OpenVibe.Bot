@@ -250,7 +250,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             });
             attachDevice(conn, r.device);
             sendFrame(conn, 'paired', {
-                device_id: r.device.id, credential: r.credential, publish_key: r.publish_key, ...(r.whip_url ? { whip_url: r.whip_url } : {}),
+                device_id: r.device.id, credential: r.credential, ...domain.present.video(r),
                 robot_ids: deviceRobotIds(r.device), profile_id: r.profile ? r.profile.id : null, profile: r.profile,
             });
             sendHello(conn);
