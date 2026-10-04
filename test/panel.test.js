@@ -5,7 +5,7 @@
 const assert = require('assert');
 const { boot, check, done } = require('./helpers/app');
 const { loadProfiles } = require('../server/profiles');
-const { renderPanel, renderWidget, renderRobotsPage, renderPairingPage, esc } = require('../server/web/render');
+const { renderPanel, renderWidget, renderRobotsPage, renderPairingPage, camerasOf, esc } = require('../server/web/render');
 const { DEFAULT_ALLOW } = require('../server/domain');
 
 const robotFor = (profile, extra = {}) => ({ id: 'rob_1', name: 'Rover', profile_id: profile.id, estop: { latched: false }, ...extra });
@@ -38,6 +38,57 @@ const allowedFor = (profile, role) => [...(DEFAULT_ALLOW[role] || []).filter((k)
             assert.ok(html(role).includes('data-estop-banner data-latched="true"'), `${role} does not see the latched banner`);
         }
         assert.match(renderWidget(p.widgets[0], { profile: p, allowed_commands: [] }), /disabled/);
+    });
+
+    await check('one camera tile per camera the profile lists, each the placeholder with its shape', () => {
+        const tiles = (html) => (html.match(/<figure class="camera" data-camera="/g) || []).length;
+        for (const p of profiles.filter((x) => x.widgets.some((w) => w.type === 'camera'))) {
+            const html = renderPanel({ robot: robotFor(p), profile: p, role: 'owner', allowed_commands: allowedFor(p, 'owner') });
+            assert.strictEqual(tiles(html), camerasOf(p).length, p.id);
+            assert.ok(html.includes('Video is not connected yet.'), p.id);
+            if (p.camera && p.camera.resolution) assert.ok(html.includes(`data-resolution="${p.camera.resolution}"`), p.id);
+            assert.doesNotMatch(html, /<video|whip_url|publish_key/, `${p.id}: no stream address on the page`);
+        }
+        const p = profiles.find((x) => x.id === 'sim.rover');
+        const two = { ...p, camera: [{ name: 'Front', transport: 'whip', resolution: '640x360' }, { name: 'Arm', transport: 'whip', resolution: '320x240' }] };
+        const html = renderPanel({ robot: robotFor(two), profile: two, role: 'owner', allowed_commands: [] });
+        assert.strictEqual(tiles(html), 2);
+        assert.ok(html.includes('data-resolution="320x240"') && html.includes('Arm · 320×240'));
+        const one = renderWidget({ type: 'camera', camera: 'Arm' }, { profile: two });
+        assert.strictEqual(tiles(one), 1);
+        assert.ok(one.includes('data-camera="1"'));
+        // A camera widget with no camera entry still holds one slot.
+        assert.strictEqual(tiles(renderWidget({ type: 'camera' }, { profile: { ...p, camera: null } })), 1);
+    });
+
+    await check('a drive widget is a joystick for two of its axes, hold buttons for the rest, and the latency meter', () => {
+        const attr = (html, name) => JSON.parse(new RegExp(`${name}="([^"]+)"`).exec(html)[1].replace(/&quot;/g, '"'));
+        for (const p of profiles) {
+            for (const w of p.widgets.filter((x) => x.type === 'drive')) {
+                const html = renderWidget(w, { profile: p, allowed_commands: allowedFor(p, 'owner') });
+                const axes = p.commands[w.command.kind].axes;
+                const stick = Object.values(attr(html, 'data-joystick'));
+                assert.ok(stick.length >= 1 && stick.every((a) => axes[a]), p.id);
+                assert.deepStrictEqual(attr(html, 'data-axes'), axes, p.id);
+                for (const a of Object.keys(axes)) assert.strictEqual(html.includes(`data-axis="${a}"`), !stick.includes(a), `${p.id}: ${a}`);
+                assert.ok(html.includes('data-stop'));
+                assert.match(renderWidget(w, { profile: p, allowed_commands: [] }), /data-joystick="[^"]+" [^>]*aria-disabled="true"/);
+            }
+        }
+        const mecanum = profiles.find((x) => x.id === 'adeept.adr036.mecanum');
+        const html = renderWidget(mecanum.widgets.find((w) => w.type === 'drive'), { profile: mecanum, allowed_commands: ['drive'] });
+        assert.ok(html.includes('data-axis="rotation"') && !html.includes('data-axis="x"') && !html.includes('data-axis="y"'));
+        const latency = renderWidget({ type: 'latency' }, { profile: mecanum });
+        for (const slot of ['data-latency', 'data-telemetry-age', 'data-link']) assert.ok(latency.includes(slot), slot);
+    });
+
+    await check('the robots page has an empty state and labelled fields; the pairing page waits for the device', () => {
+        const empty = renderRobotsPage({ robots: [], profiles: profiles.map((p) => ({ id: p.id, name: p.name })) });
+        assert.ok(empty.includes('No robots yet.'));
+        for (const label of ['Name', 'Model', 'Who may drive']) assert.ok(empty.includes(`<span class="field-label">${label}</span>`), label);
+        for (const v of ['private', 'invite', 'queue']) assert.ok(empty.includes(`value="${v}"`), v);
+        const pair = renderPairingPage({ robot: { id: 'rob_1', name: 'Rover' }, pairing: { code: 'ABCD-EFGH', installer: 'curl x', expires_at: 'soon' } });
+        assert.ok(pair.includes('data-pair-robot="rob_1"') && pair.includes('Waiting for the device.') && pair.includes('data-pair-open hidden'));
     });
 
     await check('every value is escaped', () => {
@@ -164,6 +215,25 @@ const allowedFor = (profile, role) => [...(DEFAULT_ALLOW[role] || []).filter((k)
         assert.match(html, /class="code">[0-9A-Z]{4}-[0-9A-Z]{4}</);
         assert.ok(html.includes('data-copy'));
         assert.strictEqual((await get(loc, bob)).status, 403);
+    });
+
+    await check('the pairing page\'s indicator: the owner\'s /control join reports the device and flips when it connects', async () => {
+        const { robot } = await t.robot(alex, { name: 'Indicator', profile_id: 'adeept.adr036' });
+        const html = await (await get(`/pair/${robot.id}`, alex)).text();
+        assert.ok(html.includes(`data-pair-robot="${robot.id}"`) && html.includes('Waiting for the device.'));
+        const code = /class="code">([0-9A-Z]{4}-[0-9A-Z]{4})</.exec(html)[1];
+        const c = await control(alex);
+        c.send({ type: 'join', robot_id: robot.id });
+        const joined = await c.waitFor((m) => m.type === 'joined');
+        assert.strictEqual(joined.state.online, false);
+        const p = await t.call('POST', '/api/v1/pair', { token: null, body: { robot: robot.id, code } });
+        assert.strictEqual(p.status, 201, p.text);
+        const dev = await t.ws('/device', { headers: { Authorization: `Bearer ${p.json.credential}` } });
+        const up = await c.waitFor((m) => m.type === 'robot_state' && m.state && m.state.online === true);
+        assert.ok(up, 'no online flip');
+        dev.close();
+        assert.ok(await c.waitFor((m) => c.messages.indexOf(m) > c.messages.indexOf(up) && m.type === 'robot_state' && m.state.online === false), 'no offline flip');
+        c.close();
     });
 
     await check('/pair/:id mints nothing for a cross-site navigation or a prefetch', async () => {
