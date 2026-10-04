@@ -186,7 +186,7 @@ function v1Router({ domain, apiAuth, limits, hub }) {
             return res.json({ device: domain.present.device(d), sent });
         }
         const rotated = await domain.devices.rotate(req.params.id);
-        res.json({ device: domain.present.device(rotated.device), credential: rotated.credential, publish_key: rotated.publish_key, ...(rotated.whip_url ? { whip_url: rotated.whip_url } : {}) });
+        res.json({ device: domain.present.device(rotated.device), credential: rotated.credential, ...domain.present.video(rotated) });
     }));
     r.post('/devices/:id/revoke', manage, wrap(async (req, res) => {
         fence(req);
@@ -194,11 +194,13 @@ function v1Router({ domain, apiAuth, limits, hub }) {
         if (!d) fail(404, 'bot.device_not_found', 'no such device');
         await owner(req, json(d.robot_ids, [])[0]);
         const revoked = await domain.devices.revoke(req.params.id);
-        // A Network-paired machine is revoked on Network too (Bot never binds that principal again either way).
+        // A Network-paired machine is revoked on Network too (Bot never binds that principal again either way),
+        // and the publish key it holds on OpenRe is revoked with its live session ended.
         let networkError = null;
         if (d.node_principal) await domain.devices.revokeNode(d.node_principal).catch((e) => { networkError = e; });
+        await domain.devices.revokeVideo(req.params.id).catch((e) => { networkError = networkError || e; });
         hub.closeDevice(req.params.id, 'revoked');   // revocation disconnects the device at once
-        if (networkError) throw networkError;          // revoked here; the owner retries for Network
+        if (networkError) throw networkError;          // revoked here; the owner retries for Network or OpenRe
         res.json({ device: domain.present.device(revoked) });
     }));
 
@@ -238,7 +240,7 @@ function v1Router({ domain, apiAuth, limits, hub }) {
             device_kind: req.body?.device_kind || 'onboard', drivers: Array.isArray(req.body?.drivers) ? req.body.drivers : [],
             capabilities: req.body?.capabilities && typeof req.body.capabilities === 'object' ? req.body.capabilities : {}, name: req.body?.name || null,
         });
-        res.status(201).json({ device_id: result.device.id, credential: result.credential, publish_key: result.publish_key, ...(result.whip_url ? { whip_url: result.whip_url } : {}), robot_id: json(result.device.robot_ids, [])[0], profile: result.profile });
+        res.status(201).json({ device_id: result.device.id, credential: result.credential, ...domain.present.video(result), robot_id: json(result.device.robot_ids, [])[0], profile: result.profile });
     }));
 
     // ── Bootstrap of a Network-paired machine (its node token, once after pairing) ────────────────
@@ -249,7 +251,7 @@ function v1Router({ domain, apiAuth, limits, hub }) {
         const device = await domain.devices.bindNode(req.principal.principal);
         const issued = await domain.devices.issuePublishKey(device.id);
         res.setHeader('Cache-Control', 'no-store');
-        res.status(201).json({ device_id: issued.device.id, publish_key: issued.publish_key, ...(issued.whip_url ? { whip_url: issued.whip_url } : {}), robot_id: json(issued.device.robot_ids, [])[0], profile: issued.profile });
+        res.status(201).json({ device_id: issued.device.id, ...domain.present.video(issued), robot_id: json(issued.device.robot_ids, [])[0], profile: issued.profile });
     }));
 
     return r;

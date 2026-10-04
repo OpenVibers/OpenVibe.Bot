@@ -60,7 +60,9 @@ To run the schema migrations before the service serves, start it once with the d
 
 Set `BOT_PAIRING_AUTHORITY` to `bot` (the default) or `network`; any other value refuses to boot.
 
-Set `BOT_WHIP_BASE` in `/etc/openvibe/bot.env` to the WHIP ingest base each device publishes to (`whip_url = <base>/<publish key>`, sent once with the pairing); leave it unset to pair devices without video.
+Set `BOT_WHIP_BASE` in `/etc/openvibe/bot.env` to the WHIP ingest base each device publishes to (`whip_url = <base>/<publish key>`, sent once with the pairing; OpenRe's is `https://ingest.openre.stream/whip`); leave it unset to pair devices without video.
+
+The publish key is always an ingest key OpenRe.Stream issued for the robot's stream (OpenRe's WHIP ingest admits no other): set `BOT_OPENRE_URL` and `BOT_OPENRE_TOKEN` (a Network service token holding `openre.stream.read`, `openre.stream.write` and `openre.key.rotate`, or `openre.stream.*` with `openre.key.rotate`; `BOT_OPENRE_TIMEOUT_MS`, default 8000, bounds each call). Pairing creates the robot's OpenRe stream (or rotates the one it has), a credential rotation rotates its key, revoking a device or removing a robot revokes the key and ends the live session. Bot stores the stream id and the key's hint, never the key. With either variable unset, devices still pair but get no publish key and the answer says `"video": "not_configured"`; Bot mints no key of its own.
 
 `/install` is proxied to the app, which answers a 302 to OpenVibe.Node's installer script (`BOT_INSTALLER_SOURCE_URL`, by default `install/install.sh` on OpenVibe.Node's `main`; https on an allow-listed GitHub or openvibe.bot host, checked at boot, and no query parameter changes the target). The pairing's installer command adds `--driver adeept|adeept-mecanum|cozmo` for those profiles and nothing for the others (the dry-run `none`).
 
