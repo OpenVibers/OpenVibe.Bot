@@ -9,7 +9,7 @@
  *   /auth/*      Network SSO session for people (the control WS accepts the ov_token cookie)
  *   GET  /       a one-line text placeholder; the panel and the site are designed separately
  *
- * createApp({ config, db, valkey, registry, keys, hub, outbox, nodes, openre, now, fetchImpl, log }) — everything
+ * createApp({ config, db, valkey, registry, keys, hub, outbox, usage, nodes, openre, now, fetchImpl, log }) — everything
  * injectable. `db` is an openvibe-sdk/db handle with the schema migrated; `hub` the realtime WebSocket
  * hub (server/realtime.js), whose handleUpgrade the caller attaches to the HTTP server.
  */
@@ -23,6 +23,7 @@ const { openDb } = require('./db');
 const { createKeyProvider, createUserAuth, createNodePrincipals } = require('./network');
 const { createOpenRe } = require('./openre/client');
 const { createBotOutbox } = require('./events/outbox');
+const { createUsageRelay } = require('./jobs/metering');
 const { createDomain } = require('./domain');
 const { createRealtime } = require('./realtime');
 const { createApiAuth } = require('./api/auth');
@@ -45,7 +46,9 @@ function createApp(opts = {}) {
     const keys = opts.keys || createKeyProvider(config, { fetchImpl, log });
     const userAuth = createUserAuth(config, keys);
     const outbox = opts.outbox || createBotOutbox({ db, config, fetchImpl: opts.eventsFetch, now, log });
-    const hub = opts.hub || createRealtime({ config, keys, userAuth, log, now });
+    // Job usage readings → Billing (server/jobs/metering.js); started by server/index.js with the other jobs.
+    const usage = opts.usage || createUsageRelay({ db, config, fetchImpl: opts.billingFetch || fetchImpl, now, log });
+    const hub = opts.hub || createRealtime({ config, keys, userAuth, usage, log, now });
     const nodes = opts.nodes || createNodePrincipals(config, { fetchImpl });
     const openre = opts.openre !== undefined ? opts.openre : createOpenRe(config, { fetchImpl });
     const domain = createDomain({ db, config, outbox, link: hub, nodes, openre, now, log });
@@ -101,7 +104,7 @@ function createApp(opts = {}) {
         return res.status(500).type('text/plain').send('Something went wrong\n');
     });
 
-    Object.assign(app.locals, { config, db, valkey, domain, keys, outbox, hub, userAuth, metrics });
+    Object.assign(app.locals, { config, db, valkey, domain, keys, outbox, usage, hub, userAuth, metrics });
     return app;
 }
 

@@ -13,6 +13,7 @@ OpenVibe.Bot pairs a robot's machines, keeps their state and gates every operato
 - Pairing: one-time codes with a short expiry, minted by Bot or, with `BOT_PAIRING_AUTHORITY=network`, by OpenVibe.Network.
 - The `/device` and `/control` WebSockets, the command gate and the latched e-stop.
 - The command audit (`command_audit`, kept 30 days) and the `bot.*` outbox events.
+- Dispatching `platform.job@1` jobs to a paired Node over `/device` (`server/jobs/dispatch.js`, no HTTP route) and metering them per wall-clock second (`run_jobs`, `run_usage_outbox`; docs/protocol.md §1.2).
 
 ## Does not own
 
@@ -27,7 +28,8 @@ OpenVibe.Bot pairs a robot's machines, keeps their state and gates every operato
 - Valkey (`VALKEY_URL`, optional): the shared per-actor limit counters; unset, limits are counted per process.
 - OpenVibe.Network: user and service tokens, node tokens, and pairing when the authority is `network`.
 - OpenRe.Stream: the WHIP ingest base (`BOT_WHIP_BASE`) devices publish to.
-- `openvibe-contracts` v0.85.0, `openvibe-sdk` v0.26.0 and `openvibe-shared` v2.5.0 (package.json).
+- OpenVibe.Billing: job usage readings go to `billing.usage.record` (`BOT_BILLING_URL`, `BOT_BILLING_TOKEN`); unset, they wait in `run_usage_outbox`.
+- `openvibe-contracts` v0.92.0, `openvibe-sdk` v0.26.0 and `openvibe-shared` v2.5.0 (package.json).
 
 ## Capabilities
 

@@ -7,7 +7,9 @@
  *                     on the upgrade, never a query string; an unauthenticated socket may only send
  *                     `pair`. A Network-paired machine presents its node token instead (bound on first
  *                     use) and renews it with `reauth` before the 330 s deadline, else close 4002. Heartbeats every 1 s; offline after 2 missed + 3 s grace. Commands are
- *                     never queued for an offline device and never replayed after a reconnect.
+ *                     never queued for an offline device and never replayed after a reconnect. Jobs
+ *                     (platform.job-frame@1, server/jobs/dispatch.js) are the exception: an unacked `job`
+ *                     is resent on every reconnect, and the Node never runs one id twice.
  *   wss://…/control   a signed-in person (Network session cookie or Bearer) or a service token holding
  *                     `bot.robot.control` acting for `X-OV-Subject`. Joins a robot, sends commands; the
  *                     gate lives in the domain and every decision is audited.
@@ -20,6 +22,7 @@ const { capabilities, ids } = require('openvibe-contracts');
 const { json, iso, prefixedId } = require('./util');
 const { userPrincipal, verifyService, verifyNode, isNodeToken, PRINCIPAL_SUB, decodePayload } = require('./api/auth');
 const { getProfile } = require('./profiles');
+const { createJobFrames } = require('./jobs/dispatch');
 
 const OPEN = 1;
 const MAX_BACKLOG = 64;   // frames a device may send before its authentication completes
@@ -38,7 +41,7 @@ function parseCookies(header) {
 const bearer = (req) => { const h = String(req.headers.authorization || ''); return h.startsWith('Bearer ') ? h.slice(7).trim() : null; };
 const isSubject = (v) => typeof v === 'string' && ids.isSubjectId('user', v);
 
-function createRealtime({ config, keys, userAuth, log = console, now = () => Date.now() }) {
+function createRealtime({ config, keys, userAuth, usage = null, log = console, now = () => Date.now() }) {
     let domain = null;
     const deviceConns = new Map();     // device_id → conn
     const subsByRobot = new Map();     // robot_id → Set<conn>
@@ -51,12 +54,15 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     const deviceWss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024, perMessageDeflate: false });
     const controlWss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024, perMessageDeflate: false });
     const offlineAfterMs = config.device.heartbeatMs * config.device.offlineMisses + config.device.offlineGraceMs;
+    const jobs = createJobFrames({ db: () => domain.db, usage, log, now });
 
     const nextSeq = (conn) => ++conn.seq;
     function send(ws, obj) { if (ws.readyState === OPEN) { ws.send(JSON.stringify(obj)); return true; } return false; }
     function sendFrame(conn, type, fields) { return send(conn.ws, { v: 1, seq: nextSeq(conn), ts: now(), type, ...fields }); }
     function sendError(conn, code, detail) { return sendFrame(conn, 'error', { code, detail: detail || null }); }
     const deviceRobotIds = (device) => json(device.robot_ids, []);
+    /** The job frames' view of one device socket (server/jobs/dispatch.js). */
+    const jobLink = (conn) => ({ deviceId: conn.device.id, send: (type, fields) => sendFrame(conn, type, fields), error: (code, detail) => sendError(conn, code, detail) });
 
     // ── Upgrade routing ───────────────────────────────────────────────────────────────────────────
     function handleUpgrade(req, socket, head) {
@@ -88,6 +94,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
                 await sendConfig(conn);
                 await bringOnline(conn);
             } catch (e) { log.warn(`[Bot] device auth: ${e.message}`); conn.backlog = null; ws.close(4002, 'invalid credential'); return; }
+            await jobs.onConnect(jobLink(conn)).catch((e) => log.warn(`[Bot] job resend to ${conn.device.id}: ${e.message}`));
             await drainBacklog(conn);
         }
     }
@@ -236,6 +243,8 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             case 'reauth': if (conn.node) return onReauth(conn, msg); return sendError(conn, 'bot.unknown_message', `unknown type ${msg.type}`);
             case 'ack': case 'nack': return onAck(conn, msg);
             case 'estop_state': return onEstopState(conn, msg);
+            // Jobs (platform.job-frame@1). Out: job, job_cancel, job_exit_ack (server/jobs/dispatch.js); in:
+            case 'job_started': case 'job_stdout': case 'job_usage': case 'job_exit': return jobs.onFrame(jobLink(conn), msg);
             default: return sendError(conn, 'bot.unknown_message', `unknown type ${msg.type}`);
         }
     }
@@ -274,6 +283,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
 
     async function onAck(conn, msg) {
         const id = String(msg.id || '');
+        if (id.startsWith('job_')) return jobs.onAck(jobLink(conn), msg);   // a job's ack/nack, never a command's
         const p = pendingCmds.get(id);
         if (!p || p.deviceId !== conn.device.id) return; // unknown, already answered, or another device's command
         pendingCmds.delete(id);
@@ -517,6 +527,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         bindDomain(d) { domain = d; },
         handleUpgrade,
         isOnline, deviceState, sendToDevice, sendToRobotDevices, broadcast, closeDevice, robotState, refreshConfig, pushEstop,
+        jobStdout: (jobId) => jobs.stdout(jobId),
         onlineCount() { let n = 0; for (const c of deviceConns.values()) if (c.online) n++; return n; },
         devices() { return [...deviceConns.values()].map((c) => ({ device_id: c.device.id, online: c.online })); },
         async close() {

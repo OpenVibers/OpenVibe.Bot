@@ -10,7 +10,8 @@
  * migration run is serialised by an advisory lock.
  *
  * Background jobs (BOT_JOBS=off disables them): the events outbox relay, the 30-day audit prune, the
- * pairing-code sweep and the turn-queue sweep (expire a turn, promote the next waiting person).
+ * pairing-code sweep, the turn-queue sweep (expire a turn, promote the next waiting person) and the job usage
+ * relay to Billing (BOT_BILLING_URL and BOT_BILLING_TOKEN; unset, readings wait in run_usage_outbox).
  */
 const { loadConfig } = require('./config');
 const { openDb, migrate } = require('./db');
@@ -30,7 +31,7 @@ async function main() {
     const valkey = createValkey({ url: config.valkey.url, prefix: config.valkey.prefix });
 
     const app = createApp({ config, db, valkey, registry });
-    const { domain, keys, outbox, hub } = app.locals;
+    const { domain, keys, outbox, usage, hub } = app.locals;
     keys.start();
 
     const timers = [];
@@ -40,11 +41,12 @@ async function main() {
         every(30 * 60 * 1000, () => domain.pairing.prune());
         every(1000, async () => { for (const robotId of await domain.queue.sweep()) hub.broadcast(robotId); });
         outbox.start();
+        usage.start();
     }
 
     const server = app.listen(config.port, config.host, () => {
         console.log(`[Bot] ${config.nodeEnv} on http://${config.host}:${config.port} → ${config.baseUrl} (store ${db.store}; valkey ${valkey ? 'on' : 'off: per process'})`);
-        console.log(`[Bot] profiles from server/profiles; events relay ${outbox.enabled ? `→ ${config.events.url}` : 'off (outbox accumulates)'}; heartbeat ${config.device.heartbeatMs} ms, offline after ${config.device.heartbeatMs * config.device.offlineMisses + config.device.offlineGraceMs} ms`);
+        console.log(`[Bot] profiles from server/profiles; events relay ${outbox.enabled ? `→ ${config.events.url}` : 'off (outbox accumulates)'}; usage relay ${usage.enabled ? `→ ${config.billing.url}` : 'off (readings wait)'}; heartbeat ${config.device.heartbeatMs} ms, offline after ${config.device.heartbeatMs * config.device.offlineMisses + config.device.offlineGraceMs} ms`);
     });
     server.keepAliveTimeout = 65_000;
     server.on('upgrade', (req, socket, head) => hub.handleUpgrade(req, socket, head));
@@ -66,6 +68,7 @@ async function main() {
             () => keys.stop(),
             () => hub.close().catch(() => {}),
             () => outbox.stop(),
+            () => usage.stop(),
         ],
         close: [
             () => db.close().catch(() => {}),

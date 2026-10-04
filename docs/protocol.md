@@ -82,8 +82,8 @@ At most 64 frames wait; any more are answered `error` `bot.not_ready`.
 | `telemetry` | `battery, voltage, sensors{}, events[]?, …` | at most 2 Hz; extra frames are dropped — except a frame with a non-empty `events` array (a fault, a bump, low battery), which is always delivered and does not count against the samples' window. `battery` is either a 0..1 fraction or an object `{volts, percent}` with `percent` 0..100 (as OpenVibe.Node sends it); `robot_state.battery` is always the fraction 0..1 (or `null`), while `robot_state.telemetry` keeps the raw frame |
 | `status` | `firmware, capabilities, faults[], estop_latched, device_kind?, drivers[]?, agent_version?` | on connect and on change. See below |
 | `reauth` | `token` | a Network-paired machine only: a fresh node token for the same principal, before the last one expires (300 s); a refused one is answered `error` `bot.reauth_refused` and moves nothing |
-| `ack` | `id` | a command ran |
-| `nack` | `id, fault_code` | a command was refused on the device |
+| `ack` | `id` | a command ran (or, keyed by a job id, a job was accepted: §1.2) |
+| `nack` | `id, fault_code` | a command (or a job, §1.2) was refused on the device |
 | `estop_state` | `latched, by, at, robot_id?` | the device's own latch, a **report**; `robot_id` omitted = every robot the device serves. See below |
 
 `kind` is one of `drive`, `actuator`, `ptz`, `say`, `display`, `halt`, and a device only ever gets the
@@ -237,6 +237,51 @@ heartbeat or any frame brings it back. Commands are never replayed after a recon
 `id` is answered with the first result without reaching the device again.
 
 ---
+
+### 1.2 Jobs (platform.job-frame@1)
+
+Bot is the dispatcher of plan T14: it hands a `platform.job@1` job to a paired OpenVibe.Node over this socket
+and meters it. There is no HTTP route; the Run service (which owns `run.job.*`) calls
+`server/jobs/dispatch.js` `dispatch(db, nodeId, job, { link, project, subject, provider })` and
+`cancel(db, jobId, { link })`. Each frame carries the envelope (`v`, `seq`, `ts`, `type`) and is validated
+against `platform.job-frame@1` from the pinned openvibe-contracts; an invalid one is answered `error`
+`bot.bad_frame`, and one naming a job of another device `error` `bot.unknown_job` (nothing changes).
+
+| direction | type | fields | Bot's part |
+|---|---|---|---|
+| server → device | `job` | `job` (platform.job@1) | sent by `dispatch` when the device is connected, and resent on every reconnect while unacked. Never sent for a `class` missing from the device's stored `capabilities.worker.runtime_classes` (dispatch answers `409 bot.class_unadvertised`; a queued job whose class is no longer advertised fails with `fault_code` `bot.class_unadvertised`) |
+| server → device | `job_cancel` | `id` | sent by `cancel` if the job was sent and has not ended; resent on a reconnect and when a `job_started` or `ack` crosses it. A job not yet started is `cancelled` at once; a cancelled job is never sent again |
+| server → device | `job_exit_ack` | `id` | after every reading of the job is committed to `run_usage_outbox`; the Node then forgets the job and stops resending its `job_exit` |
+| device → server | `ack` / `nack` | `id`, `fault_code` | the Node accepted (`placed`) or refused (`failed`, `fault_code` kept) the job |
+| device → server | `job_started` | `id, started_ms` | `running`; the first `started_ms` anchors every second and never changes |
+| device → server | `job_stdout` | `id, chunk_seq, chunk` | the last 1 MiB of each job, in memory; a `chunk_seq` already held is dropped. Never metered |
+| device → server | `job_usage` | `id, started_ms, second, cpu_ms?` | one reading for `second` (quantity 1); ignored once `job_exit` was taken |
+| device → server | `job_exit` | `id, reason, code, result, usage{started_ms?, wall_ms, …}` | authoritative: writes (or finds) every second it stands for, sets the final state, then `job_exit_ack`. A second `job_exit` writes nothing and is acked again |
+
+States (`run_jobs.state`): `queued` → `placed` (ack) → `running` (`job_started`) → `succeeded` (exited, code 0),
+`failed` (exited ≠ 0, `limit`, `stopped`, `failed`, or a `nack`), `cancelled`, `expired` (`ttl`).
+
+**Metering keys.** Each wall-clock second `n` of a job is one `platform.usage-sample@1` reading:
+
+| field | value |
+|---|---|
+| `id`, `idempotency_key` | `run:<job id>:<n>` |
+| `service` / `operation` / `unit` | `run` / `function.invoke` / `s` |
+| `quantity` | `1`; the partial last second `(wall_ms mod 1000)/1000`, never 0 |
+| `at` | `new Date(started_ms + n*1000).toISOString()` |
+| `resource` / `node` / `source` | the job id / the device id (`dev_…`) / `openvibe-node.worker` |
+| `project`, `subject`, `provider` | from Bot's record of the job (what `dispatch` was given); left out when unset |
+
+No field depends on when or how often a frame arrived, and no rating field is set. `job_exit` writes seconds
+0 … floor(wall_ms/1000) − 1 and the partial last second, so a lost `job_usage` is backfilled; a resend, a
+`job_usage` and the backfill of one second are one key, kept once in `run_usage_outbox` (`ON CONFLICT DO
+NOTHING`). `run_jobs.usage_read` (seconds queued) only moves forward. Every reason is billed for the seconds the
+process held, never beyond the job's own `limits.wall_ms` (a later second is not metered and `wall_ms` is capped
+there). The relay posts each reading to OpenVibe.Billing's `billing.usage.record` (`POST <BOT_BILLING_URL>/api/v1/usage`,
+`Authorization: Bearer <BOT_BILLING_TOKEN>`), one per request; 201 (written) and 200 (identical replay) mark it
+sent. 400/409/413/422 mark it rejected (kept, never resent). Anything else, and `BOT_BILLING_URL` or
+`BOT_BILLING_TOKEN` unset, leaves it queued and retried with backoff: a reading is never dropped and never billed
+twice.
 
 ## 2. `/control` — the operator WebSocket
 
