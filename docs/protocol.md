@@ -377,7 +377,10 @@ and a "Sign in to control" link that opens `/panel/:id` in a new tab; otherwise 
 An unknown robot is `404`. The e-stop state is always shown; the E-stop button only to an owner or operator.
 Its response carries `Content-Security-Policy: default-src 'self'; frame-ancestors 'self' <BOT_EMBED_ORIGINS>;
 object-src 'none'; base-uri 'self'` and `Cache-Control: no-store`; every other page keeps
-`frame-ancestors 'self'`.
+`frame-ancestors 'self'`. Framing takes both sides and the two lists are independent: `BOT_EMBED_ORIGINS` lets
+a page frame Bot, while that page must list Bot's origin — its own `BASE_URL`, `https://openvibe.bot` in
+production — in its own CSP `frame-src` (OpenVibe.Live computes it from `LIVE_BOT_URL`, default
+`https://openvibe.bot`). Allow the framer here but not Bot there and the browser refuses the frame.
 
 The watcher's panel joins on `wss://openvibe.bot/watch`: no credential, never a cookie or token.
 
