@@ -93,6 +93,11 @@ const { boot, check, done } = require('./helpers/app');
         assert.ok(page.json.audit[0].id > page.json.audit[1].id);
         assert.ok(page.json.next_before);
         assert.strictEqual((await t.call('GET', `/api/v1/robots/${robot.id}/audit`, { user: stranger })).status, 403);
+        // The audit is a read for a service: bot.robot.read opens it, manage alone does not.
+        const svc = await t.call('GET', `/api/v1/robots/${robot.id}/audit`, { cap: ['bot.robot.read'] });
+        assert.strictEqual(svc.status, 200, svc.text);
+        assert.strictEqual(svc.json.audit.length, 3);
+        assert.strictEqual((await t.call('GET', `/api/v1/robots/${robot.id}/audit`, { cap: ['bot.robot.manage'] })).status, 403);
     });
 
     await check('an outbox event is written for a refused command (bot.command.refused)', async () => {
