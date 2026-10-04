@@ -7,7 +7,9 @@
  *   GET  /api/health, /api/ready, /release.json, /metrics (direct loopback callers only)
  *   /api/v1/*    the API (service tokens + user tokens, see api/v1.js)
  *   /auth/*      Network SSO session for people (the control WS accepts the ov_token cookie)
- *   GET  /       a one-line text placeholder; the panel and the site are designed separately
+ *   GET  /       a one-line text placeholder
+ *   /robots, /pair/:id, /panel/:id   the signed-in pages (web/routes.js); a `sim` robot is driven by the
+ *                in-process simulator (sim/index.js), which server/index.js starts for existing ones at boot
  *
  * createApp({ config, db, valkey, registry, keys, hub, outbox, usage, nodes, openre, now, fetchImpl, log }) — everything
  * injectable. `db` is an openvibe-sdk/db handle with the schema migrated; `hub` the realtime WebSocket
@@ -26,6 +28,7 @@ const { createBotOutbox } = require('./events/outbox');
 const { createUsageRelay } = require('./jobs/metering');
 const { createDomain } = require('./domain');
 const { createRealtime } = require('./realtime');
+const { createSimulator } = require('./sim');
 const { createApiAuth } = require('./api/auth');
 const { v1Router } = require('./api/v1');
 const { createActorLimits } = require('./api/actor-limits');
@@ -53,6 +56,7 @@ function createApp(opts = {}) {
     const openre = opts.openre !== undefined ? opts.openre : createOpenRe(config, { fetchImpl });
     const domain = createDomain({ db, config, outbox, link: hub, nodes, openre, now, log });
     hub.bindDomain(domain);
+    const sim = opts.sim || createSimulator({ config, domain, hub, now, log });
     const apiAuth = createApiAuth({ config, keys, userAuth });
     const release = require('openvibe-shared/release').createRelease({ service: 'bot', root: path.join(__dirname, '..') });
 
@@ -85,7 +89,7 @@ function createApp(opts = {}) {
     app.use('/api/v1', express.json({ limit: '64kb' }), (req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); }, apiAuth.middleware, v1Router({ domain, apiAuth, limits, hub }));
     app.use('/auth', createSessionRoutes(config, userAuth, { fetchImpl }));
     app.use(viewerMiddleware(userAuth));
-    app.use(createWebRoutes(config));
+    app.use(createWebRoutes(config, { domain, sim, log }));
 
     app.use((req, res) => {
         if (req.path.startsWith('/api/') || req.path.startsWith('/internal/')) return http.sendProblem(res, 404, 'not_found', { ctx: req.ov });
@@ -104,7 +108,7 @@ function createApp(opts = {}) {
         return res.status(500).type('text/plain').send('Something went wrong\n');
     });
 
-    Object.assign(app.locals, { config, db, valkey, domain, keys, outbox, usage, hub, userAuth, metrics });
+    Object.assign(app.locals, { config, db, valkey, domain, keys, outbox, usage, hub, sim, userAuth, metrics });
     return app;
 }
 

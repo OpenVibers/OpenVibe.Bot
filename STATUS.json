@@ -36,6 +36,7 @@
     "command audit kept 30 days, and the bot.robot.online/offline, bot.estop.set/cleared and bot.command.refused outbox events",
     "public robot-profile catalogue (GET /profiles, /profiles/:id); robots are private to their owner, with public control only as a timed turn queue",
     "per-actor limits on capability-boundary writes (openvibe-sdk/limits; shared through Valkey when VALKEY_URL is set)",
+    "signed-in pages: /robots (list and add), /pair/:id (the code and the one-paste installer command) and /panel/:id, rendered from the robot's profile and driven over /control; a sim.rover robot is driven by an in-process simulated device",
     "platform.job@1 jobs dispatched to a paired Node over /device (platform.job-frame@1: resent unacked on reconnect, only to an advertised runtime class) and metered per second into run_usage_outbox for billing.usage.record"
   ],
   "updated": "2026-10-04"

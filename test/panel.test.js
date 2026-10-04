@@ -1,0 +1,173 @@
+'use strict';
+// The five-minute path and the profile-rendered panel (plan T15 step 3): every profile's widgets render from
+// the profile alone, the e-stop is the owner's and an operator's, the signed-in pages answer as the gate does,
+// and a `sim` robot is driven by the in-process simulator (telemetry, acks, the deadman).
+const assert = require('assert');
+const { boot, check, done } = require('./helpers/app');
+const { loadProfiles } = require('../server/profiles');
+const { renderPanel, renderWidget, renderRobotsPage, renderPairingPage, esc } = require('../server/web/render');
+const { DEFAULT_ALLOW } = require('../server/domain');
+
+const robotFor = (profile, extra = {}) => ({ id: 'rob_1', name: 'Rover', profile_id: profile.id, estop: { latched: false }, ...extra });
+const allowedFor = (profile, role) => [...(DEFAULT_ALLOW[role] || []).filter((k) => k !== 'halt' && profile.commands[k]), ...(DEFAULT_ALLOW[role] ? ['halt'] : [])];
+
+(async () => {
+    const profiles = [...loadProfiles().values()];
+
+    await check('every profile renders each of its widgets, controls enabled only for an allowed kind', () => {
+        assert.ok(profiles.length >= 4);
+        for (const p of profiles) {
+            const html = renderPanel({ robot: robotFor(p), profile: p, role: 'owner', allowed_commands: allowedFor(p, 'owner') });
+            for (const w of p.widgets) assert.ok(html.includes(`data-widget="${w.type}"`), `${p.id}: no ${w.type} widget`);
+            for (const w of p.widgets.filter((x) => x.command)) {
+                assert.doesNotMatch(renderWidget(w, { profile: p, allowed_commands: allowedFor(p, 'owner') }), / disabled/, `${p.id}: ${w.type} is disabled for the owner`);
+                assert.match(renderWidget(w, { profile: p, allowed_commands: [] }), / disabled/, `${p.id}: ${w.type} is enabled with no allowed kind`);
+            }
+            assert.ok(html.includes('<script src="/panel/panel.js" defer></script>'));
+            assert.doesNotMatch(html, /<script>|style="/, 'nothing inline (CSP default-src self)');
+        }
+    });
+
+    await check('the e-stop is shown to the owner and an operator; only the owner gets the clear', () => {
+        const p = profiles.find((x) => x.id === 'sim.rover');
+        const html = (role) => renderPanel({ robot: robotFor(p, { estop: { latched: true } }), profile: p, role, allowed_commands: allowedFor(p, role) });
+        assert.ok(html('owner').includes('data-estop>') && html('owner').includes('data-estop-clear'));
+        assert.ok(html('operator').includes('data-estop>') && !html('operator').includes('data-estop-clear'));
+        for (const role of ['viewer', 'queue']) {
+            assert.ok(!html(role).includes('data-estop>') && !html(role).includes('data-estop-clear'), `${role} sees an e-stop button`);
+            assert.ok(html(role).includes('data-estop-banner data-latched="true"'), `${role} does not see the latched banner`);
+        }
+        assert.match(renderWidget(p.widgets[0], { profile: p, allowed_commands: [] }), /disabled/);
+    });
+
+    await check('every value is escaped', () => {
+        const p = profiles.find((x) => x.id === 'sim.rover');
+        const evil = '<img src=x onerror=alert(1)>"\'&';
+        const panel = renderPanel({ robot: robotFor(p, { name: evil, id: 'rob_"x' }), profile: { ...p, name: evil, widgets: [{ ...p.widgets[0], label: evil }] }, role: evil, allowed_commands: [] });
+        const robots = renderRobotsPage({ robots: [{ id: 'rob_"x', name: evil, profile_id: evil, access_policy: 'private' }], profiles: [{ id: evil, name: evil }], error: evil, values: { name: evil } });
+        const pair = renderPairingPage({ robot: { id: 'rob_"x', name: evil }, pairing: { code: evil, installer: evil, expires_at: evil }, profile: { name: evil } });
+        for (const html of [panel, robots, pair]) {
+            assert.ok(!html.includes('<img') && !html.includes('rob_"x'), 'an unescaped value');
+            assert.ok(html.includes(esc(evil)));
+        }
+    });
+
+    const t = await boot();
+    const alex = t.network.newUser('alex');
+    const bob = t.network.newUser('bob');
+    const carol = t.network.newUser('carol');
+    const cookie = (user) => ({ Cookie: `ov_token=${t.network.signUser(user)}` });
+    const get = (p, user, headers = {}) => fetch(t.base + p, { redirect: 'manual', headers: { ...(user ? cookie(user) : {}), ...headers } });
+    const post = (p, user, form, headers = {}) => fetch(t.base + p, {
+        method: 'POST', redirect: 'manual', body: new URLSearchParams(form).toString(),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...(user ? cookie(user) : {}), ...headers },
+    });
+    const control = (user) => t.ws('/control', { headers: cookie(user) });
+    const poll = async (fn, ms = 3000) => { const end = Date.now() + ms; while (Date.now() < end) { const v = await fn(); if (v) return v; await t.wait(20); } return null; };
+
+    await check('/, /robots.txt and /install are unchanged; the pages need a session', async () => {
+        assert.match(await (await get('/')).text(), /^OpenVibe\.Bot .* — ok/);
+        assert.strictEqual(await (await get('/robots.txt')).text(), 'User-agent: *\nDisallow: /\n');
+        assert.strictEqual((await get('/install')).status, 302);
+        for (const p of ['/robots', '/panel/rob_x', '/pair/rob_x']) {
+            const r = await get(p);
+            assert.strictEqual(r.status, 302, p);
+            assert.strictEqual(r.headers.get('location'), `/auth/login?next=${encodeURIComponent(p)}`);
+        }
+        const js = await get('/panel/panel.js');
+        assert.strictEqual(js.status, 200);
+        assert.match(js.headers.get('content-type'), /javascript/);
+        assert.match((await get('/panel/panel.css')).headers.get('content-type'), /text\/css/);
+    });
+
+    let simId;
+    await check('POST /robots (sim.rover) → its panel, 200 with the profile\'s widgets', async () => {
+        const r = await post('/robots', alex, { name: 'Sim', profile_id: 'sim.rover', access_policy: 'private' });
+        assert.strictEqual(r.status, 303);
+        const m = /^\/panel\/(rob_[0-9A-Za-z]+)$/.exec(r.headers.get('location'));
+        assert.ok(m, r.headers.get('location'));
+        simId = m[1];
+        const page = await get(`/panel/${simId}`, alex);
+        assert.strictEqual(page.status, 200);
+        assert.strictEqual(page.headers.get('cache-control'), 'no-store');
+        const html = await page.text();
+        for (const w of ['drive', 'camera', 'latency']) assert.ok(html.includes(`data-widget="${w}"`), w);
+        assert.ok(html.includes(`data-robot-id="${simId}"`) && html.includes('data-role="owner"') && html.includes('data-estop>'));
+        const list = await (await get('/robots', alex)).text();
+        assert.ok(list.includes(`/panel/${simId}`));
+    });
+
+    await check('a sim robot has telemetry within 1 s and acks a command; the deadman stops it', async () => {
+        const { robot } = await t.robot(alex, { name: 'Sim 2' });
+        assert.strictEqual(await t.app.locals.sim.attach(robot.id), true);
+        assert.ok(await poll(() => t.hub.deviceState(`dev_sim_${robot.id}`).telemetry, 1000), 'no telemetry within 1 s');
+        assert.strictEqual(t.hub.onlineCount(), 0, 'a simulator is not counted as a device');
+        const c = await control(alex);
+        c.send({ type: 'join', robot_id: robot.id });
+        const joined = await c.waitFor((m) => m.type === 'joined');
+        assert.ok(joined.allowed_commands.includes('drive'));
+        c.send({ type: 'command', id: 'd1', kind: 'drive', value: { throttle: 0.5 } });
+        const res = await c.waitFor((m) => m.type === 'command_result' && m.id === 'd1');
+        assert.strictEqual(res.result, 'ack');
+        // Held as the panel holds it (a fresh id every 100 ms): moving; let go: the deadman stops it by itself.
+        const moving = (m) => m.type === 'robot_state' && m.state.telemetry && m.state.telemetry.drive.throttle === 0.5;
+        let n = 0;
+        const hold = setInterval(() => c.send({ type: 'command', id: `h${++n}`, kind: 'drive', value: { throttle: 0.5 } }), 100);
+        try { assert.ok(await c.waitFor(moving), 'moving'); } finally { clearInterval(hold); }
+        const after = c.messages.length;
+        assert.ok(await c.waitFor((m) => c.messages.indexOf(m) >= after && m.type === 'robot_state' && m.state.telemetry && m.state.telemetry.drive.throttle === 0), 'stopped at the deadline');
+        c.close();
+        t.app.locals.sim.stop(robot.id);
+        assert.strictEqual(t.hub.isOnline(`dev_sim_${robot.id}`), false);
+    });
+
+    await check('a signed-in person with no role gets 403 and join answers bot.not_an_operator', async () => {
+        const r = await get(`/panel/${simId}`, bob);
+        assert.strictEqual(r.status, 403);
+        const c = await control(bob);
+        c.send({ type: 'join', robot_id: simId });
+        const e = await c.waitFor((m) => m.type === 'joined' || m.type === 'error');
+        assert.strictEqual(e.type, 'error');
+        assert.strictEqual(e.code, 'bot.not_an_operator');
+        c.close();
+        assert.strictEqual((await get('/panel/rob_nothing', bob)).status, 404);
+    });
+
+    await check('a viewer member gets the panel with nothing to drive; a stranger on a queue robot gets the queue role', async () => {
+        await t.call('POST', `/api/v1/robots/${simId}/operators`, { user: alex, body: { subject: carol.subject, role: 'viewer' } });
+        const html = await (await get(`/panel/${simId}`, carol)).text();
+        assert.ok(html.includes('data-role="viewer"') && html.includes('data-allowed="[]"') && !html.includes('data-estop>'));
+        const { robot } = await t.robot(alex, { name: 'Queue', access_policy: 'queue' });
+        const q = await (await get(`/panel/${robot.id}`, bob)).text();
+        assert.ok(q.includes('data-role="queue"'));
+    });
+
+    await check('POST /robots (a hardware profile) → the owner\'s pairing page; others get 403', async () => {
+        const r = await post('/robots', alex, { name: 'Arm', profile_id: 'adeept.adr036' });
+        assert.strictEqual(r.status, 303);
+        const loc = r.headers.get('location');
+        assert.match(loc, /^\/pair\/rob_/);
+        const page = await get(loc, alex);
+        assert.strictEqual(page.status, 200);
+        const html = await page.text();
+        assert.match(html, /class="code">[0-9A-Z]{4}-[0-9A-Z]{4}</);
+        assert.match(html, /--driver adeept</);
+        assert.ok(html.includes('data-copy'));
+        assert.strictEqual((await get(loc, bob)).status, 403);
+    });
+
+    await check('a bad form answers 422 with the form; a cross-site post is refused', async () => {
+        const bad = await post('/robots', alex, { name: '', profile_id: 'sim.rover' });
+        assert.strictEqual(bad.status, 422);
+        assert.match(await bad.text(), /class="error"/);
+        const unknown = await post('/robots', alex, { name: 'X', profile_id: 'nope' });
+        assert.strictEqual(unknown.status, 422);
+        const cross = await post('/robots', alex, { name: 'X', profile_id: 'sim.rover' }, { Origin: 'https://evil.test' });
+        assert.strictEqual(cross.status, 403);
+        assert.strictEqual((await post('/robots', null, { name: 'X', profile_id: 'sim.rover' })).status, 302);
+    });
+
+    t.app.locals.sim.stopAll();
+    await t.close();
+    done();
+})();

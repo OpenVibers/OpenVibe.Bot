@@ -31,7 +31,7 @@ async function main() {
     const valkey = createValkey({ url: config.valkey.url, prefix: config.valkey.prefix });
 
     const app = createApp({ config, db, valkey, registry });
-    const { domain, keys, outbox, usage, hub } = app.locals;
+    const { domain, keys, outbox, usage, hub, sim } = app.locals;
     keys.start();
 
     const timers = [];
@@ -50,6 +50,8 @@ async function main() {
     });
     server.keepAliveTimeout = 65_000;
     server.on('upgrade', (req, socket, head) => hub.handleUpgrade(req, socket, head));
+    // The robots whose profile's driver is `sim` get their in-process device back (server/sim).
+    sim.startAll().then((n) => n && console.log(`[Bot] simulator: ${n} sim robots`), (e) => console.warn(`[Bot] simulator: ${e.message}`));
 
     // systemd sends SIGTERM (SIGINT by hand); openvibe-sdk/service's gracefulStop takes the signal, runs the stop
     // steps in order (nothing new starts), drains the HTTP server, runs the close steps, then exits. The stop steps
@@ -66,6 +68,7 @@ async function main() {
         stop: [
             () => timers.forEach(clearInterval),
             () => keys.stop(),
+            () => sim.stopAll(),
             () => hub.close().catch(() => {}),
             () => outbox.stop(),
             () => usage.stop(),
