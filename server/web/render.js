@@ -209,6 +209,15 @@ function renderWidget(w, { profile = {}, allowed_commands = [] } = {}) {
     return `<section class="widget widget-${esc(w.type)}" data-widget="${esc(w.type)}"${cmd}><h2>${esc(label)}</h2>${inner}</section>`;
 }
 
+/** The owner's embed switch: plain markup, a checkbox posted as embed_public=on (the hidden field makes unchecked off). */
+function embedForm(robot) {
+    return `<form class="embed-form" method="post" action="/robots/${esc(robot.id)}/embed" data-embed-form>
+<input type="hidden" name="embed_public" value="off">
+<label><input type="checkbox" name="embed_public" value="on"${robot.embed_public ? ' checked' : ''}> Let anyone see this robot's video and readouts on a page that embeds it (never the controls)</label>
+<button type="submit">Save</button>
+</form>`;
+}
+
 function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs = 150 }) {
     const latched = !!(robot.estop && robot.estop.latched);
     const widgets = (profile.widgets || []).map((w, i) => ({ w, i }))
@@ -229,6 +238,7 @@ ${topbar(`<span class="crumb">${esc(robot.name)}</span>`)}
 <div class="widgets">
 ${widgets.join('\n')}
 </div>
+${role === 'owner' ? embedForm(robot) : ''}
 </main>`;
     return page(robot.name, body, { scripts: ['/panel/panel.js'], bodyClass: 'panel-page' });
 }
@@ -238,7 +248,7 @@ function renderRobotsPage({ robots = [], profiles = [], error = null, values = {
     const list = robots.length
         ? `<ul class="robots">${robots.map((r) => `<li class="robot-card"><a class="robot-name" href="/panel/${esc(r.id)}">${icon('robot')}<span>${esc(r.name)}</span></a>`
             + `<span class="robot-meta"><span class="pill">${esc(names.get(r.profile_id) || r.profile_id)}</span> <span class="pill">${esc(POLICY_LABEL[r.access_policy] || r.access_policy)}</span></span>`
-            + `<span class="robot-actions"><a class="button" href="/panel/${esc(r.id)}">Open panel</a> <a class="button quiet pair" href="/pair/${esc(r.id)}">${icon('plug')}<span>Pair a device</span></a></span></li>`).join('')}</ul>`
+            + `<span class="robot-actions"><a class="button" href="/panel/${esc(r.id)}">Open panel</a> <a class="button quiet pair" href="/pair/${esc(r.id)}">${icon('plug')}<span>Pair a device</span></a></span>${embedForm(r)}</li>`).join('')}</ul>`
         : `<div class="empty">${icon('robot', 'icon empty-icon')}<p class="empty-title">No robots yet.</p><p>Add one below. A simulated rover needs no hardware and drives straight away.</p></div>`;
     const option = (v, label, selected) => `<option value="${esc(v)}"${selected ? ' selected' : ''}>${esc(label)}</option>`;
     const form = `<form class="add-robot card" method="post" action="/robots">
