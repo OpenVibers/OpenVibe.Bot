@@ -28,6 +28,35 @@ function checkInstallerSource(sourceUrl) {
     }
 }
 
+const DEFAULT_EMBED_ORIGINS = ['https://openvibe.live', 'https://www.openvibe.live'];
+
+/**
+ * BOT_EMBED_ORIGINS (comma or space separated): the pages that may frame the embeddable panel. Each entry is a
+ * bare https origin, no path, query or wildcard; http://localhost:<port> and http://127.0.0.1:<port> only
+ * outside production. Anything else refuses to boot, so the CSP frame-ancestors list can never be widened by accident.
+ */
+function parseEmbedOrigins(value, isProduction) {
+    const entries = String(value || '').split(/[\s,]+/).filter(Boolean);
+    if (!entries.length) return [...DEFAULT_EMBED_ORIGINS];
+    const out = [];
+    for (const entry of entries) {
+        let u = null;
+        try { u = new URL(entry); } catch { /* reported below */ }
+        const local = u && u.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(u.hostname) && u.port !== '' && !isProduction;
+        const bare = u && (u.protocol === 'https:' || local) && u.origin === entry && !entry.includes('*');
+        if (!bare) {
+            throw new Error(`BOT_EMBED_ORIGINS entries must be bare https origins like https://openvibe.live (no path, query or wildcard${isProduction ? '' : '; http://localhost:<port> is allowed outside production'}), not ${JSON.stringify(entry)}`);
+        }
+        if (!out.includes(entry)) out.push(entry);
+    }
+    return out;
+}
+
+/** The CSP frame-ancestors source list for the embeddable panel: this site and the configured origins. */
+function frameAncestors(config) {
+    return ["'self'", ...config.embed.origins].join(' ');
+}
+
 function loadConfig(env = process.env) {
     const nodeEnv = env.NODE_ENV || 'development';
     const isProduction = nodeEnv === 'production';
@@ -40,6 +69,7 @@ function loadConfig(env = process.env) {
     }
     const installerSource = String(env.BOT_INSTALLER_SOURCE_URL || 'https://github.com/OpenVibers/OpenVibe.Node/releases/latest/download/install.sh').trim();
     checkInstallerSource(installerSource);
+    const embedOrigins = parseEmbedOrigins(env.BOT_EMBED_ORIGINS, isProduction);
     return {
         nodeEnv,
         isProduction,
@@ -152,6 +182,8 @@ function loadConfig(env = process.env) {
         // prints; sourceUrl is where GET /install sends the client (302). Bot keeps no copy of the script:
         // it redirects to OpenVibe.Node's canonical one, and only this config (never a query parameter)
         // chooses the target.
+        // Embeddable panel (plan T15 R9): the origins whose pages may frame a robot's read-only panel.
+        embed: { origins: embedOrigins },
         installer: {
             scriptUrl: trim(env.BOT_INSTALLER_URL || 'https://openvibe.bot/install'),
             sourceUrl: installerSource,
@@ -160,4 +192,4 @@ function loadConfig(env = process.env) {
     };
 }
 
-module.exports = { loadConfig };
+module.exports = { loadConfig, frameAncestors };

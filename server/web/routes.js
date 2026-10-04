@@ -10,6 +10,7 @@
  *   GET  /pair/:id         the owner only: a fresh pairing code and the installer command (never minted for a
  *                          cross-site navigation or a prefetch: those go to /robots)
  *   GET  /panel/:id        a member (or anyone on a `queue` robot): the panel, rendered from the profile
+ *   POST /robots/:id/embed the owner only: allow (embed_public=on) or stop (off) anonymous read-only embedding → 303 to its panel
  *   GET  /panel/panel.js, /panel/panel.css   the panel client and its sheet (public/, no build step)
  *
  * Not signed in → 302 to /auth/login?next=<the page>. No access → 403 (bot.not_an_operator / bot.forbidden).
@@ -68,8 +69,11 @@ function createWebRoutes(config, { domain = null, sim = null, limits = null, log
         try { return new URL(origin).origin === new URL(config.baseUrl).origin || new URL(origin).host === req.headers.host; } catch { return false; }
     };
 
+    // The embed flag is web-only: domain.present.robot (and so /api/v1) does not carry it.
+    const presentForPage = (row) => ({ ...domain.present.robot(row), embed_public: !!row.embed_public });
+
     async function robotsPage(req, res, me, extra = {}) {
-        const robots = (await domain.robots.list(me.subject)).map(domain.present.robot);
+        const robots = (await domain.robots.list(me.subject)).map(presentForPage);
         const profiles = (await listProfiles(domain.db)).map((p) => p.profile);
         res.type('html').send(renderRobotsPage({ robots, profiles, ...extra }));
     }
@@ -110,6 +114,20 @@ function createWebRoutes(config, { domain = null, sim = null, limits = null, log
         res.type('html').send(renderPairingPage({ robot: domain.present.robot(robot), pairing, profile: await profileOf(robot) }));
     }));
 
+    r.post('/robots/:id/embed', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        const robot = await domain.robots.get(req.params.id);
+        if (!robot) throw new BotError(404, 'bot.robot_not_found', 'no such robot');
+        if (robot.owner_subject !== me.subject) throw new BotError(403, 'bot.forbidden', 'only the owner may change embedding');
+        // The hidden "off" comes first, the checked box's "on" after it: the last value wins.
+        const sent = req.body && req.body.embed_public;
+        const value = Array.isArray(sent) ? sent[sent.length - 1] : sent;
+        if (value !== 'on' && value !== 'off') throw new BotError(422, 'bot.invalid_input', 'embed_public must be on or off');
+        await domain.robots.setEmbedPublic(robot.id, value === 'on');
+        res.redirect(303, `/panel/${robot.id}`);
+    }));
+
     r.get('/panel/:id', page(async (req, res) => {
         const me = requireUser(req);
         const robot = await domain.robots.get(req.params.id);
@@ -123,7 +141,7 @@ function createWebRoutes(config, { domain = null, sim = null, limits = null, log
         await startSim(robot, profile);
         const { maxCommandMs } = domain.control.effectiveLimits(robot, profile);
         res.type('html').send(renderPanel({
-            robot: domain.present.robot(robot), profile, role,
+            robot: presentForPage(robot), profile, role,
             allowed_commands: domain.control.allowedFor(robot, role, profile),
             // A held control is re-sent well inside the device's deadline, so it never stops between two frames.
             holdResendMs: Math.max(50, Math.min(HOLD_RESEND_MS, Math.floor(maxCommandMs / 2))),

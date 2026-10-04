@@ -162,6 +162,11 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         await db.query(`UPDATE robots SET ${sets.join(', ')} WHERE id = $1`, args);
         return getRobot(id);
     }
+    /** Opt a robot in or out of anonymous read-only embedding (the owner check is the caller's; no event). */
+    async function setEmbedPublic(id, value) {
+        await db.query('UPDATE robots SET embed_public = $2, updated_at = $3 WHERE id = $1', [id, !!value, iso(now())]);
+        return getRobot(id);
+    }
     /**
      * Remove a robot. Its OpenRe stream's key is revoked first (rotated with no grace, its sessions ended), so
      * nothing publishes as the robot afterwards; an OpenRe that refuses or does not answer leaves the robot in
@@ -784,7 +789,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     return {
         db, now, config, log, outbox, link,
         present: { robot: presentRobot, device: presentDevice, video: presentVideo },
-        robots: { create: createRobot, list: listRobots, get: getRobot, update: updateRobot, remove: removeRobot },
+        robots: { create: createRobot, list: listRobots, get: getRobot, update: updateRobot, setEmbedPublic, remove: removeRobot },
         members: { roleOf, add: addOperator, remove: removeOperator, list: listOperators },
         pairing: { create: createPairingCode, redeem, prune: prunePairingCodes, installerCommand, driverForProfile, whipUrl },
         devices: { byCredential, bindNode, issuePublishKey, revokeVideo, updateDeclared, revokeNode, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, touchSeen, setOnline },
