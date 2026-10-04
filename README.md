@@ -2,6 +2,56 @@
 
 The open control panel for robots (openvibe.bot). Design: OpenVibe.Contracts docs/adr/ADR-043-bot-devices-and-control.md; plan track T15.
 
+## Purpose
+
+OpenVibe.Bot pairs a robot's machines, keeps their state and gates every operator command. A device opens one outbound WebSocket to `/device`; a person drives it from `/control` or the REST API, through the same gate — roles, per-robot limits, cooldowns and the turn budget — over a panel built from the robot's profile rather than per-robot code.
+
+## Owns
+
+- Robots, their profiles and each robot's limits, `allow` lists, roles and operators.
+- Devices (the machines that serve a robot) and the credentials that identify them: hashed at rest, rotated and revoked, never readable back.
+- Pairing: one-time codes with a short expiry, minted by Bot or, with `BOT_PAIRING_AUTHORITY=network`, by OpenVibe.Network.
+- The `/device` and `/control` WebSockets, the command gate and the latched e-stop.
+- The command audit (`command_audit`, kept 30 days) and the `bot.*` outbox events.
+
+## Does not own
+
+- Identity, subjects and tokens (OpenVibe.Network) and the robot's record on Network.
+- Video: a device publishes over WHIP to OpenRe.Stream; Bot only hands out the URL at pairing.
+- The agent that runs on the robot; it ships with the T15 device-agent job.
+- The public openvibe.bot front page and legal pages, built by OpenVibe.Sites.
+
+## Depends on
+
+- PostgreSQL 18: robots, devices, profile rows, pairing codes, the command audit and the event outbox; `migrations/` applies on boot.
+- Valkey (`VALKEY_URL`, optional): the shared per-actor limit counters; unset, limits are counted per process.
+- OpenVibe.Network: user and service tokens, node tokens, and pairing when the authority is `network`.
+- OpenRe.Stream: the WHIP ingest base (`BOT_WHIP_BASE`) devices publish to.
+- `openvibe-contracts` v0.85.0, `openvibe-sdk` v0.26.0 and `openvibe-shared` v2.5.0 (package.json).
+
+## Capabilities
+
+| capability | guards |
+|---|---|
+| `bot.robot.read` | `GET /robots`, `GET /robots/:id`, operators, devices and the audit, for a service acting for an owner |
+| `bot.robot.manage` | create, patch and delete a robot, pairing codes, operators |
+| `bot.robot.control` | the e-stop set and clear (clear is owner-only) and the control gate |
+| `bot.device.connect` | rotate and revoke a device credential |
+
+A person acts on their own robots with a Network user token; a service acts with a service token plus the capability, for the subject it names. The REST routes are in `docs/protocol.md` §3 and the two WebSockets in §§1–2.
+
+## Tests
+
+`npm test` runs `test/run.js`, the whole suite. `npm run test:pg` (`BOT_TEST_STORE=pg`) runs the same suite against PostgreSQL; the default store is in-process PGlite. The tests cover the device and operator WebSocket gates, the REST routes, the pairing paths, the owner fence, the e-stop and the outbox.
+
+## Security
+
+- A device credential is a secret: sent only in the `Authorization` header (never a query string), stored hashed, returned once by `pair` or a rotation, and revoking it closes the socket at once.
+- A person acts only as themself; naming anyone else is refused, never ignored, and a node token is refused on the person and service routes.
+- Pairing codes are one-time and short-lived; the e-stop is latched and only the owner clears it, while `halt` always passes the gate.
+- Every command, allowed or refused, is audited; the outbox carries ids, kinds and results — never a credential, a pairing code, a publish key or a WHIP URL.
+- `/api/health` and `/api/ready` are loopback-only; nginx terminates TLS and upgrades `/device` and `/control`.
+
 ## Deploy
 
 Production runs the Node process under systemd as `openvibe-bot.service` (unit reference: `deploy/systemd/openvibe-bot.service`), with `WorkingDirectory=/opt/openvibe.bot`, `ExecStart` running `server/index.js`, and secrets/config read from the environment file `/etc/openvibe/bot.env`. The app listens on port **4630** behind nginx (`deploy/nginx/openvibe.bot.conf`), which terminates TLS and upgrades the `/device` and `/control` WebSockets to `127.0.0.1:4630`. Readiness is `http://127.0.0.1:4630/api/ready` (liveness: `/api/health`); both are loopback-only.
