@@ -80,6 +80,32 @@ function createRealtime({ config, keys, userAuth, usage = null, log = console, n
         socket.destroy();
     }
 
+    /**
+     * An in-process device (server/sim): no socket and no credential, so it is attached here and never through
+     * /device. `device` is the device as the hub sees it ({ id, robot_ids, kind }); `onFrame(frame)` gets what Bot
+     * sends it, on a later tick as a real socket would; its frames come back through `deliver`, the same path a
+     * socket's frames take. A real device online for the same robot is preferred over a simulated one.
+     */
+    function attachSim(device, { onFrame, onClose = () => {} }) {
+        if (closed) return null;
+        const ws = {
+            readyState: OPEN,
+            send(data) { setImmediate(() => { if (ws.readyState === OPEN) onFrame(JSON.parse(data)); }); },
+            close() { if (ws.readyState !== OPEN) return; ws.readyState = 3; onClose(); },
+        };
+        const conn = { ws, sim: true, seq: 0, pending: false, device: null, online: false, rttMs: null, telemetry: null, status: null, deviceEstop: new Map(), backlog: null, lastHeartbeat: now(), lastTelemetry: 0, sessionId: prefixedId('sess', now()) };
+        attachDevice(conn, device);
+        sendHello(conn);
+        const ready = sendConfig(conn).then(() => bringOnline(conn)).catch((e) => log.warn(`[Bot] simulator ${device.id}: ${e.message}`));
+        return { deliver: (frame) => (ws.readyState === OPEN ? onDeviceFrame(conn, JSON.stringify(frame)) : undefined), ready };
+    }
+    function detachSim(deviceId) {
+        const c = deviceConns.get(deviceId);
+        if (!c || !c.sim) return;
+        c.ws.close();
+        dropDevice(c);
+    }
+
     // ── Device side ───────────────────────────────────────────────────────────────────────────────
     async function onDeviceSocket(ws, req) {
         // backlog: while authentication (credential or pair) is in progress, frames wait here and are handled
@@ -208,8 +234,13 @@ function createRealtime({ config, keys, userAuth, usage = null, log = console, n
         sendToRobotDevices(robotId, { type: 'estop', latched, by, at: iso(now()) });
         await refreshConfig(robotId);
     }
+    /** The online/offline event and last_seen are a real machine's: a simulator (no devices row) reports neither. */
+    function reportOnline(conn, online) {
+        if (conn.sim) return Promise.resolve();
+        return domain.devices.setOnline(conn.device, online).catch((e) => log.warn(`[Bot] ${online ? 'online' : 'offline'} event: ${e.message}`));
+    }
     async function bringOnline(conn) {
-        await domain.devices.setOnline(conn.device, true).catch((e) => log.warn(`[Bot] online event: ${e.message}`));
+        await reportOnline(conn, true);
         for (const robotId of deviceRobotIds(conn.device)) broadcast(robotId);
     }
 
@@ -220,7 +251,7 @@ function createRealtime({ config, keys, userAuth, usage = null, log = console, n
         if (!conn.online) return;
         conn.online = false;
         if (silent) return;
-        domain.devices.setOnline(conn.device, false).catch((e) => log.warn(`[Bot] offline event: ${e.message}`));
+        reportOnline(conn, false);
         for (const robotId of deviceRobotIds(conn.device)) broadcast(robotId);
     }
 
@@ -458,8 +489,13 @@ function createRealtime({ config, keys, userAuth, usage = null, log = console, n
 
     // ── State and helpers ─────────────────────────────────────────────────────────────────────────
     function deviceForRobot(robotId) {
-        for (const conn of deviceConns.values()) if (conn.online && deviceRobotIds(conn.device).includes(robotId)) return conn;
-        return null;
+        let sim = null;
+        for (const conn of deviceConns.values()) {
+            if (!conn.online || !deviceRobotIds(conn.device).includes(robotId)) continue;
+            if (!conn.sim) return conn;
+            sim = sim || conn;
+        }
+        return sim;
     }
     function isOnline(deviceId) { const c = deviceConns.get(deviceId); return !!(c && c.online); }
     function sendToDevice(deviceId, fields) { const c = deviceConns.get(deviceId); return c ? sendFrame(c, fields.type, fields) : false; }
@@ -520,7 +556,7 @@ function createRealtime({ config, keys, userAuth, usage = null, log = console, n
             }
             if (conn.online && now() - conn.lastHeartbeat > offlineAfterMs) {
                 conn.online = false;
-                domain.devices.setOnline(conn.device, false).catch((e) => log.warn(`[Bot] offline event: ${e.message}`));
+                reportOnline(conn, false);
                 for (const robotId of deviceRobotIds(conn.device)) broadcast(robotId);
             }
         }
@@ -531,11 +567,12 @@ function createRealtime({ config, keys, userAuth, usage = null, log = console, n
 
     return {
         bindDomain(d) { domain = d; },
-        handleUpgrade,
+        handleUpgrade, attachSim, detachSim,
         isOnline, deviceState, sendToDevice, sendToRobotDevices, broadcast, closeDevice, robotState, refreshConfig, pushEstop,
         jobStdout: (jobId) => jobs.stdout(jobId),
-        onlineCount() { let n = 0; for (const c of deviceConns.values()) if (c.online) n++; return n; },
-        devices() { return [...deviceConns.values()].map((c) => ({ device_id: c.device.id, online: c.online })); },
+        // Real devices only: a simulator is not a machine anyone runs.
+        onlineCount() { let n = 0; for (const c of deviceConns.values()) if (c.online && !c.sim) n++; return n; },
+        devices() { return [...deviceConns.values()].filter((c) => !c.sim).map((c) => ({ device_id: c.device.id, online: c.online })); },
         async close() {
             closed = true;
             for (const t of timers) clearInterval(t);
