@@ -57,13 +57,15 @@ A person acts on their own robots with a Network user token; a service acts with
 
 ## Deploy
 
-Production runs the Node process under systemd as `openvibe-bot.service` (unit reference: `deploy/systemd/openvibe-bot.service`), with `WorkingDirectory=/opt/openvibe.bot`, `ExecStart` running `server/index.js`, and secrets/config read from the environment file `/etc/openvibe/bot.env`. The app listens on port **4630** behind nginx (`deploy/nginx/openvibe.bot.conf`), which terminates TLS and upgrades the `/device` and `/control` WebSockets to `127.0.0.1:4630`. Readiness is `http://127.0.0.1:4630/api/ready` (liveness: `/api/health`); both are loopback-only.
+Production runs the Node process under systemd as `openvibe-bot.service` (unit reference: `deploy/systemd/openvibe-bot.service`), with `WorkingDirectory=/opt/openvibe.bot`, `ExecStart` running `server/index.js`, and secrets/config read from the environment file `/etc/openvibe/bot.env`. The app listens on port **4630** behind nginx (`deploy/nginx/openvibe.bot.conf`), which terminates TLS and upgrades the `/device`, `/control` and `/watch` WebSockets to `127.0.0.1:4630`. Readiness is `http://127.0.0.1:4630/api/ready` (liveness: `/api/health`); both are loopback-only.
 
 To run the schema migrations before the service serves, start it once with the direct owner connection in `/etc/openvibe/bot.env` (`DATABASE_DIRECT_URL`); the boot applies `migrations/` and then serves on the pooled `DATABASE_URL`.
 
 Set `BOT_PAIRING_AUTHORITY` to `bot` (the default) or `network`; any other value refuses to boot.
 
 Set `BOT_EMBED_ORIGINS` (comma or space separated; default `https://openvibe.live,https://www.openvibe.live`) to the pages that may frame a robot's read-only panel (the CSP `frame-ancestors` list). Each entry is a bare https origin, with no path, query or wildcard (`http://localhost:<port>` only outside production); an invalid entry refuses to boot. A robot is embeddable only after its owner turns on `embed_public` with the form on its panel (`POST /robots/:id/embed`); the flag is web-only and never appears in `/api/v1`. Migration `0005_embed_public.sql` adds the column, off for every robot.
+
+The embeddable panel is `GET /panel/:id/embed` (framed only by `BOT_EMBED_ORIGINS`; no cookie needed to watch) and its read-only socket is `wss://openvibe.bot/watch` (docs/protocol.md §2.1); nginx must upgrade `/watch` like `/control`. Set `BOT_WATCH_MAX_PER_IP` (default 20) and `BOT_WATCH_MAX_PER_ROBOT` (default 500) to cap open `/watch` sockets per client address and watchers per robot; over a cap the socket closes 4003.
 
 Set `BOT_WHIP_BASE` in `/etc/openvibe/bot.env` to the WHIP ingest base each device publishes to (`whip_url = <base>/<publish key>`, sent once with the pairing; OpenRe's is `https://ingest.openre.stream/whip`); leave it unset to pair devices without video.
 

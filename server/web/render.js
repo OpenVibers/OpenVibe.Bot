@@ -7,7 +7,9 @@
  * code here. Every value is HTML-escaped; nothing is inline (the CSP is `default-src 'self'`), so the client
  * (public/panel.js) reads what it needs from data-* attributes, and the icons are inline SVG markup.
  *
- *   renderPanel({ robot, profile, role, allowed_commands, holdResendMs })
+ *   renderPanel({ robot, profile, role, allowed_commands, holdResendMs, mode, signedIn })
+ *                                   mode 'embed': the framed panel (no topbar, no owner form, links open a new tab)
+ *   renderEmbedRefused({ robotId })  the framed answer when the visitor may not see the robot
  *   renderWidget(widget, { profile, allowed_commands })
  *   renderRobotsPage({ robots, profiles, error, values })
  *   renderPairingPage({ robot, pairing, profile })
@@ -26,7 +28,7 @@ const STICK_X = ['steer', 'x', 'rotation'];
 const STICK_Y = ['throttle', 'y'];
 const POLICIES = [['private', 'Only me and people I add'], ['invite', 'People I invite'], ['queue', 'Anyone, taking turns']];
 const POLICY_LABEL = Object.fromEntries(POLICIES.map(([v]) => [v, { private: 'Private', invite: 'Invite only', queue: 'Open queue' }[v]]));
-const ROLE_LABEL = { owner: 'Owner', operator: 'Operator', viewer: 'Viewer', queue: 'In the queue' };
+const ROLE_LABEL = { owner: 'Owner', operator: 'Operator', viewer: 'Viewer', queue: 'In the queue', watcher: 'Watching' };
 
 // ── Icons: 24×24 strokes in currentColor, decorative (the text beside them is the label) ─────────────────────
 const PATHS = {
@@ -218,7 +220,11 @@ function embedForm(robot) {
 </form>`;
 }
 
-function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs = 150 }) {
+/** A link out of a frame: always a new tab, never with a handle back to the framing page. */
+const outLink = (href, text, cls = 'button') => `<a class="${cls}" href="${esc(href)}" target="_blank" rel="noopener">${esc(text)}</a>`;
+
+function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs = 150, mode = 'page', signedIn = true }) {
+    const embed = mode === 'embed';
     const latched = !!(robot.estop && robot.estop.latched);
     const widgets = (profile.widgets || []).map((w, i) => ({ w, i }))
         .sort((a, b) => (a.w.order != null ? a.w.order : 1e9 + a.i) - (b.w.order != null ? b.w.order : 1e9 + b.i))
@@ -226,7 +232,7 @@ function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs
     const estop = ESTOP_ROLES.has(role) ? `<button type="button" class="estop" data-estop>${icon('stop')}<span>E-stop</span></button>` : '';
     const clear = role === 'owner' ? `<button type="button" class="estop-clear" data-estop-clear${latched ? '' : ' hidden'}>Clear e-stop</button>` : '';
     const body = `<header class="estop-banner" data-estop-banner data-latched="${latched}">
-${topbar(`<span class="crumb">${esc(robot.name)}</span>`)}
+${embed ? '' : topbar(`<span class="crumb">${esc(robot.name)}</span>`)}
 <div class="estop-bar"><p class="estop-state" role="status" aria-live="assertive"><span class="estop-dot"></span><span data-estop-state>${latched ? 'E-stop latched' : 'E-stop clear'}</span><span class="estop-note">${latched ? ' — the robot stays still until the owner clears it.' : ''}</span></p>${clear}${estop}</div>
 </header>
 <main id="panel" data-robot-id="${esc(robot.id)}" data-role="${esc(role)}" data-hold-ms="${esc(holdResendMs)}" data-allowed="${data(allowed_commands)}">
@@ -234,13 +240,23 @@ ${topbar(`<span class="crumb">${esc(robot.name)}</span>`)}
 <h1>${esc(robot.name)}</h1>
 <p class="meta"><span class="pill online" data-online-pill data-state="connecting"><span class="dot"></span><span data-online-label>Connecting…</span></span> <span class="pill">${esc(profile.name || robot.profile_id)}</span> <span class="pill role" data-role-label>${esc(ROLE_LABEL[role] || role)}</span></p>
 </div>
+${embed && role === 'watcher' && !signedIn ? `<p class="embed-sign-in">${outLink(`/panel/${robot.id}`, 'Sign in to control')}</p>` : ''}
 <p class="notice" data-notice role="alert" hidden></p>
 <div class="widgets">
 ${widgets.join('\n')}
 </div>
-${role === 'owner' ? embedForm(robot) : ''}
+${role === 'owner' && !embed ? embedForm(robot) : ''}
 </main>`;
-    return page(robot.name, body, { scripts: ['/panel/panel.js'], bodyClass: 'panel-page' });
+    return page(robot.name, body, { scripts: ['/panel/panel.js'], bodyClass: embed ? 'embed-page' : 'panel-page' });
+}
+
+/** The framed 403: no robot data, only a way out to openvibe.bot (where signing in may grant access). */
+function renderEmbedRefused({ robotId }) {
+    const body = `<main class="page embed-refused">
+<div class="card"><p>This robot is not shared for embedding.</p>
+<p>${outLink(`/panel/${robotId}`, 'Open on openvibe.bot', 'button primary')}</p></div>
+</main>`;
+    return page('Not shared', body, { bodyClass: 'embed-page' });
 }
 
 function renderRobotsPage({ robots = [], profiles = [], error = null, values = {} }) {
@@ -280,4 +296,4 @@ function renderPairingPage({ robot, pairing, profile = null }) {
     return page(`Pair ${robot.name}`, body, { scripts: ['/panel/panel.js'] });
 }
 
-module.exports = { renderPanel, renderWidget, renderRobotsPage, renderPairingPage, camerasOf, esc };
+module.exports = { renderPanel, renderEmbedRefused, renderWidget, renderRobotsPage, renderPairingPage, camerasOf, esc };

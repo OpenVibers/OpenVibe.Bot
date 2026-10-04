@@ -13,6 +13,10 @@
  *   wss://…/control   a signed-in person (Network session cookie or Bearer) or a service token holding
  *                     `bot.robot.control` acting for `X-OV-Subject`. Joins a robot, sends commands; the
  *                     gate lives in the domain and every decision is audited.
+ *   wss://…/watch     anyone, no credential (plan T15 R9): joins a robot whose owner turned on embed_public and
+ *                     receives its public state only (robotState → publicState). Read-only: any frame but
+ *                     join/leave answers bot.read_only and never reaches a device or the audit. Capped per client
+ *                     address and per robot (config.watch); over a cap the socket closes 4003.
  *
  * Every frame carries v, seq, ts. A command's `id` is an idempotency key: a repeated id answers with the
  * first result instead of reaching the device again.
@@ -29,6 +33,7 @@ const MAX_BACKLOG = 64;   // frames a device may send before its authentication 
 const ACCESS_COOKIE = 'ov_token';
 const DEVICE_KINDS = new Set(['onboard', 'bridge', 'server']);
 const MAX_AGENT_VERSION = 40;
+const WATCH_MAX_PAYLOAD = 4 * 1024;   // a watcher only ever sends join/leave
 
 function parseCookies(header) {
     const out = {};
@@ -53,6 +58,9 @@ function createRealtime({ config, keys, userAuth, usage = null, log = console, n
 
     const deviceWss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024, perMessageDeflate: false });
     const controlWss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024, perMessageDeflate: false });
+    const watchWss = new WebSocketServer({ noServer: true, maxPayload: WATCH_MAX_PAYLOAD, perMessageDeflate: false });
+    const watchConns = new Set();      // every /watch socket, joined or not
+    const watchersByAddr = new Map();  // client address → open /watch sockets
     const offlineAfterMs = config.device.heartbeatMs * config.device.offlineMisses + config.device.offlineGraceMs;
     const jobs = createJobFrames({ db: () => domain.db, usage, log, now });
 
@@ -77,6 +85,7 @@ function createRealtime({ config, keys, userAuth, usage = null, log = console, n
         try { path = new URL(req.url, 'http://localhost').pathname; } catch { return socket.destroy(); }
         if (path === '/device') return deviceWss.handleUpgrade(req, socket, head, (ws) => onDeviceSocket(ws, req));
         if (path === '/control') return controlWss.handleUpgrade(req, socket, head, (ws) => onControlSocket(ws, req));
+        if (path === '/watch') return watchWss.handleUpgrade(req, socket, head, (ws) => onWatchSocket(ws, req));
         socket.destroy();
     }
 
@@ -487,6 +496,68 @@ function createRealtime({ config, keys, userAuth, usage = null, log = console, n
         broadcast(robotId);
     }
 
+    // ── Watcher side (read-only, anonymous) ───────────────────────────────────────────────────────────
+    /** The caller's address as Express decides it with the same trust proxy hop count (config.trustProxy). */
+    function clientAddress(req) {
+        const forwarded = String(req.headers['x-forwarded-for'] || '').split(',').map((s) => s.trim()).filter(Boolean).reverse();
+        const chain = [req.socket.remoteAddress || '', ...forwarded];
+        const hops = Number.isInteger(config.trustProxy) && config.trustProxy > 0 ? config.trustProxy : 0;
+        return chain[Math.min(hops, chain.length - 1)];
+    }
+
+    function onWatchSocket(ws, req) {
+        const addr = clientAddress(req);
+        const conn = { ws, seq: 0, watcher: true, subject: null, robotId: null, role: 'watcher', readouts: [], addr };
+        ws.conn = conn;
+        watchConns.add(conn);
+        watchersByAddr.set(addr, (watchersByAddr.get(addr) || 0) + 1);
+        ws.on('close', () => {
+            unsubscribe(conn);
+            watchConns.delete(conn);
+            const n = (watchersByAddr.get(addr) || 1) - 1;
+            if (n > 0) watchersByAddr.set(addr, n); else watchersByAddr.delete(addr);
+        });
+        ws.on('error', () => { /* the close event does the work */ });
+        if (watchersByAddr.get(addr) > config.watch.maxPerIp) return ws.close(4003, 'too many watchers from this address');
+        ws.on('message', (raw) => handleWatchMessage(conn, raw).catch((e) => { log.warn(`[Bot] watch: ${e.message}`); sendError(conn, 'bot.internal', null); }));
+        return undefined;
+    }
+
+    async function handleWatchMessage(conn, raw) {
+        let msg; try { msg = JSON.parse(String(raw)); } catch { return sendError(conn, 'bot.bad_json', 'frames must be JSON'); }
+        if (!msg || typeof msg !== 'object') return sendError(conn, 'bot.bad_frame', 'a frame must be an object');
+        if (msg.type === 'join') return onWatchJoin(conn, msg);
+        if (msg.type === 'leave') { unsubscribe(conn); conn.robotId = null; return undefined; }
+        return sendError(conn, 'bot.read_only', 'this socket only watches; sign in on openvibe.bot to control');
+    }
+
+    async function onWatchJoin(conn, msg) {
+        const robotId = String(msg.robot_id || '').slice(0, 64);
+        const robot = robotId ? await domain.robots.get(robotId) : null;
+        // An unknown robot and a robot that is not public answer alike: an anonymous caller learns nothing.
+        if (!robot || !robot.embed_public) return sendError(conn, 'bot.not_an_operator', 'this robot is not public');
+        if (conn.robotId !== robotId) {
+            const set = subsByRobot.get(robotId);
+            let watching = 0;
+            if (set) for (const c of set) if (c.watcher) watching++;
+            if (watching >= config.watch.maxPerRobot) return conn.ws.close(4003, 'too many watchers on this robot');
+            if (conn.robotId) unsubscribe(conn);
+        }
+        const profileRow = await getProfile(domain.db, robot.profile_id, robot.profile_version);
+        const profile = profileRow ? profileRow.profile : null;
+        conn.robotId = robotId;
+        conn.readouts = readoutKeys(profile);
+        subscribe(conn);
+        return sendFrame(conn, 'joined', { role: 'watcher', profile, allowed_commands: [], state: publicState(await robotState(robotId), conn.readouts) });
+    }
+
+    /** The owner turned embed_public off: every watcher of the robot is dropped at once. */
+    function closeWatchers(robotId, reason = 'this robot is no longer public') {
+        const set = subsByRobot.get(robotId);
+        if (!set) return;
+        for (const c of [...set]) if (c.watcher) { unsubscribe(c); try { c.ws.close(4003, reason); } catch { /* gone */ } }
+    }
+
     // ── State and helpers ─────────────────────────────────────────────────────────────────────────
     function deviceForRobot(robotId) {
         let sim = null;
@@ -538,10 +609,40 @@ function createRealtime({ config, keys, userAuth, usage = null, log = console, n
         if (robot && robot.access_policy === 'queue') state.queue = await domain.queue.state(robotId, subjectForQueue);
         return state;
     }
+    /** The telemetry keys a profile's readout widgets show (`telemetry` widgets, `sensor.<key>` capabilities). */
+    function readoutKeys(profile) {
+        const keys = new Set();
+        for (const w of (profile && profile.widgets) || []) {
+            if (w && w.type === 'telemetry' && typeof w.capability === 'string' && w.capability) keys.add(w.capability.replace(/^sensor\./, ''));
+        }
+        return [...keys];
+    }
+    /**
+     * What a watcher may see: online, the latch, latency, battery and the readouts' sensor values. Never the
+     * queue, a subject, the device's ids, its status or the rest of its telemetry.
+     */
+    function publicState(state, readouts) {
+        const t = state.telemetry;
+        const sensors = t && t.sensors && typeof t.sensors === 'object' ? t.sensors : {};
+        const picked = {};
+        for (const k of readouts) if (Object.prototype.hasOwnProperty.call(sensors, k)) picked[k] = sensors[k];
+        return {
+            robot_id: state.robot_id, online: state.online,
+            estop: { latched: !!(state.estop && state.estop.latched) },
+            latency_ms: state.latency_ms, battery: state.battery,
+            telemetry: t ? { sensors: picked } : null,
+        };
+    }
     function broadcast(robotId) {
         const subs = subsByRobot.get(robotId);
         if (!subs || !subs.size) return;
+        let watched = null;   // one state for every watcher (no subject, no queue view)
         for (const sub of [...subs]) {
+            if (sub.watcher) {
+                watched = watched || robotState(robotId);
+                watched.then((state) => sendFrame(sub, 'robot_state', { state: publicState(state, sub.readouts) })).catch(() => {});
+                continue;
+            }
             robotState(robotId, sub.subject).then((state) => sendFrame(sub, 'robot_state', { state })).catch(() => {});
         }
     }
@@ -568,7 +669,7 @@ function createRealtime({ config, keys, userAuth, usage = null, log = console, n
     return {
         bindDomain(d) { domain = d; },
         handleUpgrade, attachSim, detachSim,
-        isOnline, deviceState, sendToDevice, sendToRobotDevices, broadcast, closeDevice, robotState, refreshConfig, pushEstop,
+        isOnline, deviceState, sendToDevice, sendToRobotDevices, broadcast, closeDevice, robotState, refreshConfig, pushEstop, closeWatchers,
         jobStdout: (jobId) => jobs.stdout(jobId),
         // Real devices only: a simulator is not a machine anyone runs.
         onlineCount() { let n = 0; for (const c of deviceConns.values()) if (c.online && !c.sim) n++; return n; },
@@ -581,9 +682,10 @@ function createRealtime({ config, keys, userAuth, usage = null, log = console, n
             inflight.clear();
             for (const conn of [...deviceConns.values()]) { try { conn.ws.close(1001, 'server closing'); } catch { /* gone */ } }
             for (const set of subsByRobot.values()) for (const conn of set) { try { conn.ws.close(1001, 'server closing'); } catch { /* gone */ } }
-            deviceConns.clear(); subsByRobot.clear();
+            for (const conn of watchConns) { try { conn.ws.close(1001, 'server closing'); } catch { /* gone */ } }
+            deviceConns.clear(); subsByRobot.clear(); watchConns.clear(); watchersByAddr.clear();
             await Promise.all([
-                new Promise((r) => deviceWss.close(r)), new Promise((r) => controlWss.close(r)),
+                new Promise((r) => deviceWss.close(r)), new Promise((r) => controlWss.close(r)), new Promise((r) => watchWss.close(r)),
             ]).catch(() => {});
         },
     };

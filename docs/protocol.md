@@ -1,11 +1,13 @@
 # OpenVibe.Bot — the device and control protocol
 
 Everything here is exactly what `server/realtime.js` implements today; the device agent job builds
-against this document. Two WebSockets share one hub:
+against this document. Three WebSockets share one hub:
 
 - `wss://openvibe.bot/device` — one **outbound** connection per device (ADR-043 decision 4). It works
   behind any home router and on an ESP32; video goes separately over WHIP to OpenRe.
 - `wss://openvibe.bot/control` — operators (a signed-in person, or a service acting for one).
+- `wss://openvibe.bot/watch` — anyone, read-only: the public state of a robot whose owner allows embedding
+  (§2.1, the embeddable panel).
 
 Every frame is JSON with three envelope fields on **every** message:
 
@@ -364,6 +366,43 @@ Refusal codes (the gate, in order): `bot.robot_not_found`, `bot.unknown_command`
 `bot.not_your_turn`, `bot.turn_budget`, `bot.unknown_actuator`, `bot.invalid_input`, `bot.text_too_long`.
 `halt` is never refused for the e-stop, the allowlist, a cooldown or the turn budget; it still needs a
 role that may drive (a queue robot's turn holder, not someone waiting) and an online device.
+
+### 2.1 `/watch` and the embeddable panel (plan T15 R9)
+
+`GET /panel/:id/embed` is the panel for a frame on another site. It never redirects to sign in and sets no
+cookie. A signed-in visitor (the `ov_token` cookie) who is a member gets their role exactly as `/panel/:id`
+decides (a stranger on a `queue` robot: `queue`) and drives over `/control`; anyone else gets the role
+`watcher` when the owner turned on `embed_public` (`POST /robots/:id/embed`), with every control disabled
+and a "Sign in to control" link that opens `/panel/:id` in a new tab; otherwise `403` with only a link out.
+An unknown robot is `404`. The e-stop state is always shown; the E-stop button only to an owner or operator.
+Its response carries `Content-Security-Policy: default-src 'self'; frame-ancestors 'self' <BOT_EMBED_ORIGINS>;
+object-src 'none'; base-uri 'self'` and `Cache-Control: no-store`; every other page keeps
+`frame-ancestors 'self'`.
+
+The watcher's panel joins on `wss://openvibe.bot/watch`: no credential, never a cookie or token.
+
+| client → server | fields | answer |
+|---|---|---|
+| `join` | `robot_id` | `joined { role: "watcher", profile, allowed_commands: [], state }` for an `embed_public` robot; otherwise (or an unknown robot) `error` `bot.not_an_operator` |
+| `leave` | — | unsubscribe |
+| anything else (`command`, `estop`, `estop_clear`, …) | — | `error` `bot.read_only`; never reaches a device or the audit |
+
+A joined watcher then gets `robot_state { state }` on every change, as a `/control` subscriber does, but always
+the **public state**: `{ robot_id, online, estop{latched}, latency_ms, battery, telemetry }`, where
+`telemetry` is `null` or `{ sensors: { … } }` holding only the keys the profile's `telemetry` widgets read
+(`sensor.ultrasonic` → `ultrasonic`). Never the queue, a subject, who latched the e-stop, the device's ids,
+its `status` or the rest of its telemetry.
+
+Frames over 4 KiB close the socket (1009). Over `BOT_WATCH_MAX_PER_IP` open sockets from one client address
+(default 20) or `BOT_WATCH_MAX_PER_ROBOT` watchers on one robot (default 500) the socket closes **4003**; the
+owner turning `embed_public` off closes the robot's watchers with 4003 too.
+
+```json
+{ "v": 1, "seq": 1, "ts": 1738065600001, "type": "joined", "role": "watcher", "profile": { "id": "adeept.adr036" },
+  "allowed_commands": [],
+  "state": { "robot_id": "rob_01J8Z4M2Q0R7T9YV3K6N8P1W2X", "online": true, "estop": { "latched": false },
+             "latency_ms": 63, "battery": 0.72, "telemetry": { "sensors": { "ultrasonic": 41.5 } } } }
+```
 
 ---
 
