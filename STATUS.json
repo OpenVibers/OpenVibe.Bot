@@ -5,9 +5,9 @@
   "runtime": "node 22, express 4, ws; PostgreSQL 18 via openvibe-sdk/db (pg, or embedded PGlite in tests); Valkey optional; no build step",
   "port": 4630,
   "domain": "openvibe.bot (www -> apex; /device and /control WebSockets; /install)",
-  "contracts": "openvibe-contracts v0.85.0",
+  "contracts": "openvibe-contracts v0.92.0",
   "packages": [
-    "openvibe-contracts v0.85.0",
+    "openvibe-contracts v0.92.0",
     "openvibe-sdk v0.26.0",
     "openvibe-shared v2.5.0"
   ],
@@ -35,7 +35,8 @@
     "a latched e-stop only the owner clears, with halt always allowed, and a device-side deadman deadline on the motion kinds",
     "command audit kept 30 days, and the bot.robot.online/offline, bot.estop.set/cleared and bot.command.refused outbox events",
     "public robot-profile catalogue (GET /profiles, /profiles/:id); robots are private to their owner, with public control only as a timed turn queue",
-    "per-actor limits on capability-boundary writes (openvibe-sdk/limits; shared through Valkey when VALKEY_URL is set)"
+    "per-actor limits on capability-boundary writes (openvibe-sdk/limits; shared through Valkey when VALKEY_URL is set)",
+    "platform.job@1 jobs dispatched to a paired Node over /device (platform.job-frame@1: resent unacked on reconnect, only to an advertised runtime class) and metered per second into run_usage_outbox for billing.usage.record"
   ],
-  "updated": "2026-10-03"
+  "updated": "2026-10-04"
 }

@@ -139,6 +139,15 @@ function loadConfig(env = process.env) {
             token: String(env.BOT_OPENRE_TOKEN || '').trim(),
             timeoutMs: Math.max(100, int(env.BOT_OPENRE_TIMEOUT_MS, 8000)),
         },
+        // OpenVibe.Billing (plan T14 L1): job usage readings go to billing.usage.record (POST <url>/api/v1/usage).
+        // token is a Network service token for audience openvibe.billing holding billing.usage.record; it is never
+        // logged or returned. Either unset: readings wait in run_usage_outbox (never dropped) until both are set.
+        billing: {
+            url: trim(env.BOT_BILLING_URL || ''),
+            token: String(env.BOT_BILLING_TOKEN || '').trim(),
+            intervalMs: Math.max(100, int(env.BOT_BILLING_INTERVAL_MS, 2000)),
+            timeoutMs: Math.max(100, int(env.BOT_BILLING_TIMEOUT_MS, 5000)),
+        },
         // The one-line installer the owner copies next to the pairing code. scriptUrl is what the command
         // prints; sourceUrl is where GET /install sends the client (302). Bot keeps no copy of the script:
         // it redirects to OpenVibe.Node's canonical one, and only this config (never a query parameter)
