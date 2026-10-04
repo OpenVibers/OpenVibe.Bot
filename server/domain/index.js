@@ -48,6 +48,11 @@ function newCode() {
 const formatCode = (s) => `${s.slice(0, 4)}-${s.slice(4)}`;
 const isCodeShape = (s) => /^[0-9A-HJKMNP-TV-Z]{8}$/.test(s);
 
+// The installer driver a robot's profile needs (OpenVibe.Node install/install.sh --driver). Simulated,
+// camera and unknown profiles get `none`, the dry-run plugin, which is also the installer's default.
+const DRIVER_BY_PROFILE = Object.freeze({ 'adeept.adr036': 'adeept', 'adeept.adr036.mecanum': 'adeept-mecanum', cozmo: 'cozmo' });
+const driverForProfile = (profileId) => (Object.hasOwn(DRIVER_BY_PROFILE, profileId) ? DRIVER_BY_PROFILE[profileId] : 'none');
+
 const clampNum = (v, lo, hi, d = 0) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
 
 // Scientific pitch: 'A4' is 440 Hz; a sharp (#) or flat (b) after the letter.
@@ -59,7 +64,7 @@ function noteToHz(note) {
     return 440 * 2 ** ((12 * (Number(m[3]) + 1) + semis - 69) / 12);
 }
 
-function createDomain({ db, config, outbox, link = null, nodes = null, now = () => Date.now(), log = console }) {
+function createDomain({ db, config, outbox, link = null, nodes = null, openre = null, now = () => Date.now(), log = console }) {
     // ── Presenters ────────────────────────────────────────────────────────────────────────────────
     const presentRobot = (r) => (r ? {
         id: r.id, name: r.name, profile_id: r.profile_id, profile_version: r.profile_version,
@@ -74,6 +79,11 @@ function createDomain({ db, config, outbox, link = null, nodes = null, now = () 
         last_seen: d.last_seen ? iso(new Date(d.last_seen).getTime()) : null, revoked_at: d.revoked_at ? iso(new Date(d.revoked_at).getTime()) : null,
         created_at: iso(new Date(d.created_at).getTime()), updated_at: iso(new Date(d.updated_at).getTime()),
     } : null);
+
+    /** A pairing/rotation answer's video fields: the publish key and its WHIP URL (once), or why there is no key. */
+    const presentVideo = (r) => (r.publish_key
+        ? { publish_key: r.publish_key, ...(r.whip_url ? { whip_url: r.whip_url } : {}) }
+        : { video: r.video || 'not_configured' });
 
     async function emit(t, event_type, subject, payload) {
         await outbox.emitIn(t, { ...ENVELOPE, event_type, subject, payload });
@@ -116,7 +126,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, now = () 
         const id = prefixedId('rob', now());
         const at = iso(now());
         // A Network-minted code comes first, so a Network that does not answer leaves no robot behind.
-        const minted = networkPairing() ? await mintOnNetwork(id, owner, installerUrl) : null;
+        const minted = networkPairing() ? await mintOnNetwork(id, owner, installerUrl, driverForProfile(profile.id)) : null;
         const created = await db.tx(async (t) => {
             await t.query(`INSERT INTO robots (id, owner_subject, name, profile_id, profile_version, access_policy, limits, created_at, updated_at)
                 VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $8)`,
@@ -124,7 +134,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, now = () 
             await t.query(`INSERT INTO robot_operators (robot_id, subject, role, added_by, created_at) VALUES ($1, $2, 'owner', $2, $3)`, [id, owner, at]);
             return t.maybe('SELECT * FROM robots WHERE id = $1', [id]);
         });
-        const pairing = minted || await createPairingCode(id, owner, installerUrl);
+        const pairing = minted || await createPairingCode(id, owner, installerUrl, created);
         return { robot: created, pairing };
     }
     function cleanLimits(limits = {}) {
@@ -152,14 +162,30 @@ function createDomain({ db, config, outbox, link = null, nodes = null, now = () 
         await db.query(`UPDATE robots SET ${sets.join(', ')} WHERE id = $1`, args);
         return getRobot(id);
     }
+    /**
+     * Remove a robot. Its OpenRe stream's key is revoked first (rotated with no grace, its sessions ended), so
+     * nothing publishes as the robot afterwards; an OpenRe that refuses or does not answer leaves the robot in
+     * place for the owner to retry. The stream is archived when nothing was live (OpenRe refuses a live one).
+     */
     async function removeRobot(id) {
+        const robot = await getRobot(id);
+        if (robot && robot.openre_stream_id && !openre) log.warn(`[Bot] robot ${id} removed with OpenRe stream ${robot.openre_stream_id} left as it is: OpenRe is not configured`);
+        if (robot && robot.openre_stream_id && openre) {
+            const ended = await openre.rotate(robot.openre_stream_id, robot.owner_subject, { grace_seconds: 0, end_sessions: true });
+            if (ended && !ended.sessions_ending) {
+                await openre.archive(robot.openre_stream_id, robot.owner_subject)
+                    .catch((e) => log.warn(`[Bot] OpenRe stream ${robot.openre_stream_id} of removed robot ${id} not archived: ${e.message}`));
+            }
+        }
         await db.query('DELETE FROM robots WHERE id = $1', [id]);
     }
 
     // ── Pairing (ADR-043 decision 2) ──────────────────────────────────────────────────────────────
     const networkPairing = () => config.pairing.authority === 'network';
-    async function createPairingCode(robotId, createdBy, installerUrl) {
-        if (networkPairing()) return mintOnNetwork(robotId, (await getRobot(robotId)).owner_subject, installerUrl);
+    async function createPairingCode(robotId, createdBy, installerUrl, robotRow = null) {
+        const robot = robotRow || await getRobot(robotId);
+        const driver = driverForProfile(robot && robot.profile_id);
+        if (networkPairing()) return mintOnNetwork(robotId, robot.owner_subject, installerUrl, driver);
         const code = newCode();
         const at = iso(now());
         const expires = iso(now() + config.pairing.ttlMs);
@@ -169,32 +195,36 @@ function createDomain({ db, config, outbox, link = null, nodes = null, now = () 
             await t.query('INSERT INTO pairing_codes (id, robot_id, code_hash, created_by, expires_at, created_at) VALUES ($1, $2, $3, $4, $5, $6)',
                 [prefixedId('pair', now()), robotId, hashSecret(code), createdBy || null, expires, at]);
         });
-        return { code: formatCode(code), expires_at: expires, installer: installerCommand(robotId, formatCode(code), installerUrl) };
+        return { code: formatCode(code), expires_at: expires, installer: installerCommand(robotId, formatCode(code), installerUrl, driver) };
     }
-    function installerCommand(robotId, code, installerUrl) {
+    /** ` --driver <kind>` for a profile that needs a real driver; nothing for `none` (the installer's default). */
+    const driverFlag = (driver) => (driver && driver !== 'none' ? ` --driver ${driver}` : '');
+    function installerCommand(robotId, code, installerUrl, driver = 'none') {
         const url = installerUrl || config.installer.scriptUrl;
-        return `curl -fsSL ${url} | sh -s -- --robot ${robotId} --code ${code}`;
+        return `curl -fsSL ${url} | sh -s -- --robot ${robotId} --code ${code}${driverFlag(driver)}`;
     }
     /**
      * BOT_PAIRING_AUTHORITY=network (plan T15 B2): Network mints the code for the robot's owner (POST
      * /internal/node-pairings, ref = the robot) and Bot stores none. The machine redeems it on Network and
      * reaches Bot with a node token (bindNode). A Network that does not answer is 503 bot.network_unavailable.
      */
-    async function mintOnNetwork(robotId, ownerSubject, installerUrl) {
+    async function mintOnNetwork(robotId, ownerSubject, installerUrl, driver = 'none') {
         if (!nodes) fail(503, 'bot.network_unavailable', 'Network pairing is not configured here');
         const p = await nodes.pair({ subject: ownerSubject, ref: robotId });
         if (!p || typeof p.pairing_id !== 'string' || typeof p.code !== 'string') fail(503, 'bot.network_unavailable', 'Network answered no pairing code');
         const url = installerUrl || config.installer.scriptUrl;
         return {
             code: p.code, expires_at: p.expires_at, pairing_id: p.pairing_id,
-            installer: `curl -fsSL ${url} | sh -s -- --network ${config.network.url} --pairing ${p.pairing_id} --code ${p.code}`,
+            installer: `curl -fsSL ${url} | sh -s -- --network ${config.network.url} --pairing ${p.pairing_id} --code ${p.code}${driverFlag(driver)}`,
         };
     }
     /**
      * Redeem a pairing code. `robot` (from the installer command/QR) attributes a wrong code to that
      * robot's live code and counts the try (5 end it); without it the code is matched by hash across
      * every live code. On success the credential and the publish key are returned once, never stored in
-     * the clear.
+     * the clear. The publish key is a new ingest key of the robot's OpenRe stream (newStreamKey), asked for
+     * only once the code is good: an OpenRe that refuses or does not answer fails the pairing and leaves the
+     * code unused, with no device. Without OpenRe configured the device pairs without video.
      */
     async function redeem({ robot = null, code, agent_version = null, device_kind = 'onboard', drivers = [], capabilities = {}, name = null }) {
         if (networkPairing()) fail(410, 'bot.pairing_moved', `pairing moved to OpenVibe.Network: pair this machine on ${config.network.url}`);
@@ -222,24 +252,73 @@ function createDomain({ db, config, outbox, link = null, nodes = null, now = () 
             if (row.used_at) return { error: [403, 'bot.pairing_code_used', 'that pairing code has already been used'] };
             if (new Date(row.expires_at).getTime() <= now()) return { error: [403, 'bot.pairing_code_expired', 'that pairing code has expired'] };
             if (row.tries >= config.pairing.maxTries) return { error: [403, 'bot.pairing_code_locked', 'too many wrong tries; the code is dead'] };
+            const deviceDisplayName = text(name, 'name', 80);
+            const issued = await newStreamKey(await t.maybe('SELECT * FROM robots WHERE id = $1', [row.robot_id]));
             await t.query('UPDATE pairing_codes SET used_at = $2 WHERE id = $1', [row.id, at]);
             const deviceId = prefixedId('dev', now());
             const credential = token(32);
-            const publishKey = token(32);
+            if (issued) await keepStream(t, row.robot_id, issued.streamId, deviceId);
             const device = await t.maybe(
-                `INSERT INTO devices (id, robot_ids, name, kind, agent_version, drivers, capabilities, credential_hash, publish_key_hash, created_at, updated_at)
+                `INSERT INTO devices (id, robot_ids, name, kind, agent_version, drivers, capabilities, credential_hash, publish_key_hint, created_at, updated_at)
                  VALUES ($1, $2::jsonb, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9, $10, $10) RETURNING *`,
-                [deviceId, JSON.stringify([row.robot_id]), text(name, 'name', 80), device_kind, storable(agent_version || ''), JSON.stringify(drivers || []), JSON.stringify(capabilities || {}), hashSecret(credential), hashSecret(publishKey), at]);
-            return { device, credential, publishKey, robot_id: row.robot_id };
+                [deviceId, JSON.stringify([row.robot_id]), deviceDisplayName, device_kind, storable(agent_version || ''), JSON.stringify(drivers || []), JSON.stringify(capabilities || {}), hashSecret(credential), issued ? issued.hint : null, at]);
+            return { device, credential, issued, robot_id: row.robot_id };
         });
         if (result.error) fail(result.error[0], result.error[1], result.error[2]);
         const profile = await getProfile(db, (await getRobot(result.robot_id)).profile_id);
-        const whUrl = whipUrl(result.publishKey);
-        return { device: result.device, credential: result.credential, publish_key: result.publishKey, ...(whUrl ? { whip_url: whUrl } : {}), profile: profile ? profile.profile : null };
+        return { device: result.device, credential: result.credential, ...videoKey(result.issued), profile: profile ? profile.profile : null };
+    }
+    // ── Video: the robot's OpenRe stream (T15 R5) ─────────────────────────────────────────────────
+    // OpenRe's WHIP worker admits only its own ingest keys, so the publish key is always one OpenRe issued for
+    // the robot's stream (external ref bot:robot:<id>); Bot keeps the stream id and the key's hint, never the
+    // key. One stream per robot, so the device given the newest key is the robot's publisher.
+    /**
+     * A new ingest key for the robot's OpenRe stream → { streamId, key, hint }, or null when OpenRe is not
+     * configured. The stored stream is rotated (graceSeconds: how long the previous key keeps publishing);
+     * with none stored, or one OpenRe no longer has, the stream is found by its external ref and rotated, or
+     * else created with its first key. Throws OpenRe's refusal or silence (502/503) and writes nothing here.
+     */
+    async function newStreamKey(robot, graceSeconds = 0) {
+        if (!openre || !robot) return null;
+        const owner = robot.owner_subject;
+        const rotated = async (streamId) => {
+            const r = await openre.rotate(streamId, owner, { grace_seconds: graceSeconds, end_sessions: false });
+            return r && { streamId, key: r.key };
+        };
+        let out = robot.openre_stream_id ? await rotated(robot.openre_stream_id) : null;
+        if (!out) {
+            const found = await openre.find(`bot:robot:${robot.id}`, owner);
+            if (found && found.id) out = await rotated(found.id);
+        }
+        if (!out) {
+            const created = await openre.create({
+                title: robot.name, protocols: ['webrtc'], recording_mode: 'none', recording_visibility: 'unlisted', playback_visibility: 'unlisted',
+                external_refs: [{ service: 'bot', type: 'robot', id: robot.id, label: robot.name }],
+            }, owner);
+            out = created && created.stream && { streamId: created.stream.id, key: created.key };
+        }
+        if (!out || typeof out.streamId !== 'string' || !out.key || typeof out.key.key !== 'string' || !out.key.key) {
+            fail(503, 'bot.openre_unavailable', 'OpenRe answered no ingest key for the robot');
+        }
+        return { streamId: out.streamId, key: out.key.key, hint: typeof out.key.hint === 'string' ? out.key.hint.slice(0, 16) : null };
+    }
+    /** Record the robot's stream and that `deviceId` now holds its key: other devices' keys are retired. */
+    async function keepStream(t, robotId, streamId, deviceId) {
+        await t.query('UPDATE robots SET openre_stream_id = $2 WHERE id = $1 AND openre_stream_id IS DISTINCT FROM $2', [robotId, streamId]);
+        await t.query('UPDATE devices SET publish_key_hint = NULL WHERE robot_ids @> $1::jsonb AND id <> $2 AND publish_key_hint IS NOT NULL',
+            [JSON.stringify([robotId]), deviceId]);
+    }
+    /** The answer fields for an issued key: publish_key and whip_url, or video: 'not_configured' without OpenRe. */
+    function videoKey(issued) {
+        if (!issued) return { video: 'not_configured' };
+        const whUrl = whipUrl(issued.key);
+        return { publish_key: issued.key, ...(whUrl ? { whip_url: whUrl } : {}) };
     }
     /**
      * Where the device publishes its camera: OpenRe's WHIP ingest (`POST <base>/<key>`, RFC 9725) with
-     * this device's publish key as the stream key. It carries the key, so it is shown once, with the key.
+     * this device's publish key as the stream key. The key must be one OpenRe admits, an ingest key OpenRe
+     * issued for the robot's stream (newStreamKey): OpenRe refuses any other. It carries the key, so it is
+     * shown once, with the key.
      * The base's trailing slashes are trimmed; with no base (BOT_WHIP_BASE unset or empty) it is null, and
      * the caller omits the field entirely rather than sending null or an empty string.
      */
@@ -264,18 +343,46 @@ function createDomain({ db, config, outbox, link = null, nodes = null, now = () 
     async function listDevicesForRobot(robotId) {
         return db.many('SELECT * FROM devices WHERE robot_ids @> $1::jsonb ORDER BY created_at DESC', [JSON.stringify([robotId])]);
     }
+    /**
+     * A new credential and a new publish key (the robot's OpenRe stream rotated; the old key keeps publishing
+     * for the credential's grace). OpenRe is asked first: if it refuses or does not answer, nothing changes.
+     */
     async function rotateDevice(id) {
         const d = await getDevice(id);
         if (!d || d.revoked_at) fail(404, 'bot.device_not_found', 'no live device');
+        const robotId = json(d.robot_ids, [])[0];
+        const issued = await newStreamKey(await getRobot(robotId), Math.ceil(config.device.rotateGraceMs / 1000));
         const credential = token(32);
-        const publishKey = token(32);
         const at = iso(now());
-        const updated = await db.maybe(
-            `UPDATE devices SET credential_hash = $2, credential_prev_hash = $3, prev_valid_until = $4, publish_key_hash = $5, updated_at = $6
-             WHERE id = $1 RETURNING *`,
-            [id, hashSecret(credential), d.credential_hash, iso(now() + config.device.rotateGraceMs), hashSecret(publishKey), at]);
-        const whUrl = whipUrl(publishKey);
-        return { device: updated, credential, publish_key: publishKey, ...(whUrl ? { whip_url: whUrl } : {}) };
+        const updated = await db.tx(async (t) => {
+            if (issued) await keepStream(t, robotId, issued.streamId, id);
+            return t.maybe(
+                `UPDATE devices SET credential_hash = $2, credential_prev_hash = $3, prev_valid_until = $4,
+                    publish_key_hint = CASE WHEN $5 THEN $6 ELSE publish_key_hint END, updated_at = $7
+                 WHERE id = $1 RETURNING *`,
+                [id, hashSecret(credential), d.credential_hash, iso(now() + config.device.rotateGraceMs), !!issued, issued ? issued.hint : null, at]);
+        });
+        return { device: updated, credential, ...videoKey(issued) };
+    }
+    /**
+     * Revoke the OpenRe key a device holds, after the device itself is revoked: the robot's stream is rotated
+     * with no grace and its sessions ended (OpenRe refuses to archive a live stream). The new key is shown to
+     * no one; the robot's next pairing or rotation issues another. A failure throws and keeps the device's
+     * key hint, so the owner's retry asks again. → true when a key was revoked.
+     */
+    async function revokeVideo(id) {
+        const d = await getDevice(id);
+        if (!d || !d.publish_key_hint) return false;
+        const robot = await getRobot(json(d.robot_ids, [])[0]);
+        if (robot && robot.openre_stream_id) {
+            if (!openre) {
+                log.warn(`[Bot] device ${id} revoked but its key on OpenRe stream ${robot.openre_stream_id} was not: OpenRe is not configured`);
+                return false;
+            }
+            await openre.rotate(robot.openre_stream_id, robot.owner_subject, { grace_seconds: 0, end_sessions: true });
+        }
+        await db.query('UPDATE devices SET publish_key_hint = NULL WHERE id = $1', [id]);
+        return true;
     }
     async function revokeDevice(id) {
         const d = await getDevice(id);
@@ -318,18 +425,25 @@ function createDomain({ db, config, outbox, link = null, nodes = null, now = () 
         return inserted || db.maybe('SELECT * FROM devices WHERE node_principal = $1 AND revoked_at IS NULL', [principalId]);
     }
     /**
-     * Issue (or re-issue) a device's WHIP publish key: the new key replaces the old one, which stops working.
-     * → { device, publish_key, whip_url?, profile }, the key shown this once.
+     * Issue (or re-issue) a device's WHIP publish key, a new ingest key of its robot's OpenRe stream: the new
+     * key replaces the old one, which stops working. → { device, publish_key, whip_url?, profile }, the key
+     * shown this once; without OpenRe configured { device, video: 'not_configured', profile }.
      */
     async function issuePublishKey(id) {
-        const publishKey = token(32);
-        const device = await db.maybe('UPDATE devices SET publish_key_hash = $2, updated_at = $3 WHERE id = $1 AND revoked_at IS NULL RETURNING *',
-            [id, hashSecret(publishKey), iso(now())]);
+        const live = await db.maybe('SELECT * FROM devices WHERE id = $1 AND revoked_at IS NULL', [id]);
+        if (!live) fail(404, 'bot.device_not_found', 'no live device');
+        const robot = await getRobot(json(live.robot_ids, [])[0]);
+        const issued = await newStreamKey(robot);
+        const device = await db.tx(async (t) => {
+            if (issued) await keepStream(t, robot.id, issued.streamId, id);
+            return t.maybe(
+                `UPDATE devices SET publish_key_hint = CASE WHEN $2 THEN $3 ELSE publish_key_hint END, updated_at = $4
+                 WHERE id = $1 AND revoked_at IS NULL RETURNING *`,
+                [id, !!issued, issued ? issued.hint : null, iso(now())]);
+        });
         if (!device) fail(404, 'bot.device_not_found', 'no live device');
-        const robot = await getRobot(json(device.robot_ids, [])[0]);
         const profile = robot ? await getProfile(db, robot.profile_id) : null;
-        const whUrl = whipUrl(publishKey);
-        return { device, publish_key: publishKey, ...(whUrl ? { whip_url: whUrl } : {}), profile: profile ? profile.profile : null };
+        return { device, ...videoKey(issued), profile: profile ? profile.profile : null };
     }
     /** Persist what a Network-paired device declares (kind, drivers, capabilities, agent_version): only the given fields. */
     async function updateDeclared(id, { kind, drivers, capabilities, agent_version: agentVersion }) {
@@ -669,11 +783,11 @@ function createDomain({ db, config, outbox, link = null, nodes = null, now = () 
 
     return {
         db, now, config, log, outbox, link,
-        present: { robot: presentRobot, device: presentDevice },
+        present: { robot: presentRobot, device: presentDevice, video: presentVideo },
         robots: { create: createRobot, list: listRobots, get: getRobot, update: updateRobot, remove: removeRobot },
         members: { roleOf, add: addOperator, remove: removeOperator, list: listOperators },
-        pairing: { create: createPairingCode, redeem, prune: prunePairingCodes, installerCommand, whipUrl },
-        devices: { byCredential, bindNode, issuePublishKey, updateDeclared, revokeNode, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, touchSeen, setOnline },
+        pairing: { create: createPairingCode, redeem, prune: prunePairingCodes, installerCommand, driverForProfile, whipUrl },
+        devices: { byCredential, bindNode, issuePublishKey, revokeVideo, updateDeclared, revokeNode, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, touchSeen, setOnline },
         estop: { set: setEstop, clear: clearEstop },
         queue: { join: joinQueue, state: queueState, currentTurn, consume: consumeTurn, sweep: sweepQueues },
         audit: { record: auditCommand, list: listAudit, listPage: listAuditPage, prune: pruneAudit },
@@ -681,4 +795,4 @@ function createDomain({ db, config, outbox, link = null, nodes = null, now = () 
     };
 }
 
-module.exports = { createDomain, DEFAULT_ALLOW, KINDS, normaliseCode, formatCode, newCode, isCodeShape, noteToHz };
+module.exports = { createDomain, DEFAULT_ALLOW, DRIVER_BY_PROFILE, driverForProfile, KINDS, normaliseCode, formatCode, newCode, isCodeShape, noteToHz };

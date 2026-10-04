@@ -32,10 +32,15 @@ so a reconnecting agent cannot be shadowed by a stale socket.
 **Pairing authority** (`BOT_PAIRING_AUTHORITY`, `bot` by default, or `network`). With `network` the
 pairing code is minted by OpenVibe.Network (Bot calls `POST /internal/node-pairings` with its own service
 token, `{owner: {kind: 'user', subject}, ref: <robot id>}`) and Bot stores none; the installer command
-carries `--network <Network URL> --pairing pair_… --code XXXX-XXXX`, and the machine pairs on Network and
+carries `--network <Network URL> --pairing pair_… --code XXXX-XXXX` (plus `--driver <kind>`, as below), and the machine pairs on Network and
 connects with a node token (below). The `pair` frame is then answered `error` `bot.pairing_moved` (its
 `detail` names the Network URL) and the socket stays unpaired. Devices that already hold a Bot credential
 keep connecting with it either way.
+
+**The installer command** is `curl -fsSL <BOT_INSTALLER_URL> | sh -s -- --robot rob_… --code XXXX-XXXX` (or the
+Network form above), plus `--driver adeept`, `adeept-mecanum` or `cozmo` for the `adeept.adr036`,
+`adeept.adr036.mecanum` and `cozmo` profiles; any other profile gets no `--driver` (the installer's dry-run
+`none`). `GET /install` answers a 302 to `BOT_INSTALLER_SOURCE_URL` (OpenVibe.Node's `install/install.sh`).
 
 **A Network-paired machine** (a node principal `nod_…`, paired on OpenVibe.Network for one of its
 owner's robots) carries `Authorization: Bearer <node token>` instead: a Network JWT with `actor_type`
@@ -59,7 +64,7 @@ At most 64 frames wait; any more are answered `error` `bot.not_ready`.
 
 | type | fields (besides v, seq, ts) | when |
 |---|---|---|
-| `paired` | `device_id, credential, publish_key, whip_url, robot_ids, profile_id, profile` | the answer to `pair`; `credential`/`publish_key`/`whip_url` are shown **once** |
+| `paired` | `device_id, credential, publish_key, whip_url, robot_ids, profile_id, profile` | the answer to `pair`; `credential`/`publish_key`/`whip_url` are shown **once**; without OpenRe configured `video: "not_configured"` instead of `publish_key`/`whip_url` |
 | `hello` | `session_id, device_id, robot_ids, server_time` | on every authenticated connection |
 | `config` | `heartbeat_ms, limits, allowed_commands, estop_latched` | right after `hello`, and again whenever the owner changes the robot's limits (or `allow` lists) and whenever Bot's latch is set or cleared (after the `estop` frame) |
 | `command` | `id, kind, value, deadline_ms, operator{subject,role}, robot_id` | an operator's command passed the gate |
@@ -106,6 +111,18 @@ from the device's own publish key (never the owner's stream key), so it is a sec
 only by `pair` / `POST /pair` and by a rotation (which issues a new key, so a new URL), never by a read.
 With `BOT_WHIP_BASE` unset or empty the field is left out of the answer entirely and the device runs
 without video.
+
+`publish_key` is an ingest key OpenRe.Stream issued, the only kind its WHIP ingest admits: each robot has one
+OpenRe stream (external ref `bot:robot:<robot id>`, protocol `webrtc`, no recording), created at its first
+pairing with `BOT_OPENRE_URL`/`BOT_OPENRE_TOKEN` set and found again by that ref (the token needs
+`openre.stream.read`, `openre.stream.write` and `openre.key.rotate`; `openre.stream.*` covers the first two).
+A pairing or `POST /devices/bind` rotates the stream's key with no grace (the robot's previous device stops publishing), a
+credential rotation with the credential's grace, a revocation with no grace and the live session ended;
+removing the robot does the same and archives the stream when nothing is live. Bot stores the stream id and
+the key's hint, never the key. OpenRe refusing is `502 bot.openre_refused` (its problem code in `detail`),
+not answering `503 bot.openre_unavailable`; a pairing that fails so leaves the code unused and no device.
+With `BOT_OPENRE_URL` or `BOT_OPENRE_TOKEN` unset the answers carry `"video": "not_configured"` and neither
+`publish_key` nor `whip_url`.
 
 ### 1.1 Command values (the profile's `commands`)
 
@@ -332,9 +349,9 @@ routes. Both come before any lookup, so a real robot or device id answers exactl
 | `POST /robots/:id/operators` | owner, or `bot.robot.manage` | `201 { operators[] }` |
 | `DELETE /robots/:id/operators/:subject` | owner, or `bot.robot.manage` | `{ operators[] }` |
 | `GET /robots/:id/devices` | member, or `bot.robot.read` | `{ devices[] }` (no hashes, `online`) |
-| `POST /devices/:id/rotate` | the robot's owner, `bot.device.connect` | `{ device, credential, publish_key, whip_url }` (once); for a Network-paired machine `{ device, sent }` — the machine is sent `rotate`, no credential is answered |
-| `POST /devices/:id/revoke` | the robot's owner, `bot.device.connect` | `{ device }`; the socket closes at once. A Network-paired machine's principal is revoked on Network too (`503 bot.network_unavailable` if Network did not answer: revoked here, retry) and never binds again |
-| `POST /devices/bind` | a Network node token (audience `openvibe.bot`), no body | `201 { device_id, publish_key, whip_url, robot_id, profile }` — `POST /pair`'s answer without `credential`; again → the same device and a new publish key (the old one stops working). Refused: `401 bot.node_token_required`, `403 bot.node_not_bound` |
+| `POST /devices/:id/rotate` | the robot's owner, `bot.device.connect` | `{ device, credential, publish_key, whip_url }` (once; `video: "not_configured"` instead of the key without OpenRe); for a Network-paired machine `{ device, sent }` — the machine is sent `rotate`, no credential is answered |
+| `POST /devices/:id/revoke` | the robot's owner, `bot.device.connect` | `{ device }`; the socket closes at once. A Network-paired machine's principal is revoked on Network too (`503 bot.network_unavailable` if Network did not answer: revoked here, retry) and never binds again. The OpenRe key the device holds is revoked and its live session ended (`502`/`503 bot.openre_*` if OpenRe did not: revoked here, retry) |
+| `POST /devices/bind` | a Network node token (audience `openvibe.bot`), no body | `201 { device_id, publish_key, whip_url, robot_id, profile }` — `POST /pair`'s answer without `credential`; again → the same device and a new publish key (the old one stops working); without OpenRe `video: "not_configured"` instead of the key. Refused: `401 bot.node_token_required`, `403 bot.node_not_bound` |
 | `POST /robots/:id/estop` | owner/operator, `bot.robot.control` | `{ robot }` |
 | `POST /robots/:id/estop/clear` | **owner only**, `bot.robot.control` | `{ robot }` |
 | `GET /robots/:id/audit?limit=&before=` | owner, or `bot.robot.read` | `{ audit[], next_before }` (newest first) |

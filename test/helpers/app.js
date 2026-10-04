@@ -9,6 +9,7 @@
  *                                                                    otherwise a service token with `cap`
  *   t.ws(path, { headers })                                          a WebSocket client: .send, .waitFor
  *   t.clock.offset                                                   advance the injected clock (ms)
+ *   t.openre                                                         the OpenRe stub (null with opts.openre false)
  */
 const fs = require('fs');
 const os = require('os');
@@ -16,12 +17,14 @@ const path = require('path');
 const http = require('http');
 const crypto = require('crypto');
 const WebSocket = require('ws');
-const { startNetwork, startEvents } = require('./stubs');
+const { startNetwork, startEvents, startOpenRe } = require('./stubs');
 const { testDb } = require('./db');
 
 async function boot(opts = {}) {
     const network = await startNetwork();
     const events = await startEvents();
+    // OpenRe issues every publish key; `openre: false` boots with BOT_OPENRE_* unset (pairing without video).
+    const openre = opts.openre === false ? null : await startOpenRe();
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-test-'));
     const env = {
         NODE_ENV: 'test',
@@ -39,6 +42,7 @@ async function boot(opts = {}) {
         BOT_OFFLINE_GRACE_MS: '0',
         BOT_ROTATE_GRACE_MS: '60000',
         BOT_QUEUE_TURN_MS: '60000',
+        ...(openre ? { BOT_OPENRE_URL: openre.url, BOT_OPENRE_TOKEN: openre.token, BOT_OPENRE_TIMEOUT_MS: '1500' } : {}),
         ...(opts.env || {}),
     };
     for (const k of Object.keys(require.cache)) if (k.includes(`${path.sep}server${path.sep}`)) delete require.cache[k];
@@ -120,14 +124,14 @@ async function boot(opts = {}) {
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
     return {
-        app, base, call, ws, robot, wait, domain, hub, db: domain.db, store, config, clock, network, events, logs, dir,
+        app, base, call, ws, robot, wait, domain, hub, db: domain.db, store, config, clock, network, events, openre, logs, dir,
         outboxRows: async (type) => (await domain.db.many('SELECT envelope FROM bot_event_outbox ORDER BY id')).map((r) => r.envelope).filter((e) => !type || e.event_type === type),
         close: async () => {
             await hub.close().catch(() => {});
             server.closeAllConnections();
             await new Promise((r) => server.close(r));
             await app.locals.outbox.stop();
-            await Promise.all([network.close(), events.close()]);
+            await Promise.all([network.close(), events.close(), openre && openre.close()]);
             await store.close();
             fs.rmSync(dir, { recursive: true, force: true });
         },
