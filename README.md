@@ -23,6 +23,11 @@ OpenVibe.Bot pairs a robot's machines, keeps their state and gates every operato
 - The agent that runs on the robot; it ships with the T15 device-agent job.
 - The public openvibe.bot front page and legal pages, built by OpenVibe.Sites.
 
+## Devices
+
+- A device (the machine that serves a robot) pairs with one pasted command, shown on the robot's pairing page: `curl -fsSL <BOT_INSTALLER_URL> | sh -s -- --robot rob_… --code XXXX-XXXX [--driver …]` (the Network form in `docs/protocol.md` §1). The `--driver` follows the robot's profile: `adeept` for `adeept.adr036`, `adeept-mecanum` for `adeept.adr036.mecanum`, `cozmo` for `cozmo`; any other profile gets none (`server/domain/index.js` `driverForProfile`), the installer's dry-run `none`.
+- The robot's panel is `openvibe.bot/panel/<rob_…>` (`GET /panel/:id`, rendered from the profile; `docs/protocol.md` §3). The device-side bring-up steps for the Adeept ADR036 kit live with the driver, in OpenVibe.Node's `docs/hardware-adeept.md` (T15 step 1).
+
 ## Depends on
 
 - PostgreSQL 18: robots, devices, profile rows, pairing codes, the command audit and the event outbox; `migrations/` applies on boot.

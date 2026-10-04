@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { check, done } = require('./helpers/app');
+const { driverForProfile } = require('../server/domain');
 
 const ROOT = path.join(__dirname, '..');
 const MANIFEST_REPOSITORY = 'OpenVibers/OpenVibe.Bot';
@@ -31,6 +32,16 @@ const REQUIRED = [
     await check('the README has every section docs-currency.js requires', () => {
         const headings = readme.split('\n').filter((l) => /^##\s+/.test(l)).map((l) => l.replace(/^##\s+/, '').replace(/[`*_]/g, '').trim());
         for (const [label, re] of REQUIRED) assert.ok(headings.some((h) => re.test(h)), `README: no "## ${label}" section`);
+    });
+
+    await check('the README names the panel path and the driver mapping the device runbook cites', () => {
+        assert.match(readme, /openvibe\.bot\/panel\//, 'README: no openvibe.bot/panel/ URL');
+        assert.match(readme, /adeept\.adr036\.mecanum/, 'README: no adeept.adr036.mecanum profile');
+        assert.match(readme, /adeept-mecanum/, 'README: no adeept-mecanum installer driver');
+        // …and the claims are real: the profile ships, its installer driver is adeept-mecanum, and the panel route exists.
+        assert.ok(fs.existsSync(path.join(ROOT, 'server/profiles/adeept.adr036.mecanum.json')), 'no adeept.adr036.mecanum profile file');
+        assert.strictEqual(driverForProfile('adeept.adr036.mecanum'), 'adeept-mecanum');
+        assert.match(fs.readFileSync(path.join(ROOT, 'server/web/routes.js'), 'utf8'), /r\.get\('\/panel\/:id'/, 'no GET /panel/:id route');
     });
 
     await check('STATUS.json has the required fields and the manifest repository', () => {
