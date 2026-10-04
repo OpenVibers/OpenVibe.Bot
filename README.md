@@ -12,6 +12,7 @@ OpenVibe.Bot pairs a robot's machines, keeps their state and gates every operato
 - Devices (the machines that serve a robot) and the credentials that identify them: hashed at rest, rotated and revoked, never readable back.
 - Pairing: one-time codes with a short expiry, minted by Bot or, with `BOT_PAIRING_AUTHORITY=network`, by OpenVibe.Network.
 - The `/device` and `/control` WebSockets, the command gate and the latched e-stop.
+- The signed-in pages (`server/web/routes.js`): `/robots` to list and add robots, `/pair/:id` for a pairing code and the installer command, and `/panel/:id`, the panel rendered from the profile. A `sim.rover` robot is driven by an in-process simulator (`server/sim`), so the panel works before any hardware exists. It gets no jobs, and it is not counted as a device or reported online in the outbox.
 - The command audit (`command_audit`, kept 30 days) and the `bot.*` outbox events.
 - Dispatching `platform.job@1` jobs to a paired Node over `/device` (`server/jobs/dispatch.js`, no HTTP route) and metering them per wall-clock second (`run_jobs`, `run_usage_outbox`; docs/protocol.md §1.2).
 

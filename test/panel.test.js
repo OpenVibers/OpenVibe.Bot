@@ -95,6 +95,9 @@ const allowedFor = (profile, role) => [...(DEFAULT_ALLOW[role] || []).filter((k)
         assert.ok(html.includes(`data-robot-id="${simId}"`) && html.includes('data-role="owner"') && html.includes('data-estop>'));
         const list = await (await get('/robots', alex)).text();
         assert.ok(list.includes(`/panel/${simId}`));
+        await t.wait(50);
+        const simEvents = (await t.outboxRows()).filter((e) => e.payload && String(e.payload.device_id || '').startsWith('dev_sim_'));
+        assert.deepStrictEqual(simEvents, [], 'a simulator is reported online in the outbox');
     });
 
     await check('a sim robot has telemetry within 1 s and acks a command; the deadman stops it', async () => {
@@ -142,18 +145,52 @@ const allowedFor = (profile, role) => [...(DEFAULT_ALLOW[role] || []).filter((k)
         assert.ok(q.includes('data-role="queue"'));
     });
 
-    await check('POST /robots (a hardware profile) → the owner\'s pairing page; others get 403', async () => {
+    await check('POST /robots (a hardware profile) → 201 with the code create minted; /pair/:id is the owner\'s', async () => {
         const r = await post('/robots', alex, { name: 'Arm', profile_id: 'adeept.adr036' });
-        assert.strictEqual(r.status, 303);
-        const loc = r.headers.get('location');
-        assert.match(loc, /^\/pair\/rob_/);
+        assert.strictEqual(r.status, 201);
+        assert.strictEqual(r.headers.get('cache-control'), 'no-store');
+        const created = await r.text();
+        const code = /class="code">([0-9A-Z]{4}-[0-9A-Z]{4})</.exec(created);
+        assert.ok(code, 'no pairing code on the 201 page');
+        assert.match(created, /--driver adeept</);
+        const id = /--robot (rob_[0-9A-Za-z]+)/.exec(created)[1];
+        // The shown code is the robot's only one: it redeems.
+        const paired = await t.call('POST', '/api/v1/pair', { body: { code: code[1], robot: id } });
+        assert.strictEqual(paired.status, 201, paired.text);
+        const loc = `/pair/${id}`;
         const page = await get(loc, alex);
         assert.strictEqual(page.status, 200);
         const html = await page.text();
         assert.match(html, /class="code">[0-9A-Z]{4}-[0-9A-Z]{4}</);
-        assert.match(html, /--driver adeept</);
         assert.ok(html.includes('data-copy'));
         assert.strictEqual((await get(loc, bob)).status, 403);
+    });
+
+    await check('/pair/:id mints nothing for a cross-site navigation or a prefetch', async () => {
+        const { robot } = await t.robot(alex, { name: 'Fenced', profile_id: 'adeept.adr036' });
+        const live = async () => (await t.db.many('SELECT id FROM pairing_codes WHERE robot_id = $1 AND used_at IS NULL', [robot.id])).map((x) => x.id);
+        const before = await live();
+        for (const headers of [{ 'Sec-Fetch-Site': 'cross-site' }, { 'Sec-Fetch-Site': 'same-site' }, { 'Sec-Purpose': 'prefetch' }, { Purpose: 'prefetch' }]) {
+            const r = await get(`/pair/${robot.id}`, alex, headers);
+            assert.strictEqual(r.status, 303, JSON.stringify(headers));
+            assert.strictEqual(r.headers.get('location'), '/robots');
+        }
+        assert.deepStrictEqual(await live(), before, 'a code was replaced');
+        assert.strictEqual((await get(`/pair/${robot.id}`, alex, { 'Sec-Fetch-Site': 'same-origin' })).status, 200);
+        assert.notDeepStrictEqual(await live(), before);
+    });
+
+    await check('the form and /pair/:id count against the person\'s bot.robot.manage limit', async () => {
+        const dave = t.network.newUser('dave');
+        const { robot } = await t.robot(dave, { name: 'Limited', profile_id: 'adeept.adr036' });
+        const statuses = [];
+        for (let i = 0; i < 31; i++) statuses.push((await get(`/pair/${robot.id}`, dave)).status);
+        assert.strictEqual(statuses[0], 200);
+        assert.strictEqual(statuses[statuses.length - 1], 429, statuses.join(','));
+        assert.strictEqual((await post('/robots', dave, { name: 'More', profile_id: 'sim.rover' })).status, 429);
+        // Another person is counted apart.
+        assert.strictEqual((await get('/robots', alex)).status, 200);
+        assert.notStrictEqual((await post('/robots', alex, { name: 'Mine', profile_id: 'adeept.adr036' })).status, 429);
     });
 
     await check('a bad form answers 422 with the form; a cross-site post is refused', async () => {

@@ -6,13 +6,15 @@
  * path and the profile-rendered panel, plan T15 step 3):
  *
  *   GET  /robots           the signed-in person's robots and the "add a robot" form
- *   POST /robots           add one (form post) → 303 to its panel (a `sim` robot) or its pairing page
- *   GET  /pair/:id         the owner only: a fresh pairing code and the installer command
+ *   POST /robots           add one (form post) → 303 to its panel (a `sim` robot), else 201 with its pairing page
+ *   GET  /pair/:id         the owner only: a fresh pairing code and the installer command (never minted for a
+ *                          cross-site navigation or a prefetch: those go to /robots)
  *   GET  /panel/:id        a member (or anyone on a `queue` robot): the panel, rendered from the profile
  *   GET  /panel/panel.js, /panel/panel.css   the panel client and its sheet (public/, no build step)
  *
  * Not signed in → 302 to /auth/login?next=<the page>. No access → 403 (bot.not_an_operator / bot.forbidden).
- * Pages are never cached: a pairing page carries a live code.
+ * Pages are never cached: a pairing page carries a live code. Adding a robot and minting a code count against
+ * the signed-in person's `bot.robot.manage` limit, the same one /api/v1 applies.
  */
 const path = require('path');
 const express = require('express');
@@ -24,7 +26,7 @@ const VERSION = require('../../package.json').version;
 const PUBLIC = path.join(__dirname, '..', '..', 'public');
 const HOLD_RESEND_MS = 150;
 
-function createWebRoutes(config, { domain = null, sim = null, log = console } = {}) {
+function createWebRoutes(config, { domain = null, sim = null, limits = null, log = console } = {}) {
     const r = express.Router();
     r.get('/', (req, res) => res.type('text/plain').send(`OpenVibe.Bot ${VERSION} — ok (devices, pairing and control; API under /api/v1)\n`));
     r.get('/robots.txt', (req, res) => res.type('text/plain').send('User-agent: *\nDisallow: /\n'));
@@ -44,7 +46,11 @@ function createWebRoutes(config, { domain = null, sim = null, log = console } = 
         const row = await getProfile(domain.db, robot.profile_id, robot.profile_version);
         return row ? row.profile : null;
     };
-    const startSim = (robot) => (sim ? sim.attach(robot).catch((e) => { log.warn(`[Bot] simulator for ${robot.id}: ${e.message}`); return false; }) : Promise.resolve(false));
+    const startSim = (robot, profile) => (sim ? sim.attach(robot, profile).catch((e) => { log.warn(`[Bot] simulator for ${robot.id}: ${e.message}`); return false; }) : Promise.resolve(false));
+    // Counted by who is signed in (req.principal, as /api/v1 counts), or by address before the sign-in redirect.
+    const manage = limits
+        ? [(req, res, next) => { if (req.viewer && !req.principal) req.principal = req.viewer; next(); }, limits('bot.robot.manage', { minute: 30, hour: 300 })]
+        : [];
     /** A page handler: 401 → sign in and come back, 403/404 → a plain answer, anything else → the app's 500. */
     const page = (fn) => async (req, res, next) => {
         res.setHeader('Cache-Control', 'no-store');
@@ -70,24 +76,33 @@ function createWebRoutes(config, { domain = null, sim = null, log = console } = 
 
     r.get('/robots', page(async (req, res) => robotsPage(req, res, requireUser(req))));
 
-    r.post('/robots', express.urlencoded({ extended: false, limit: '8kb' }), page(async (req, res) => {
+    r.post('/robots', ...manage, express.urlencoded({ extended: false, limit: '8kb' }), page(async (req, res) => {
         const me = requireUser(req);
         if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
         const body = req.body || {};
         const values = { name: typeof body.name === 'string' ? body.name : '', profile_id: String(body.profile_id || ''), access_policy: String(body.access_policy || 'private') };
-        let robot;
+        let robot, pairing;
         try {
-            ({ robot } = await domain.robots.create({ owner: me.subject, name: values.name, profile_id: values.profile_id, access_policy: values.access_policy }));
+            ({ robot, pairing } = await domain.robots.create({ owner: me.subject, name: values.name, profile_id: values.profile_id, access_policy: values.access_policy }));
         } catch (e) {
             if (e.status === 422) { res.status(422); return robotsPage(req, res, me, { error: e.detail || e.code, values }); }
             throw e;
         }
-        // A simulated robot needs no machine: straight to its panel.
-        return res.redirect(303, (await startSim(robot)) ? `/panel/${robot.id}` : `/pair/${robot.id}`);
+        // A simulated robot needs no machine: straight to its panel. Otherwise the code create minted is shown here.
+        const profile = await profileOf(robot);
+        if (await startSim(robot, profile)) return res.redirect(303, `/panel/${robot.id}`);
+        return res.status(201).type('html').send(renderPairingPage({ robot: domain.present.robot(robot), pairing, profile }));
     }));
 
-    r.get('/pair/:id', page(async (req, res) => {
+    // A load replaces the robot's unused code, so only a navigation from this site (or a typed address) mints one.
+    const crossSiteOrPrefetch = (req) => {
+        const site = req.headers['sec-fetch-site'];
+        const purpose = String(req.headers['sec-purpose'] || req.headers.purpose || req.headers['x-moz'] || '');
+        return (site && site !== 'same-origin' && site !== 'none') || /prefetch|prerender/i.test(purpose);
+    };
+    r.get('/pair/:id', ...manage, page(async (req, res) => {
         const me = requireUser(req);
+        if (crossSiteOrPrefetch(req)) return res.redirect(303, '/robots');
         const robot = await domain.robots.get(req.params.id);
         if (!robot) throw new BotError(404, 'bot.robot_not_found', 'no such robot');
         if (robot.owner_subject !== me.subject) throw new BotError(403, 'bot.forbidden', 'only the owner may pair a device');
@@ -105,7 +120,7 @@ function createWebRoutes(config, { domain = null, sim = null, log = console } = 
         if (!role) throw new BotError(403, 'bot.not_an_operator', 'you have no access to this robot');
         const profile = await profileOf(robot);
         if (!profile) throw new BotError(404, 'bot.profile_not_found', 'this robot has no profile');
-        await startSim(robot);
+        await startSim(robot, profile);
         const { maxCommandMs } = domain.control.effectiveLimits(robot, profile);
         res.type('html').send(renderPanel({
             robot: domain.present.robot(robot), profile, role,

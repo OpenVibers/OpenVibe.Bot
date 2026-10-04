@@ -234,8 +234,13 @@ function createRealtime({ config, keys, userAuth, usage = null, log = console, n
         sendToRobotDevices(robotId, { type: 'estop', latched, by, at: iso(now()) });
         await refreshConfig(robotId);
     }
+    /** The online/offline event and last_seen are a real machine's: a simulator (no devices row) reports neither. */
+    function reportOnline(conn, online) {
+        if (conn.sim) return Promise.resolve();
+        return domain.devices.setOnline(conn.device, online).catch((e) => log.warn(`[Bot] ${online ? 'online' : 'offline'} event: ${e.message}`));
+    }
     async function bringOnline(conn) {
-        await domain.devices.setOnline(conn.device, true).catch((e) => log.warn(`[Bot] online event: ${e.message}`));
+        await reportOnline(conn, true);
         for (const robotId of deviceRobotIds(conn.device)) broadcast(robotId);
     }
 
@@ -246,7 +251,7 @@ function createRealtime({ config, keys, userAuth, usage = null, log = console, n
         if (!conn.online) return;
         conn.online = false;
         if (silent) return;
-        domain.devices.setOnline(conn.device, false).catch((e) => log.warn(`[Bot] offline event: ${e.message}`));
+        reportOnline(conn, false);
         for (const robotId of deviceRobotIds(conn.device)) broadcast(robotId);
     }
 
@@ -551,7 +556,7 @@ function createRealtime({ config, keys, userAuth, usage = null, log = console, n
             }
             if (conn.online && now() - conn.lastHeartbeat > offlineAfterMs) {
                 conn.online = false;
-                domain.devices.setOnline(conn.device, false).catch((e) => log.warn(`[Bot] offline event: ${e.message}`));
+                reportOnline(conn, false);
                 for (const robotId of deviceRobotIds(conn.device)) broadcast(robotId);
             }
         }

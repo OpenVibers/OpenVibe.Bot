@@ -7,7 +7,7 @@
  * `hello`/`config`, sends heartbeats and telemetry, acks each command, mirrors the e-stop and stops by itself
  * at a motion command's `deadline_ms` unless a newer command arrived first (the Node's deadman).
  *
- *   attach(robotId)   start the robot's simulator if its profile is a `sim` one (idempotent) → true/false
+ *   attach(robotId)   start the robot's simulator if its profile is a `sim` one (idempotent; pass the profile if loaded) → true/false
  *   startAll()        every existing sim robot (boot)
  *   stop(robotId), stopAll(), running(robotId)
  *
@@ -107,13 +107,19 @@ function createSimulator({ config, domain, hub, now = () => Date.now(), log = co
         hub.detachSim(sim.device.id);
     }
 
-    /** Start the robot's simulator when its profile's driver is `sim`; anything else is left alone. */
-    async function attach(robotOrId) {
+    /**
+     * Start the robot's simulator when its profile's driver is `sim`; anything else is left alone. `profile`, when
+     * the caller already loaded it, saves the read.
+     */
+    async function attach(robotOrId, profile) {
         const robot = typeof robotOrId === 'string' ? await domain.robots.get(robotOrId) : robotOrId;
         if (!robot) return false;
         if (sims.has(robot.id)) return true;
-        const row = await getProfile(domain.db, robot.profile_id, robot.profile_version);
-        if (!isSimProfile(row && row.profile)) return false;
+        if (profile === undefined) {
+            const row = await getProfile(domain.db, robot.profile_id, robot.profile_version);
+            profile = row && row.profile;
+        }
+        if (!isSimProfile(profile)) return false;
         start(robot);
         return true;
     }

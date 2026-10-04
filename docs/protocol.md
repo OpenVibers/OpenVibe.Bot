@@ -403,7 +403,10 @@ routes. Both come before any lookup, so a real robot or device id answers exactl
 | `POST /pair` | the one-time code is the credential | `201 { device_id, credential, publish_key, whip_url, robot_id, profile }`; with `BOT_PAIRING_AUTHORITY=network` always `410 bot.pairing_moved` (the `detail` names the Network URL) |
 
 Not in `/api/v1`: `GET /api/health`, `GET /api/ready`, `GET /metrics`, `GET /release.json`, the
-`/auth/*` SSO routes, and `GET /` (a one-line text health placeholder).
+`/auth/*` SSO routes, `GET /` (a one-line text health placeholder), `GET /install` (a 302 to the installer),
+and the signed-in pages `GET|POST /robots`, `GET /pair/:id`, `GET /panel/:id` and `GET /panel/panel.{js,css}`
+(`server/web/routes.js`; adding a robot and minting a code count against the `bot.robot.manage` per-person limit,
+30 a minute and 300 an hour, as on `/api/v1`; past it `429 rate_limited`).
 
 ---
 
