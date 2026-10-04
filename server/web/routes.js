@@ -10,6 +10,10 @@
  *   GET  /pair/:id         the owner only: a fresh pairing code and the installer command (never minted for a
  *                          cross-site navigation or a prefetch: those go to /robots)
  *   GET  /panel/:id        a member (or anyone on a `queue` robot): the panel, rendered from the profile
+ *   GET  /panel/:id/embed  the panel for a frame (plan T15 R9): a signed-in member's role as /panel/:id decides it,
+ *                          otherwise `watcher` (video and readouts, no control) when the owner allows embedding,
+ *                          otherwise 403 with a link out. Never redirects to sign in; framed only by the
+ *                          BOT_EMBED_ORIGINS allow-list (CSP frame-ancestors), every other page by itself
  *   POST /robots/:id/embed the owner only: allow (embed_public=on) or stop (off) anonymous read-only embedding → 303 to its panel
  *   GET  /panel/panel.js, /panel/panel.css   the panel client and its sheet (public/, no build step)
  *
@@ -20,8 +24,9 @@
 const path = require('path');
 const express = require('express');
 const { getProfile, listProfiles } = require('../profiles');
+const { frameAncestors } = require('../config');
 const { BotError } = require('../util');
-const { renderPanel, renderRobotsPage, renderPairingPage } = require('./render');
+const { renderPanel, renderEmbedRefused, renderRobotsPage, renderPairingPage } = require('./render');
 const VERSION = require('../../package.json').version;
 
 const PUBLIC = path.join(__dirname, '..', '..', 'public');
@@ -125,27 +130,48 @@ function createWebRoutes(config, { domain = null, sim = null, limits = null, log
         const value = Array.isArray(sent) ? sent[sent.length - 1] : sent;
         if (value !== 'on' && value !== 'off') throw new BotError(422, 'bot.invalid_input', 'embed_public must be on or off');
         await domain.robots.setEmbedPublic(robot.id, value === 'on');
+        if (value === 'off' && domain.link && domain.link.closeWatchers) domain.link.closeWatchers(robot.id);
         res.redirect(303, `/panel/${robot.id}`);
     }));
+
+    /** As the /control join decides: a member's role, or a place in the queue on a `queue` robot; else null. */
+    async function memberRole(robot, me) {
+        const role = await domain.members.roleOf(robot.id, me.subject);
+        return role || (robot.access_policy === 'queue' ? 'queue' : null);
+    }
+    async function sendPanel(res, robot, profile, role, mode = 'page', signedIn = true) {
+        await startSim(robot, profile);
+        const { maxCommandMs } = domain.control.effectiveLimits(robot, profile);
+        res.type('html').send(renderPanel({
+            robot: presentForPage(robot), profile, role, mode, signedIn,
+            allowed_commands: role === 'watcher' ? [] : domain.control.allowedFor(robot, role, profile),
+            // A held control is re-sent well inside the device's deadline, so it never stops between two frames.
+            holdResendMs: Math.max(50, Math.min(HOLD_RESEND_MS, Math.floor(maxCommandMs / 2))),
+        }));
+    }
 
     r.get('/panel/:id', page(async (req, res) => {
         const me = requireUser(req);
         const robot = await domain.robots.get(req.params.id);
         if (!robot) throw new BotError(404, 'bot.robot_not_found', 'no such robot');
-        // As the /control join decides: a member's role, or a place in the queue on a `queue` robot.
-        let role = await domain.members.roleOf(robot.id, me.subject);
-        if (!role && robot.access_policy === 'queue') role = 'queue';
+        const role = await memberRole(robot, me);
         if (!role) throw new BotError(403, 'bot.not_an_operator', 'you have no access to this robot');
         const profile = await profileOf(robot);
         if (!profile) throw new BotError(404, 'bot.profile_not_found', 'this robot has no profile');
-        await startSim(robot, profile);
-        const { maxCommandMs } = domain.control.effectiveLimits(robot, profile);
-        res.type('html').send(renderPanel({
-            robot: presentForPage(robot), profile, role,
-            allowed_commands: domain.control.allowedFor(robot, role, profile),
-            // A held control is re-sent well inside the device's deadline, so it never stops between two frames.
-            holdResendMs: Math.max(50, Math.min(HOLD_RESEND_MS, Math.floor(maxCommandMs / 2))),
-        }));
+        await sendPanel(res, robot, profile, role);
+    }));
+
+    // The embed's own CSP replaces the app's for this route only; it sets no cookie and needs none to watch.
+    r.get('/panel/:id/embed', page(async (req, res) => {
+        res.setHeader('Content-Security-Policy', ["default-src 'self'", `frame-ancestors ${frameAncestors(config)}`, "object-src 'none'", "base-uri 'self'"].join('; '));
+        const robot = await domain.robots.get(req.params.id);
+        if (!robot) throw new BotError(404, 'bot.robot_not_found', 'no such robot');
+        let role = req.viewer ? await memberRole(robot, req.viewer) : null;
+        if (!role && robot.embed_public) role = 'watcher';
+        if (!role) return res.status(403).type('html').send(renderEmbedRefused({ robotId: robot.id }));
+        const profile = await profileOf(robot);
+        if (!profile) throw new BotError(404, 'bot.profile_not_found', 'this robot has no profile');
+        return sendPanel(res, robot, profile, role, 'embed', !!req.viewer);
     }));
 
     return r;

@@ -18,13 +18,16 @@
  *             B = stop, Start = e-stop; gamepaddisconnected releases it all
  *   latency   round trip from a command's id to its result on /control (rolling median) + telemetry age
  *
+ * A watcher (data-role="watcher": the embed's anonymous, read-only view) joins on /watch instead and only paints
+ * the state it is sent: no command, e-stop or clear frame is ever sent from it.
+ *
  * Also on the pairing page: [data-copy] copies the installer command, and [data-pair-robot] joins the robot on
  * /control (the owner's own, read-only use of it) to flip "Waiting for the device." when the device connects.
  */
 (() => {
     const $ = (sel, root = document) => root.querySelector(sel);
     const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
-    const wsUrl = () => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/control`;
+    const wsUrl = (path = '/control') => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${path}`;
 
     for (const b of $$('[data-copy]')) {
         b.addEventListener('click', () => {
@@ -69,6 +72,7 @@
     const main = document.getElementById('panel');
     if (!main) return;
     const ROBOT_ID = main.dataset.robotId;
+    const WATCHER = main.dataset.role === 'watcher';
     const HOLD_MS = Number(main.dataset.holdMs) || 150;
     const MIN_GAP_MS = 40;        // a moving stick sends at most this often between the hold re-sends
     const STICK_DEADZONE = 0.12;  // touch joystick, fraction of its radius
@@ -92,6 +96,7 @@
     }
     function raw(frame) {
         if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+        if (WATCHER && frame.type !== 'join') return false;   // /watch is read-only
         ws.send(JSON.stringify({ v: 1, ...frame }));
         return true;
     }
@@ -491,7 +496,7 @@
     }
 
     function connect() {
-        ws = new WebSocket(wsUrl());
+        ws = new WebSocket(wsUrl(WATCHER ? '/watch' : '/control'));
         ws.onopen = () => raw({ type: 'join', robot_id: ROBOT_ID });
         ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch { return; } onFrame(m); };
         ws.onclose = (e) => {

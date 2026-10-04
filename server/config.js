@@ -184,6 +184,11 @@ function loadConfig(env = process.env) {
         // chooses the target.
         // Embeddable panel (plan T15 R9): the origins whose pages may frame a robot's read-only panel.
         embed: { origins: embedOrigins },
+        // The anonymous read-only /watch socket: open sockets per client address and watchers per robot; over → close 4003.
+        watch: {
+            maxPerIp: Math.max(1, int(env.BOT_WATCH_MAX_PER_IP, 20)),
+            maxPerRobot: Math.max(1, int(env.BOT_WATCH_MAX_PER_ROBOT, 500)),
+        },
         installer: {
             scriptUrl: trim(env.BOT_INSTALLER_URL || 'https://openvibe.bot/install'),
             sourceUrl: installerSource,
