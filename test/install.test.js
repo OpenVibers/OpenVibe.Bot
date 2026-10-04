@@ -8,7 +8,7 @@ const { loadConfig } = require('../server/config');
 const { driverForProfile } = require('../server/domain');
 
 (async () => {
-    const NODE_INSTALLER = 'https://raw.githubusercontent.com/OpenVibers/OpenVibe.Node/main/install/install.sh';
+    const NODE_INSTALLER = 'https://github.com/OpenVibers/OpenVibe.Node/releases/latest/download/install.sh';
 
     await check('BOT_INSTALLER_SOURCE_URL: Node\'s script by default, https on an allow-listed host or no boot', async () => {
         assert.strictEqual(loadConfig({}).installer.sourceUrl, NODE_INSTALLER);

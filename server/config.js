@@ -38,7 +38,7 @@ function loadConfig(env = process.env) {
     if (!PAIRING_AUTHORITIES.includes(pairingAuthority)) {
         throw new Error(`BOT_PAIRING_AUTHORITY must be ${PAIRING_AUTHORITIES.join(' or ')}, not ${JSON.stringify(pairingAuthority)}`);
     }
-    const installerSource = String(env.BOT_INSTALLER_SOURCE_URL || 'https://raw.githubusercontent.com/OpenVibers/OpenVibe.Node/main/install/install.sh').trim();
+    const installerSource = String(env.BOT_INSTALLER_SOURCE_URL || 'https://github.com/OpenVibers/OpenVibe.Node/releases/latest/download/install.sh').trim();
     checkInstallerSource(installerSource);
     return {
         nodeEnv,
