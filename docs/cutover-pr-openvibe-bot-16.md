@@ -19,6 +19,20 @@ No migration, no schema change, no new route, no configuration, no environment v
 Merging and deploying it writes nothing to the database. The cutover is therefore a **no-op on data**; the
 steps below are the standard deploy guards, kept so the rehearsal exercises them on a copy of the data.
 
+## Cutover manifest (paste into the PR description)
+
+The merge gate requires this fenced block in the PR description (the harness reads `runbook` and `rehearsal`
+from it). Keep any existing PR text and add exactly:
+
+```cutover
+{"runbook": "docs/cutover-pr-openvibe-bot-16.md", "rehearsal": "bot-pr16"}
+```
+
+- `runbook` — this file, the runbook the rehearsal follows.
+- `rehearsal` — the marker name `bot-pr16`; the rehearsal writes `ds/deploy/rehearsals/bot-pr16.json`
+  = `{"ok": true}` on the harness when it is green. That marker is written by whoever runs the runbook on a
+  copy of the data, never by this runbook and never by the PR author.
+
 ## What runs, in which order
 
 1. **Merge gate (harness).** Checks green, review SHIP, this runbook in the PR description
