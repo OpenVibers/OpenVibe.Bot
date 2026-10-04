@@ -91,6 +91,15 @@ function v1Router({ domain, apiAuth, limits, hub }) {
         if (robot.owner_subject !== me(req)) fail(403, 'bot.forbidden', 'only the owner may do that');
         return robot;
     }
+    /** The audit is a read: the owner for a person, a service with bot.robot.read (no subject needed). */
+    async function ownerOrRead(req, robotId) {
+        fence(req);
+        const robot = await domain.robots.get(robotId);
+        if (!robot) fail(404, 'bot.robot_not_found', 'no such robot');
+        if (req.principal.kind === 'service') { requireRead(req); return robot; }
+        if (robot.owner_subject !== me(req)) fail(403, 'bot.forbidden', 'only the owner may do that');
+        return robot;
+    }
 
     // ── Profiles (public read) ────────────────────────────────────────────────────────────────────
     r.get('/profiles', wrap(async (req, res) => {
@@ -212,7 +221,7 @@ function v1Router({ domain, apiAuth, limits, hub }) {
 
     // ── Audit ─────────────────────────────────────────────────────────────────────────────────────
     r.get('/robots/:id/audit', wrap(async (req, res) => {
-        await owner(req, req.params.id);
+        await ownerOrRead(req, req.params.id);
         let before = null;
         if (req.query.before != null && req.query.before !== '') {
             before = Number(req.query.before);
