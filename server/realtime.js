@@ -63,6 +63,12 @@ function createRealtime({ config, keys, userAuth, usage = null, log = console, n
     const deviceRobotIds = (device) => json(device.robot_ids, []);
     /** The job frames' view of one device socket (server/jobs/dispatch.js). */
     const jobLink = (conn) => ({ deviceId: conn.device.id, send: (type, fields) => sendFrame(conn, type, fields), error: (code, detail) => sendError(conn, code, detail) });
+    /** A socket's job frames are handled one at a time in arrival order: second n is queued before n+1, job_exit last. */
+    function jobFrame(conn, msg) {
+        const run = (conn.jobFrames || Promise.resolve()).then(() => jobs.onFrame(jobLink(conn), msg));
+        conn.jobFrames = run.catch(() => {});
+        return run;
+    }
 
     // ── Upgrade routing ───────────────────────────────────────────────────────────────────────────
     function handleUpgrade(req, socket, head) {
@@ -244,7 +250,7 @@ function createRealtime({ config, keys, userAuth, usage = null, log = console, n
             case 'ack': case 'nack': return onAck(conn, msg);
             case 'estop_state': return onEstopState(conn, msg);
             // Jobs (platform.job-frame@1). Out: job, job_cancel, job_exit_ack (server/jobs/dispatch.js); in:
-            case 'job_started': case 'job_stdout': case 'job_usage': case 'job_exit': return jobs.onFrame(jobLink(conn), msg);
+            case 'job_started': case 'job_stdout': case 'job_usage': case 'job_exit': return jobFrame(conn, msg);
             default: return sendError(conn, 'bot.unknown_message', `unknown type ${msg.type}`);
         }
     }
