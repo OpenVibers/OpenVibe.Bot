@@ -15,7 +15,8 @@
     "bot.robot.read",
     "bot.robot.manage",
     "bot.robot.control",
-    "bot.device.connect"
+    "bot.device.connect",
+    "bot.job.dispatch"
   ],
   "events": [
     "bot.robot.online",

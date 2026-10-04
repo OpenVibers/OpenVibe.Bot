@@ -267,9 +267,58 @@ const PROJECT = `prj_${ids.ulid()}`;
         await relay.stop();
     });
 
+    await check('the jobs API serves bot.job.dispatch (dispatch, state with stdout, cancel) to a service only', async () => {
+        const n = await node();
+        const job = newJob();
+        const body = { node_id: n.deviceId, job, project_id: PROJECT, subject: SUBJECT };
+        const call = (method, p, opts = {}) => t.call(method, p, { cap: ['bot.job.dispatch'], ...opts });
+        // A person, a service without the capability, a node token and no token at all are all refused.
+        refused(await call('POST', '/api/v1/jobs', { user: alex, body }), 403, 'bot.forbidden');
+        refused(await call('POST', '/api/v1/jobs', { cap: ['bot.robot.read'], body }), 403, 'capability.denied');
+        refused(await call('POST', '/api/v1/jobs', { token: t.network.signNode(n.principal), body }), 403, 'bot.forbidden');
+        refused(await call('POST', '/api/v1/jobs', { token: null, body }), 401, 'bot.sign_in');
+        // project_id is required: Run is the payer.
+        refused(await call('POST', '/api/v1/jobs', { body: { ...body, project_id: undefined } }), 422, 'bot.invalid_input');
+        // The dispatch reaches the Node once; the same job again is idempotent.
+        const r = await call('POST', '/api/v1/jobs', { body });
+        assert.strictEqual(r.status, 201, r.text);
+        assert.strictEqual(r.json.sent, true);
+        assert.strictEqual(r.json.job.state, 'queued');
+        await n.c.waitFor((m) => m.type === 'job' && m.job.id === job.id);
+        n.say('ack', { id: job.id });
+        await poll(async () => (await row(job.id)).state === 'placed');
+        // The same job id again is idempotent: the same row, not sent again once it is placed.
+        const again = await call('POST', '/api/v1/jobs', { body });
+        assert.strictEqual(again.json.job.id, job.id);
+        assert.deepStrictEqual(again.json.job.job, job);
+        assert.strictEqual(again.json.sent, false);
+        // A class the device does not advertise is refused and never stored.
+        const code = newJob({ class: 'code' });
+        refused(await call('POST', '/api/v1/jobs', { body: { ...body, job: code } }), 409, 'bot.class_unadvertised');
+        assert.strictEqual(await row(code.id), null);
+        // GET answers the state and the captured stdout.
+        n.say('job_stdout', { id: job.id, chunk_seq: 1, chunk: 'hello\n' });
+        await poll(async () => (await call('GET', `/api/v1/jobs/${job.id}`)).json.stdout);
+        const got = await call('GET', `/api/v1/jobs/${job.id}`);
+        assert.strictEqual(got.status, 200, got.text);
+        assert.strictEqual(got.json.job.state, 'placed');
+        assert.strictEqual(got.json.stdout.text, 'hello\n');
+        refused(await call('GET', '/api/v1/jobs/job_00000000000000000000000000'), 404, 'bot.job_not_found');
+        // Cancel asks the Node to stop it.
+        const c = await call('POST', `/api/v1/jobs/${job.id}/cancel`);
+        assert.strictEqual(c.status, 200, c.text);
+        assert.strictEqual(c.json.job.state, 'cancelled');
+        await n.c.waitFor((m) => m.type === 'job_cancel' && m.id === job.id);
+    });
+
     await t.close();
     done();
 })().catch((e) => { console.error(e); process.exit(1); });
+
+function refused(res, status, code) {
+    assert.strictEqual(res.status, status, `${res.status} ${res.text}`);
+    assert.strictEqual(res.json && res.json.code, code, JSON.stringify(res.json));
+}
 
 async function poll(fn, ms = 20000) {
     const until = Date.now() + ms;

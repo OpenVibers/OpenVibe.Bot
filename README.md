@@ -14,7 +14,7 @@ OpenVibe.Bot pairs a robot's machines, keeps their state and gates every operato
 - The `/device` and `/control` WebSockets, the command gate and the latched e-stop.
 - The signed-in pages (`server/web/routes.js`): `/robots` to list and add robots, `/pair/:id` for a pairing code and the installer command, and `/panel/:id`, the panel rendered from the profile. A `sim.rover` robot is driven by an in-process simulator (`server/sim`), so the panel works before any hardware exists. It gets no jobs, and it is not counted as a device or reported online in the outbox. The panel (`public/panel.js`, no build step) drives with a touch joystick, the keyboard or a gamepad, shows a latency meter and one camera tile per camera the profile lists; the camera stays a placeholder until OpenRe.Stream can play a WHIP-published stream back to a browser.
 - The command audit (`command_audit`, kept 30 days) and the `bot.*` outbox events.
-- Dispatching `platform.job@1` jobs to a paired Node over `/device` (`server/jobs/dispatch.js`, no HTTP route) and metering them per wall-clock second (`run_jobs`, `run_usage_outbox`; docs/protocol.md §1.2).
+- Dispatching `platform.job@1` jobs to a paired Node over `/device` (`server/jobs/dispatch.js`; the internal `bot.job.dispatch` API is `POST /api/v1/jobs`, `POST /jobs/:id/cancel`, `GET /jobs/:id`) and metering them per wall-clock second (`run_jobs`, `run_usage_outbox`; docs/protocol.md §1.2).
 
 ## Does not own
 
@@ -45,6 +45,7 @@ OpenVibe.Bot pairs a robot's machines, keeps their state and gates every operato
 | `bot.robot.manage` | create, patch and delete a robot, pairing codes, operators |
 | `bot.robot.control` | the e-stop set and clear (clear is owner-only) and the control gate |
 | `bot.device.connect` | rotate and revoke a device credential |
+| `bot.job.dispatch` | the internal Run → Bot jobs API (`POST /jobs`, `POST /jobs/:id/cancel`, `GET /jobs/:id`); services only |
 
 A person acts on their own robots with a Network user token; a service acts with a service token plus the capability, for the subject it names. The REST routes are in `docs/protocol.md` §3 and the two WebSockets in §§1–2.
 
