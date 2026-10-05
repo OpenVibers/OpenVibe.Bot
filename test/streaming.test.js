@@ -173,7 +173,7 @@ const { boot, check, done } = require('./helpers/app');
         assert.match(html, /Record to OpenVibe\.Media/);
         assert.match(html, /Show on my OpenVibe\.Live channel/);
         assert.doesNotMatch(html, /name="(media|live)" value="on" checked/, 'both off by default');
-        const saved = await form(`/robots/${robot.id}/streaming`, alex, 'media=off&media=on&live=off');
+        const saved = await form(`/robots/${robot.id}/streaming`, alex, 'media_was=off&media=off&media=on&live_was=off&live=off');
         assert.strictEqual(saved.status, 303);
         assert.strictEqual(saved.headers.get('location'), `/panel/${robot.id}`);
         assert.strictEqual(t.openre.streams.get(streamId).recording_mode, 'vod');
@@ -184,6 +184,18 @@ const { boot, check, done } = require('./helpers/app');
         assert.strictEqual((await auditOf(robot, 'streaming.live')).length, 0, 'an unchanged switch writes nothing');
         const bad = await form(`/robots/${robot.id}/streaming`, alex, 'media=maybe&live=off');
         assert.strictEqual(bad.status, 422);
+        assert.match(html, /name="media_was" value="on"/, 'the page carries what each switch was drawn with');
+    });
+
+    await check('a stale tab does not revert a switch changed elsewhere', async () => {
+        const erin = t.network.newUser('erin');
+        const { robot, streamId } = await pairedRobot(erin);
+        // Drawn with both off; meanwhile live was turned on elsewhere; the stale form only turns media on.
+        t.openre.streams.get(streamId).mirror_to_live = true;
+        const r = await form(`/robots/${robot.id}/streaming`, erin, 'media_was=off&media=off&media=on&live_was=off&live=off');
+        assert.strictEqual(r.status, 303);
+        assert.strictEqual(t.openre.streams.get(streamId).recording_mode, 'vod');
+        assert.strictEqual(t.openre.streams.get(streamId).mirror_to_live, true, 'the untouched live switch is not reverted');
     });
 
     await check('only the owner sees and posts the streaming form', async () => {

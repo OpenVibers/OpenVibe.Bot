@@ -137,8 +137,9 @@ function createWebRoutes(config, { domain = null, sim = null, limits = null, log
     }));
 
     // The owner's streaming switches as a plain form (the same as POST /api/v1/robots/:id/streaming, once per
-    // switch): media=on|off and live=on|off, each after its hidden "off" so the last value wins. Unchanged
-    // switches write nothing (the domain is idempotent) → 303 to the panel.
+    // switch): media=on|off and live=on|off, each after its hidden "off" so the last value wins. A switch the
+    // owner did not touch (its value equals the <name>_was the page was drawn with) is not sent, so a stale tab
+    // never reverts a change made elsewhere; the domain is idempotent besides → 303 to the panel.
     r.post('/robots/:id/streaming', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
         const me = requireUser(req);
         if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
@@ -146,13 +147,21 @@ function createWebRoutes(config, { domain = null, sim = null, limits = null, log
         if (!robot) throw new BotError(404, 'bot.robot_not_found', 'no such robot');
         if (robot.owner_subject !== me.subject) throw new BotError(403, 'bot.forbidden', 'only the owner may change streaming');
         const last = (v) => (Array.isArray(v) ? v[v.length - 1] : v);
-        const wanted = {};
+        const changes = [];
         for (const to of ['media', 'live']) {
             const value = last(req.body && req.body[to]);
             if (value !== 'on' && value !== 'off') throw new BotError(422, 'bot.invalid_input', `${to} must be on or off`);
-            wanted[to] = value === 'on';
+            const was = last(req.body && req.body[`${to}_was`]);
+            if (was !== value) changes.push({ to, on: value === 'on' });
         }
-        for (const to of ['media', 'live']) await domain.streaming.set(robot.id, me, { to, on: wanted[to] });
+        // One switch can be saved before OpenRe refuses or stops answering for the next: say which one was.
+        const saved = [];
+        for (const change of changes) {
+            try { await domain.streaming.set(robot.id, me, change); saved.push(change.to); } catch (e) {
+                if (!saved.length || !(e instanceof BotError)) throw e;
+                throw new BotError(e.status, e.code, `${saved.join(' and ')} was saved, ${change.to} was not: ${e.detail || e.code}`);
+            }
+        }
         res.redirect(303, `/panel/${robot.id}`);
     }));
 

@@ -212,7 +212,7 @@ function renderWidget(w, { profile = {}, allowed_commands = [] } = {}) {
 }
 
 /** One owner switch: a checkbox posted as name=on, after a hidden name=off so an unchecked box still says off. */
-const toggle = (name, on, title, note, disabled = false) => `<input type="hidden" name="${esc(name)}" value="off">
+const toggle = (name, on, title, note, disabled = false, was = false) => `${was ? `<input type="hidden" name="${esc(name)}_was" value="${on ? 'on' : 'off'}">` : ''}<input type="hidden" name="${esc(name)}" value="off">
 <label class="toggle"><input type="checkbox" name="${esc(name)}" value="on"${on ? ' checked' : ''}${disabled ? ' disabled' : ''}><span><b>${esc(title)}</b><small>${esc(note)}</small></span></label>`;
 
 /** The owner's embed switch: plain markup, works without JavaScript. */
@@ -245,8 +245,8 @@ function streamingForm(robot, streaming) {
     return `<section class="setting-card" aria-labelledby="streaming-h"><h2 id="streaming-h">Streaming and recording</h2>
 <p class="setting-note">Off until you turn them on. Operators and viewers cannot change these.</p>
 ${why}<form class="streaming-form" method="post" action="/robots/${esc(robot.id)}/streaming" data-streaming-form>
-${toggle('media', s.media && s.media.on, 'Record to OpenVibe.Media', 'Each time the robot goes live, the session is saved as an unlisted video in your Media library.', off)}
-${toggle('live', s.live && s.live.on, 'Show on my OpenVibe.Live channel', 'Lets OpenRe mirror the camera to your Live channel. It appears there once your channel plays OpenRe streams.', off)}
+${toggle('media', s.media && s.media.on, 'Record to OpenVibe.Media', 'Each time the robot goes live, OpenRe records the session to OpenVibe.Media as an unlisted video.', off, true)}
+${toggle('live', s.live && s.live.on, 'Show on my OpenVibe.Live channel', 'Lets OpenRe mirror the camera to your Live channel. It appears there once your channel plays OpenRe streams.', off, true)}
 <button type="submit"${off ? ' disabled' : ''}>Save</button>
 </form></section>`;
 }
