@@ -14,6 +14,7 @@ OpenVibe.Bot pairs a robot's machines, keeps their state and gates every operato
 - The `/device` and `/control` WebSockets, the command gate and the latched e-stop.
 - The signed-in pages (`server/web/routes.js`): `/robots` to list and add robots, `/pair/:id` for a pairing code and the installer command, and `/panel/:id`, the panel rendered from the profile. A `sim.rover` robot is driven by an in-process simulator (`server/sim`), so the panel works before any hardware exists. It gets no jobs, and it is not counted as a device or reported online in the outbox. The panel (`public/panel.js`, no build step) drives with a touch joystick, the keyboard or a gamepad, shows a latency meter and one camera tile per camera the profile lists; the camera stays a placeholder until OpenRe.Stream can play a WHIP-published stream back to a browser.
 - The command audit (`command_audit`, kept 30 days) and the `bot.*` outbox events.
+- The robot's streaming and recording toggles, off by default: `media` records live sessions to OpenVibe.Media and `live` shows them on the owner's OpenVibe.Live channel. They live only on the robot's OpenRe stream (`recording_mode`, `mirror_to_live`); Bot stores no copy and the owner, not an operator, flips them (`GET`/`POST /api/v1/robots/:id/streaming`).
 - Dispatching `platform.job@1` jobs to a paired Node over `/device` (`server/jobs/index.js` over `server/jobs/dispatch.js`; the internal `bot.job.dispatch` API is `POST /api/v1/jobs`, `POST /jobs/:id/cancel`, `GET /jobs/:id`) and metering them per wall-clock second (`run_jobs`, `run_usage_outbox`; docs/protocol.md §1.2).
 
 ## Does not own
@@ -41,8 +42,8 @@ OpenVibe.Bot pairs a robot's machines, keeps their state and gates every operato
 
 | capability | guards |
 |---|---|
-| `bot.robot.read` | `GET /robots`, `GET /robots/:id`, operators, devices and the audit, for a service acting for an owner |
-| `bot.robot.manage` | create, patch and delete a robot, pairing codes, operators |
+| `bot.robot.read` | `GET /robots`, `GET /robots/:id`, operators, devices, the audit and the streaming toggles, for a service acting for an owner |
+| `bot.robot.manage` | create, patch and delete a robot, pairing codes, operators, and the streaming toggles (`POST /robots/:id/streaming`) |
 | `bot.robot.control` | the e-stop set and clear (clear is owner-only) and the control gate |
 | `bot.device.connect` | rotate and revoke a device credential |
 | `bot.job.dispatch` | the internal Run → Bot jobs API (`POST /jobs`, `POST /jobs/:id/cancel`, `GET /jobs/:id`); services only |
@@ -75,7 +76,7 @@ The embeddable panel is `GET /panel/:id/embed` (framed only by `BOT_EMBED_ORIGIN
 
 Set `BOT_WHIP_BASE` in `/etc/openvibe/bot.env` to the WHIP ingest base each device publishes to (`whip_url = <base>/<publish key>`, sent once with the pairing; OpenRe's is `https://ingest.openre.stream/whip`); leave it unset to pair devices without video.
 
-The publish key is always an ingest key OpenRe.Stream issued for the robot's stream (OpenRe's WHIP ingest admits no other): set `BOT_OPENRE_URL` and `BOT_OPENRE_TOKEN` (a Network service token holding `openre.stream.read`, `openre.stream.write` and `openre.key.rotate`, or `openre.stream.*` with `openre.key.rotate`; `BOT_OPENRE_TIMEOUT_MS`, default 8000, bounds each call). Pairing creates the robot's OpenRe stream (or rotates the one it has), a credential rotation rotates its key, revoking a device or removing a robot revokes the key and ends the live session. Bot stores the stream id and the key's hint, never the key. With either variable unset, devices still pair but get no publish key and the answer says `"video": "not_configured"`; Bot mints no key of its own.
+The publish key is always an ingest key OpenRe.Stream issued for the robot's stream (OpenRe's WHIP ingest admits no other): set `BOT_OPENRE_URL` and `BOT_OPENRE_TOKEN` (a Network service token holding `openre.stream.read`, `openre.stream.write` and `openre.key.rotate`, or `openre.stream.*` with `openre.key.rotate`; `BOT_OPENRE_TIMEOUT_MS`, default 8000, bounds each call). The same token covers the streaming toggles: `GET /api/v1/robots/:id/streaming` reads the stream with `openre.stream.read`, `POST` PATCHes `recording_mode`/`mirror_to_live` with `openre.stream.write`. Pairing creates the robot's OpenRe stream (or rotates the one it has), a credential rotation rotates its key, revoking a device or removing a robot revokes the key and ends the live session. Bot stores the stream id and the key's hint, never the key. With either variable unset, devices still pair but get no publish key and the answer says `"video": "not_configured"`; Bot mints no key of its own.
 
 `/install` is proxied to the app, which answers a 302 to OpenVibe.Node's installer script (`BOT_INSTALLER_SOURCE_URL`, by default the `install.sh` asset on OpenVibe.Node's [latest release](https://github.com/OpenVibers/OpenVibe.Node/releases/latest/download/) — a released, checksummed installer that never drifts with Node's `main`, whose CI keeps `dist/install.sh` byte-identical to `install/install.sh`; https on an allow-listed GitHub or openvibe.bot host, checked at boot, and no query parameter changes the target). The pairing's installer command adds `--driver adeept|adeept-mecanum|cozmo` for those profiles and nothing for the others (the dry-run `none`).
 

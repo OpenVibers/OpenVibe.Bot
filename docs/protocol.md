@@ -121,7 +121,10 @@ pairing with `BOT_OPENRE_URL`/`BOT_OPENRE_TOKEN` set and found again by that ref
 A pairing or `POST /devices/bind` rotates the stream's key with no grace (the robot's previous device stops publishing), a
 credential rotation with the credential's grace, a revocation with no grace and the live session ended;
 removing the robot does the same and archives the stream when nothing is live. Bot stores the stream id and
-the key's hint, never the key. OpenRe refusing is `502 bot.openre_refused` (its problem code in `detail`),
+the key's hint, never the key. The same token carries the streaming toggles: `GET /robots/:id/streaming`
+reads the stream (`openre.stream.read`) and `POST` PATCHes `recording_mode`/`mirror_to_live`
+(`openre.stream.write`); Bot keeps neither, the OpenRe stream is the only copy.
+OpenRe refusing is `502 bot.openre_refused` (its problem code in `detail`),
 not answering `503 bot.openre_unavailable`; a pairing that fails so leaves the code unused and no device.
 With `BOT_OPENRE_URL` or `BOT_OPENRE_TOKEN` unset the answers carry `"video": "not_configured"` and neither
 `publish_key` nor `whip_url`.
@@ -423,7 +426,7 @@ the subject it acts for). Without a token, every route but `GET /profiles`, `GET
 and `POST /devices/bind` answers `401 bot.sign_in`: `GET|POST /robots`, `GET|PATCH|DELETE /robots/:id`,
 `POST /robots/:id/pairing-code`, `GET|POST /robots/:id/operators`, `DELETE /robots/:id/operators/:subject`,
 `GET /robots/:id/devices`, `POST /devices/:id/rotate|revoke`, `POST /robots/:id/estop`,
-`POST /robots/:id/estop/clear` and `GET /robots/:id/audit`. A node token gets `403 bot.forbidden` on the same
+`POST /robots/:id/estop/clear`, `GET /robots/:id/audit` and `GET|POST /robots/:id/streaming`. A node token gets `403 bot.forbidden` on the same
 routes. Both come before any lookup, so a real robot or device id answers exactly as a made-up one. The three
 jobs routes are service-only: the same `401 bot.sign_in` without a token, `403 bot.forbidden` for a person or a
 node token, and a service token is judged on `bot.job.dispatch` alone.
@@ -447,6 +450,8 @@ node token, and a service token is judged on `bot.job.dispatch` alone.
 | `POST /robots/:id/estop` | owner/operator, `bot.robot.control` | `{ robot }` |
 | `POST /robots/:id/estop/clear` | **owner only**, `bot.robot.control` | `{ robot }` |
 | `GET /robots/:id/audit?limit=&before=` | owner, or `bot.robot.read` | `{ audit[], next_before }` (newest first) |
+| `GET /robots/:id/streaming` | a member, or `bot.robot.read` | `{ available, media{on}, live{on,effective}, stream_id }` (plus `reason` when unavailable), read from the robot's OpenRe stream; `available:false` is `not_configured` (OpenRe unset), `not_paired` (no stream yet) or `stream_missing` (OpenRe answered 404) |
+| `POST /robots/:id/streaming` | **the owner only**, or `bot.robot.manage` | body `{ to: "media"\|"live", on: bool }` → the new state (as `GET`). `media` sets the stream's `recording_mode` `vod`/`none` (record to OpenVibe.Media); `live` sets `mirror_to_live` (show on the owner's OpenVibe.Live channel). One audit row per real change (`streaming.media`/`streaming.live`); an idempotent repeat answers the state and writes none. `422 bot.invalid_streaming`; `409 bot.not_paired` / `bot.openre_not_configured` |
 | `POST /jobs`, `POST /jobs/:id/cancel`, `GET /jobs/:id` | **a service only**, with `bot.job.dispatch` (Run → Bot; a person or a node token is `403 bot.forbidden`) | `201 { job, sent }` / `{ job, sent }` / `{ job, stdout }`; `422 bot.invalid_input` without `project_id`, `409 bot.class_unadvertised` when the device does not advertise the job's class, `404 bot.job_not_found` |
 | `POST /pair` | the one-time code is the credential | `201 { device_id, credential, publish_key, whip_url, robot_id, profile }`; with `BOT_PAIRING_AUTHORITY=network` always `410 bot.pairing_moved` (the `detail` names the Network URL) |
 
@@ -462,6 +467,8 @@ and the signed-in pages `GET|POST /robots`, `GET /pair/:id`, `GET /panel/:id` an
 
 Every command — allowed or refused — is written to `command_audit` (robot, device, the operator
 principal and its kind, role, kind, the clamped value summary, result `ack|nack|refused|expired`,
-reason, latency, time), kept 30 days. The outbox publishes `bot.robot.online`, `bot.robot.offline`,
+reason, latency, time), kept 30 days. Changing a robot's streaming toggles writes one row per real change
+(`kind` `streaming.media` or `streaming.live`, `value` `{ on }`, role `owner`, result `ack`); an
+idempotent repeat writes none. The outbox publishes `bot.robot.online`, `bot.robot.offline`,
 `bot.estop.set`, `bot.estop.cleared` and `bot.command.refused` — small payloads of ids, kinds and
 results, never a credential, a pairing code, a publish key or a WHIP URL.

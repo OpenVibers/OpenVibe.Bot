@@ -62,7 +62,9 @@ function createWebRoutes(config, { domain = null, sim = null, limits = null, log
         res.setHeader('Cache-Control', 'no-store');
         try { await fn(req, res); } catch (e) {
             if (e.status === 401) return res.redirect(302, `/auth/login?next=${encodeURIComponent(req.originalUrl)}`);
-            if (e.status === 403 || e.status === 404) return res.status(e.status).type('text/plain').send(`${e.detail || e.code}\n`);
+            // A refusal the person can act on (a bad form value, a robot with no stream, OpenRe not answering) says so
+            // with its own status instead of the generic error page.
+            if ([403, 404, 409, 422, 502, 503].includes(e.status) && e.code) return res.status(e.status).type('text/plain').send(`${e.detail || e.code}\n`);
             return next(e);
         }
         return undefined;
@@ -134,6 +136,26 @@ function createWebRoutes(config, { domain = null, sim = null, limits = null, log
         res.redirect(303, `/panel/${robot.id}`);
     }));
 
+    // The owner's streaming switches as a plain form (the same as POST /api/v1/robots/:id/streaming, once per
+    // switch): media=on|off and live=on|off, each after its hidden "off" so the last value wins. Unchanged
+    // switches write nothing (the domain is idempotent) → 303 to the panel.
+    r.post('/robots/:id/streaming', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        const robot = await domain.robots.get(req.params.id);
+        if (!robot) throw new BotError(404, 'bot.robot_not_found', 'no such robot');
+        if (robot.owner_subject !== me.subject) throw new BotError(403, 'bot.forbidden', 'only the owner may change streaming');
+        const last = (v) => (Array.isArray(v) ? v[v.length - 1] : v);
+        const wanted = {};
+        for (const to of ['media', 'live']) {
+            const value = last(req.body && req.body[to]);
+            if (value !== 'on' && value !== 'off') throw new BotError(422, 'bot.invalid_input', `${to} must be on or off`);
+            wanted[to] = value === 'on';
+        }
+        for (const to of ['media', 'live']) await domain.streaming.set(robot.id, me, { to, on: wanted[to] });
+        res.redirect(303, `/panel/${robot.id}`);
+    }));
+
     /** As the /control join decides: a member's role, or a place in the queue on a `queue` robot; else null. */
     async function memberRole(robot, me) {
         const role = await domain.members.roleOf(robot.id, me.subject);
@@ -142,8 +164,13 @@ function createWebRoutes(config, { domain = null, sim = null, limits = null, log
     async function sendPanel(res, robot, profile, role, mode = 'page', signedIn = true) {
         await startSim(robot, profile);
         const { maxCommandMs } = domain.control.effectiveLimits(robot, profile);
+        // Only the owner's own page shows the streaming switches; an OpenRe that does not answer leaves them
+        // greyed out with a reason instead of failing the panel.
+        const streaming = role === 'owner' && mode === 'page'
+            ? await domain.streaming.get(robot.id).catch(() => ({ available: false, reason: 'unavailable', media: { on: false }, live: { on: false } }))
+            : null;
         res.type('html').send(renderPanel({
-            robot: presentForPage(robot), profile, role, mode, signedIn,
+            robot: presentForPage(robot), profile, role, mode, signedIn, streaming,
             allowed_commands: role === 'watcher' ? [] : domain.control.allowedFor(robot, role, profile),
             // A held control is re-sent well inside the device's deadline, so it never stops between two frames.
             holdResendMs: Math.max(50, Math.min(HOLD_RESEND_MS, Math.floor(maxCommandMs / 2))),

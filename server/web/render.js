@@ -211,19 +211,50 @@ function renderWidget(w, { profile = {}, allowed_commands = [] } = {}) {
     return `<section class="widget widget-${esc(w.type)}" data-widget="${esc(w.type)}"${cmd}><h2>${esc(label)}</h2>${inner}</section>`;
 }
 
-/** The owner's embed switch: plain markup, a checkbox posted as embed_public=on (the hidden field makes unchecked off). */
+/** One owner switch: a checkbox posted as name=on, after a hidden name=off so an unchecked box still says off. */
+const toggle = (name, on, title, note, disabled = false) => `<input type="hidden" name="${esc(name)}" value="off">
+<label class="toggle"><input type="checkbox" name="${esc(name)}" value="on"${on ? ' checked' : ''}${disabled ? ' disabled' : ''}><span><b>${esc(title)}</b><small>${esc(note)}</small></span></label>`;
+
+/** The owner's embed switch: plain markup, works without JavaScript. */
 function embedForm(robot) {
-    return `<form class="embed-form" method="post" action="/robots/${esc(robot.id)}/embed" data-embed-form>
-<input type="hidden" name="embed_public" value="off">
-<label><input type="checkbox" name="embed_public" value="on"${robot.embed_public ? ' checked' : ''}> Let anyone see this robot's video and readouts on a page that embeds it (never the controls)</label>
+    return `<section class="setting-card" aria-labelledby="embed-h"><h2 id="embed-h">Embedding</h2>
+<form class="embed-form" method="post" action="/robots/${esc(robot.id)}/embed" data-embed-form>
+${toggle('embed_public', robot.embed_public, 'Let anyone watch where it is embedded', "A page that embeds this robot shows its video and readouts to everyone; never the controls.")}
 <button type="submit">Save</button>
-</form>`;
+</form></section>`;
+}
+
+// Why the streaming switches cannot be used right now, in the owner's words (domain.streaming reasons, plus
+// 'unavailable' when OpenRe did not answer while the page was drawn).
+const STREAMING_WHY = {
+    not_configured: 'Streaming needs OpenRe.Stream, which this server is not connected to.',
+    not_paired: "Pair a device first: the robot's video stream is made when a device pairs.",
+    stream_missing: "OpenRe no longer has this robot's stream. Pair the device again to make a new one.",
+    unavailable: 'OpenRe did not answer just now, so these switches cannot be read. Reload in a moment.',
+};
+
+/**
+ * The owner's streaming and recording switches (plan T15 row S), both off until the owner turns them on. They
+ * are the robot's OpenRe stream's own settings (domain.streaming): Bot keeps no copy, so the page shows what
+ * OpenRe says. The panel's own video never depends on either.
+ */
+function streamingForm(robot, streaming) {
+    const s = streaming || { available: false, reason: 'unavailable', media: { on: false }, live: { on: false } };
+    const off = !s.available;
+    const why = off ? `<p class="setting-note" role="status">${esc(STREAMING_WHY[s.reason] || STREAMING_WHY.unavailable)}${s.reason === 'not_paired' ? ` <a href="/pair/${esc(robot.id)}">Pair a device</a>` : ''}</p>` : '';
+    return `<section class="setting-card" aria-labelledby="streaming-h"><h2 id="streaming-h">Streaming and recording</h2>
+<p class="setting-note">Off until you turn them on. Operators and viewers cannot change these.</p>
+${why}<form class="streaming-form" method="post" action="/robots/${esc(robot.id)}/streaming" data-streaming-form>
+${toggle('media', s.media && s.media.on, 'Record to OpenVibe.Media', 'Each time the robot goes live, the session is saved as an unlisted video in your Media library.', off)}
+${toggle('live', s.live && s.live.on, 'Show on my OpenVibe.Live channel', 'Lets OpenRe mirror the camera to your Live channel. It appears there once your channel plays OpenRe streams.', off)}
+<button type="submit"${off ? ' disabled' : ''}>Save</button>
+</form></section>`;
 }
 
 /** A link out of a frame: always a new tab, never with a handle back to the framing page. */
 const outLink = (href, text, cls = 'button') => `<a class="${cls}" href="${esc(href)}" target="_blank" rel="noopener">${esc(text)}</a>`;
 
-function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs = 150, mode = 'page', signedIn = true }) {
+function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs = 150, mode = 'page', signedIn = true, streaming = null }) {
     const embed = mode === 'embed';
     const latched = !!(robot.estop && robot.estop.latched);
     const widgets = (profile.widgets || []).map((w, i) => ({ w, i }))
@@ -245,7 +276,7 @@ ${embed && role === 'watcher' && !signedIn ? `<p class="embed-sign-in">${outLink
 <div class="widgets">
 ${widgets.join('\n')}
 </div>
-${role === 'owner' && !embed ? embedForm(robot) : ''}
+${role === 'owner' && !embed ? `<div class="owner-settings">${embedForm(robot)}${streamingForm(robot, streaming)}</div>` : ''}
 </main>`;
     return page(robot.name, body, { scripts: ['/panel/panel.js'], bodyClass: embed ? 'embed-page' : 'panel-page' });
 }
