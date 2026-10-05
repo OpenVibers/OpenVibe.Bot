@@ -593,6 +593,22 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         for (const c of [...set]) if (c.watcher) { unsubscribe(c); try { c.ws.close(4003, reason); } catch { /* gone */ } }
     }
 
+    /**
+     * A signed-in person's access to the robot changed (removed, or their role moved): close every
+     * non-watcher socket of theirs on this robot with 4003, so the client reconnects and its join
+     * re-derives the role. A watcher is anonymous and is never that subject.
+     */
+    function dropSubject(robotId, subject, reason = 'your access to this robot changed') {
+        const set = subsByRobot.get(robotId);
+        if (!set || !subject) return;
+        for (const c of [...set]) {
+            if (c.watcher || c.subject !== subject) continue;
+            unsubscribe(c);
+            c.robotId = null;
+            try { c.ws.close(4003, reason); } catch { /* gone */ }
+        }
+    }
+
     // ── State and helpers ─────────────────────────────────────────────────────────────────────────
     function deviceForRobot(robotId) {
         let sim = null;
@@ -705,7 +721,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         bindDomain(d) { domain = d; },
         bindJobs(j) { jobs = j; },
         handleUpgrade, attachSim, detachSim,
-        isOnline, deviceState, sendToDevice, sendToRobotDevices, broadcast, closeDevice, robotState, refreshConfig, pushEstop, closeWatchers, operatorCommand,
+        isOnline, deviceState, sendToDevice, sendToRobotDevices, broadcast, closeDevice, robotState, refreshConfig, pushEstop, closeWatchers, dropSubject, operatorCommand,
         // Real devices only: a simulator is not a machine anyone runs.
         onlineCount() { let n = 0; for (const c of deviceConns.values()) if (c.online && !c.sim) n++; return n; },
         devices() { return [...deviceConns.values()].filter((c) => !c.sim).map((c) => ({ device_id: c.device.id, online: c.online })); },

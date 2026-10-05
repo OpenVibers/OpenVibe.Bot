@@ -101,13 +101,26 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     async function addOperator(robotId, subject, role, addedBy) {
         if (!['owner', 'operator', 'viewer'].includes(role)) fail(422, 'bot.invalid_role', 'role must be owner, operator or viewer');
         if (role === 'owner') fail(422, 'bot.invalid_role', 'ownership is not transferred by adding an operator');
+        const before = await roleOf(robotId, subject);
         await db.query(
             `INSERT INTO robot_operators (robot_id, subject, role, added_by, created_at) VALUES ($1, $2, $3, $4, $5)
              ON CONFLICT (robot_id, subject) DO UPDATE SET role = EXCLUDED.role, added_by = EXCLUDED.added_by`,
             [robotId, subject, role, addedBy || null, iso(now())]);
+        if (before !== role) membershipChanged(robotId, subject, 'your role on this robot changed');
     }
     async function removeOperator(robotId, subject) {
+        const before = await roleOf(robotId, subject);
         await db.query(`DELETE FROM robot_operators WHERE robot_id = $1 AND subject = $2 AND role <> 'owner'`, [robotId, subject]);
+        if (before && before !== 'owner') membershipChanged(robotId, subject, 'you were removed from this robot');
+    }
+    /**
+     * A membership change: the person's live /control sockets on the robot are dropped (so their join
+     * re-derives the role) and every panel of the robot is re-broadcast. The one place both the web form
+     * routes and the v1 API reach, since both change membership through addOperator/removeOperator.
+     */
+    function membershipChanged(robotId, subject, reason) {
+        if (link && link.dropSubject) link.dropSubject(robotId, subject, reason);
+        if (link && link.broadcast) link.broadcast(robotId);
     }
 
     // ── Robots ────────────────────────────────────────────────────────────────────────────────────
@@ -608,7 +621,6 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         return {
             robot_id: robotId, subject: subject || null, active: !!(active && active.subject === subject),
             turn_ends_at: active ? iso(new Date(active.turn_ends_at).getTime()) : null,
-            turn_subject: active ? active.subject : null,
             position: active && active.subject === subject ? 0 : position,
             budget: turnBudget(robot),
             used: active && active.subject === subject ? active.commands_used : 0,

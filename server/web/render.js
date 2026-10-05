@@ -263,7 +263,7 @@ const outLink = (href, text, cls = 'button') => `<a class="${cls}" href="${esc(h
 function peopleCard(robot, people) {
     const roleName = (r) => (r === 'viewer' ? 'Viewer' : 'Operator');
     const row = (p) => {
-        const remove = `<form method="post" action="/robots/${esc(robot.id)}/operators/${esc(p.subject)}/remove"><button type="submit" class="quiet">Remove</button></form>`;
+        const remove = `<form method="post" action="/robots/${esc(robot.id)}/operators/${esc(encodeURIComponent(p.subject))}/remove"><button type="submit" class="quiet">Remove</button></form>`;
         const who = p.username
             ? `<b>${esc(p.display_name)}</b><small>@${esc(p.username)} · ${roleName(p.role)}</small>`
             : `<b>${esc(p.subject)}</b><small>name unavailable</small>`;

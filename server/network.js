@@ -115,7 +115,8 @@ function createNodePrincipals(config, { fetchImpl = globalThis.fetch } = {}) {
  * Network's identity resolution for people (usernames ↔ subjects), with Bot's own svc:bot token
  * (audience openvibe.network, identity.subject.resolve — Network grants Bot this).
  *   byUsername(name) → GET /internal/identity/resolve?username=<name> → { subject, username, display_name },
- *                     or null when Network knows no such person (404).
+ *                     or null when Network knows no such person (a 404 whose problem code is
+ *                     identity.subject_not_found).
  *   names(subjectIds) → POST /internal/identity/resolve-batch { subject_ids } → Map(subject → { username,
  *                     display_name }), skipping the ids Network does not know. Answers are cached in memory
  *                     for five minutes, at most 2000 subjects.
@@ -140,8 +141,10 @@ function createIdentity(config, { fetchImpl = globalThis.fetch, now = () => Date
             throw new BotError(503, 'bot.network_unavailable', `Network did not answer to resolve a person: ${e.message}`);
         }
         if (res.status === 401) tokens.invalidate();
-        if (res.status === 404 && method === 'GET') return null;
         const out = await res.json().catch(() => null);
+        // Only Network's own "no such person" is null. A 404 from a Network that lacks the route (or any
+        // other 404) and a 400 identity.bad_request are an outage, never "no such account".
+        if (method === 'GET' && res.status === 404 && out && out.code === 'identity.subject_not_found') return null;
         if (!res.ok || !out) throw new BotError(503, 'bot.network_unavailable', `Network answered ${res.status} for identity`);
         return out;
     }

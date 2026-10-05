@@ -324,8 +324,9 @@ needs an explicit owner or operator role — a no-role caller is refused `bot.no
 | `error` | `code, detail` | a frame or join the server refused |
 
 `robot_state.queue` (only for a `queue` robot) is
-`{ robot_id, subject, active, turn_ends_at, turn_subject, position, budget, used }` — a waiting
-person's `position` is 1-based (0 while they hold the turn).
+`{ robot_id, subject, active, turn_ends_at, position, budget, used }` — `subject` is the reader's own,
+never another person's, so a waiting person's `position` is 1-based (0 while they hold the turn) and no
+member ever learns the active driver's subject.
 
 ### Examples
 

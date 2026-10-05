@@ -5,6 +5,49 @@ const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
 const { boot, check, done } = require('./helpers/app');
+const { createIdentity } = require('../server/network');
+
+/**
+ * A Network identity endpoint over a fake fetch, for the cache's own rules (subject keying, the TTL and the
+ * 2000-entry bound) without a server. `now` drives the TTL; the token endpoint answers once.
+ */
+function identityStub() {
+    let clock = 1_000_000;
+    const users = new Map();     // subject → { subject, username, display_name }
+    const names = new Map();     // lowercased username → subject
+    const calls = { resolve: 0, batch: 0 };
+    const reply = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
+    const fetchImpl = async (url, opts = {}) => {
+        const u = new URL(url);
+        if (u.pathname === '/oauth/token') return reply(200, { access_token: 'tok', token_type: 'Bearer', expires_in: 300 });
+        if (u.pathname === '/internal/identity/resolve' && opts.method === 'GET') {
+            calls.resolve++;
+            const subject = names.get(String(u.searchParams.get('username') || '').toLowerCase());
+            return subject ? reply(200, users.get(subject)) : reply(404, { code: 'identity.subject_not_found' });
+        }
+        if (u.pathname === '/internal/identity/resolve-batch') {
+            calls.batch++;
+            const results = {};
+            for (const id of (JSON.parse(opts.body || '{}').subject_ids || [])) results[id] = users.get(id) || null;
+            return reply(200, { results });
+        }
+        return reply(404, { code: 'not_found' });
+    };
+    const identity = createIdentity(
+        { network: { internalUrl: 'http://network.test' }, oauth: { clientId: 'bot', clientSecret: 'shh' } },
+        { fetchImpl, now: () => clock });
+    return {
+        identity, calls,
+        add: (username) => {
+            const u = { subject: `usr_${username}`, username, display_name: username[0].toUpperCase() + username.slice(1) };
+            users.set(u.subject, u);
+            names.set(username.toLowerCase(), u.subject);
+            return u;
+        },
+        now: () => clock,
+        setNow: (t) => { clock = t; },
+    };
+}
 
 (async () => {
     const t = await boot();
@@ -47,9 +90,25 @@ const { boot, check, done } = require('./helpers/app');
         assert.strictEqual((await post(`/robots/${robot.id}/operators`, alex, { username: '@alex', role: 'operator' })).status, 422);
     });
 
-    await check('a non-owner cannot add or remove people', async () => {
-        assert.strictEqual((await post(`/robots/${robot.id}/operators`, bob, { username: '@carol', role: 'viewer' })).status, 403);
-        assert.strictEqual((await post(`/robots/${robot.id}/operators/${bob.subject}/remove`, bob)).status, 403);
+    await check('a Network 404 that is not "no such person", or a 400, is an outage (503), never unknown_user', async () => {
+        for (const status of [404, 400]) {
+            t.network.failIdentity(status);
+            try {
+                const r = await post(`/robots/${robot.id}/operators`, alex, { username: '@carol', role: 'viewer' });
+                const body = await r.text();
+                assert.strictEqual(r.status, 503, `${status}: ${body}`);
+                assert.match(body, /Network answered/);
+            } finally { t.network.failIdentity(null); }
+        }
+        // The only 404 that means "no such account" is Network's own identity.subject_not_found (the 422 above).
+    });
+
+    await check('a non-owner cannot add or remove people (and asks Network nothing)', async () => {
+        t.network.failIdentity(500);
+        try {
+            assert.strictEqual((await post(`/robots/${robot.id}/operators`, bob, { username: '@carol', role: 'viewer' })).status, 403);
+            assert.strictEqual((await post(`/robots/${robot.id}/operators/${bob.subject}/remove`, bob)).status, 403);
+        } finally { t.network.failIdentity(null); }
     });
 
     await check('the owner removes a person; the owner row stays', async () => {
@@ -57,6 +116,24 @@ const { boot, check, done } = require('./helpers/app');
         assert.ok((await t.domain.members.list(robot.id)).some((m) => m.subject === alex.subject && m.role === 'owner'));
         assert.strictEqual((await post(`/robots/${robot.id}/operators/${bob.subject}/remove`, alex)).status, 303);
         assert.ok(!(await t.domain.members.list(robot.id)).some((m) => m.subject === bob.subject));
+    });
+
+    await check('removing an operator drops their live /control socket (form and API)', async () => {
+        const { robot: r } = await t.robot(alex, { name: 'Watch' });
+        assert.strictEqual((await post(`/robots/${r.id}/operators`, alex, { username: '@bob', role: 'operator' })).status, 303);
+        const viaForm = await t.ws('/control', { headers: cookie(bob) });
+        viaForm.send({ type: 'join', robot_id: r.id });
+        assert.strictEqual((await viaForm.waitFor((m) => m.type === 'joined')).role, 'operator');
+        assert.strictEqual((await post(`/robots/${r.id}/operators/${bob.subject}/remove`, alex)).status, 303);
+        assert.strictEqual(await viaForm.waitForClose(), 4003, 'the removed operator\'s socket stayed open');
+
+        await t.domain.members.add(r.id, bob.subject, 'operator', alex.subject);
+        const viaApi = await t.ws('/control', { headers: cookie(bob) });
+        viaApi.send({ type: 'join', robot_id: r.id });
+        assert.strictEqual((await viaApi.waitFor((m) => m.type === 'joined')).role, 'operator');
+        const del = await t.call('DELETE', `/api/v1/robots/${r.id}/operators/${bob.subject}`, { user: alex });
+        assert.strictEqual(del.status, 200, del.text);
+        assert.strictEqual(await viaApi.waitForClose(), 4003, 'the API-removed operator\'s socket stayed open');
     });
 
     await check('Network down: the panel still renders, with the subject id and "name unavailable"', async () => {
@@ -83,9 +160,18 @@ const { boot, check, done } = require('./helpers/app');
         // Bob joins on /control (the queue's own door) and becomes the active turn; Carol waits.
         const c = await t.ws('/control', { headers: cookie(bob) });
         c.send({ type: 'join', robot_id: q.id });
-        assert.strictEqual((await c.waitFor((m) => m.type === 'joined')).role, 'queue');
+        const joined = await c.waitFor((m) => m.type === 'joined');
+        assert.strictEqual(joined.role, 'queue');
+        // A queue member's frame carries their own subject and no other: never the active driver's.
+        assert.strictEqual(joined.state.queue.subject, bob.subject);
+        assert.ok(!('turn_subject' in joined.state.queue), 'a queue member learned another subject');
         await t.domain.queue.join(q.id, carol.subject);
-        assert.strictEqual((await t.domain.queue.state(q.id, bob.subject)).active, true);
+        const active = await t.domain.queue.state(q.id, bob.subject);
+        assert.strictEqual(active.active, true);
+        assert.ok(!('turn_subject' in active), 'the active driver\'s subject leaked into a queue view');
+        const waiting = await t.domain.queue.state(q.id, carol.subject);
+        assert.strictEqual(waiting.subject, carol.subject);
+        assert.ok(!('turn_subject' in waiting), 'a waiting member learned the driver\'s subject');
 
         let broadcasts = 0;
         const original = t.hub.broadcast;
@@ -113,6 +199,46 @@ const { boot, check, done } = require('./helpers/app');
         assert.match(js, /'Your turn'/);
         assert.match(js, /in line/);
         assert.match(js, /setInterval\(paintLeft, 1000\)/);
+    });
+
+    await check('the identity cache is keyed by subject', async () => {
+        const s = identityStub();
+        const bob = s.add('bob');
+        const resolved = await s.identity.byUsername('bob');
+        assert.strictEqual(resolved.subject, bob.subject);
+        assert.strictEqual(s.calls.resolve, 1);
+        // The resolution is cached under the subject: names() for it needs no batch call.
+        const cached = await s.identity.names([bob.subject]);
+        assert.strictEqual(cached.get(bob.subject).username, 'bob');
+        assert.strictEqual(s.calls.batch, 0, 'a resolved subject was looked up again');
+        // A subject never resolved is a miss.
+        const carol = s.add('carol');
+        const fresh = await s.identity.names([carol.subject]);
+        assert.strictEqual(fresh.get(carol.subject).username, 'carol');
+        assert.strictEqual(s.calls.batch, 1);
+    });
+
+    await check('the identity cache expires after its TTL', async () => {
+        const s = identityStub();
+        const bob = s.add('bob');
+        await s.identity.names([bob.subject]);
+        await s.identity.names([bob.subject]);
+        assert.strictEqual(s.calls.batch, 1, 'a second lookup inside the TTL was not cached');
+        s.setNow(s.now() + 5 * 60 * 1000 + 1);
+        await s.identity.names([bob.subject]);
+        assert.strictEqual(s.calls.batch, 2, 'an expired entry was still served');
+    });
+
+    await check('the identity cache holds at most 2000 subjects', async () => {
+        const s = identityStub();
+        const subjects = [];
+        for (let i = 0; i < 2001; i++) subjects.push(s.add(`u${i}`).subject);
+        await s.identity.names(subjects);
+        const filled = s.calls.batch;
+        await s.identity.names([subjects[0]]);          // the oldest was evicted at the bound
+        assert.strictEqual(s.calls.batch, filled + 1, 'the cache grew past 2000 entries');
+        await s.identity.names([subjects[2000]]);       // the newest is still held
+        assert.strictEqual(s.calls.batch, filled + 1);
     });
 
     await t.close();
