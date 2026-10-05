@@ -26,7 +26,6 @@ const { capabilities, ids } = require('openvibe-contracts');
 const { json, iso, prefixedId } = require('./util');
 const { userPrincipal, verifyService, verifyNode, isNodeToken, PRINCIPAL_SUB, decodePayload } = require('./api/auth');
 const { getProfile } = require('./profiles');
-const { createJobFrames } = require('./jobs/dispatch');
 
 const OPEN = 1;
 const MAX_BACKLOG = 64;   // frames a device may send before its authentication completes
@@ -46,7 +45,7 @@ function parseCookies(header) {
 const bearer = (req) => { const h = String(req.headers.authorization || ''); return h.startsWith('Bearer ') ? h.slice(7).trim() : null; };
 const isSubject = (v) => typeof v === 'string' && ids.isSubjectId('user', v);
 
-function createRealtime({ config, keys, userAuth, usage = null, log = console, now = () => Date.now() }) {
+function createRealtime({ config, keys, userAuth, log = console, now = () => Date.now() }) {
     let domain = null;
     const deviceConns = new Map();     // device_id → conn
     const subsByRobot = new Map();     // robot_id → Set<conn>
@@ -62,7 +61,7 @@ function createRealtime({ config, keys, userAuth, usage = null, log = console, n
     const watchConns = new Set();      // every /watch socket, joined or not
     const watchersByAddr = new Map();  // client address → open /watch sockets
     const offlineAfterMs = config.device.heartbeatMs * config.device.offlineMisses + config.device.offlineGraceMs;
-    const jobs = createJobFrames({ db: () => domain.db, usage, log, now });
+    let jobs = null;                   // the jobs service (server/jobs/index.js), bound by server/app.js
 
     const nextSeq = (conn) => ++conn.seq;
     function send(ws, obj) { if (ws.readyState === OPEN) { ws.send(JSON.stringify(obj)); return true; } return false; }
@@ -73,7 +72,7 @@ function createRealtime({ config, keys, userAuth, usage = null, log = console, n
     const jobLink = (conn) => ({ deviceId: conn.device.id, send: (type, fields) => sendFrame(conn, type, fields), error: (code, detail) => sendError(conn, code, detail) });
     /** A socket's job frames are handled one at a time in arrival order: second n is queued before n+1, job_exit last. */
     function jobFrame(conn, msg) {
-        const run = (conn.jobFrames || Promise.resolve()).then(() => jobs.onFrame(jobLink(conn), msg));
+        const run = (conn.jobFrames || Promise.resolve()).then(() => jobs.frames.onFrame(jobLink(conn), msg));
         conn.jobFrames = run.catch(() => {});
         return run;
     }
@@ -135,7 +134,7 @@ function createRealtime({ config, keys, userAuth, usage = null, log = console, n
                 await sendConfig(conn);
                 await bringOnline(conn);
             } catch (e) { log.warn(`[Bot] device auth: ${e.message}`); conn.backlog = null; ws.close(4002, 'invalid credential'); return; }
-            await jobs.onConnect(jobLink(conn)).catch((e) => log.warn(`[Bot] job resend to ${conn.device.id}: ${e.message}`));
+            await jobs.frames.onConnect(jobLink(conn)).catch((e) => log.warn(`[Bot] job resend to ${conn.device.id}: ${e.message}`));
             await drainBacklog(conn);
         }
     }
@@ -329,7 +328,7 @@ function createRealtime({ config, keys, userAuth, usage = null, log = console, n
 
     async function onAck(conn, msg) {
         const id = String(msg.id || '');
-        if (id.startsWith('job_')) return jobs.onAck(jobLink(conn), msg);   // a job's ack/nack, never a command's
+        if (id.startsWith('job_')) return jobs.frames.onAck(jobLink(conn), msg);   // a job's ack/nack, never a command's
         const p = pendingCmds.get(id);
         if (!p || p.deviceId !== conn.device.id) return; // unknown, already answered, or another device's command
         pendingCmds.delete(id);
@@ -668,9 +667,9 @@ function createRealtime({ config, keys, userAuth, usage = null, log = console, n
 
     return {
         bindDomain(d) { domain = d; },
+        bindJobs(j) { jobs = j; },
         handleUpgrade, attachSim, detachSim,
         isOnline, deviceState, sendToDevice, sendToRobotDevices, broadcast, closeDevice, robotState, refreshConfig, pushEstop, closeWatchers,
-        jobStdout: (jobId) => jobs.stdout(jobId),
         // Real devices only: a simulator is not a machine anyone runs.
         onlineCount() { let n = 0; for (const c of deviceConns.values()) if (c.online && !c.sim) n++; return n; },
         devices() { return [...deviceConns.values()].filter((c) => !c.sim).map((c) => ({ device_id: c.device.id, online: c.online })); },

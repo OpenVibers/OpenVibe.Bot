@@ -303,7 +303,10 @@ const PROJECT = `prj_${ids.ulid()}`;
         assert.strictEqual(got.status, 200, got.text);
         assert.strictEqual(got.json.job.state, 'placed');
         assert.strictEqual(got.json.stdout.text, 'hello\n');
+        // One jobs service (server/jobs/index.js) holds the rings for the device socket and the API.
+        assert.deepStrictEqual(t.app.locals.jobs.stdout(job.id), got.json.stdout);
         refused(await call('GET', '/api/v1/jobs/job_00000000000000000000000000'), 404, 'bot.job_not_found');
+        refused(await call('POST', '/api/v1/jobs/job_00000000000000000000000000/cancel'), 404, 'bot.job_not_found');
         // Cancel asks the Node to stop it.
         const c = await call('POST', `/api/v1/jobs/${job.id}/cancel`);
         assert.strictEqual(c.status, 200, c.text);
