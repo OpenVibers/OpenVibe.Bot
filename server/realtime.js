@@ -434,7 +434,10 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         const key = `${conn.subject || `${conn.principal.kind}:${conn.principal.id || ''}`}|${id}`;
         const cached = results.get(key);
         if (cached) return sendFrame(conn, 'command_result', { id, result: cached.result, reason: cached.reason, cached: true });
-        if (inflight.has(key)) return sendFrame(conn, 'command_result', { id, result: 'pending', cached: true });
+        // The same id is still awaiting its ack/nack: never a second device command, and never a silent wait.
+        // A refusal code (not `result: pending`) so the HTTP route answers 409 bot.command_pending like the
+        // other refusals; the first request still gets its own result.
+        if (inflight.has(key)) return sendFrame(conn, 'command_result', { id, result: 'refused', code: 'bot.command_pending', reason: 'the same command id is still in flight' });
         // Reserved before the first await: two frames with one id are handled concurrently, and only the first may
         // reach the robot. Every path below either hands the reservation to a pending command or releases it.
         inflight.set(key, null);
@@ -709,7 +712,14 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         async close() {
             closed = true;
             for (const t of timers) clearInterval(t);
-            for (const p of pendingCmds.values()) if (p.timer) clearTimeout(p.timer);
+            // A command the device never acked settles as `expired` before the hub forgets it, so every HTTP
+            // request waiting on operatorCommand gets exactly one answer instead of hanging until the process dies.
+            for (const p of pendingCmds.values()) {
+                if (p.timer) clearTimeout(p.timer);
+                inflight.delete(p.key);
+                cacheResult(p.key, { result: 'expired', reason: 'the server closed before the device acknowledged' });
+                sendFrame(p.conn, 'command_result', { id: p.opId, result: 'expired', reason: 'the server closed before the device acknowledged' });
+            }
             pendingCmds.clear();
             inflight.clear();
             for (const conn of [...deviceConns.values()]) { try { conn.ws.close(1001, 'server closing'); } catch { /* gone */ } }

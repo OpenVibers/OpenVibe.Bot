@@ -325,6 +325,126 @@ const plugins = require('./helpers/plugins');
         assert.strictEqual(denied.json.code, 'capability.denied');
     });
 
+    // ── The HTTP command route (POST /robots/:id/commands) ────────────────────────────────────────
+    // Fixtures go through the domain so these checks do not spend the per-owner `bot.robot.manage` limit the
+    // rest of the file already uses; one robot + device (kept online with heartbeats) serves the device checks.
+    const hxSetup = await t.domain.robots.create({ owner: alex.subject, name: 'HTTP route rover', profile_id: 'sim.rover' });
+    const hx = hxSetup.robot;
+    const hdev = await deviceFor(hx.id, hxSetup.pairing.code);
+    const svc = t.network.signService({ sub: 'svc:live', cap: ['bot.robot.control'], aud: ['openvibe.bot'] });
+    const hcmd = (o) => t.call('POST', `/api/v1/robots/${hx.id}/commands`, { token: svc, headers: { 'X-OV-Subject': o.subject }, body: { id: o.id, kind: o.kind || 'drive', value: o.value || { throttle: 0.2 } } });
+    await t.domain.members.add(hx.id, bob.subject, 'operator', alex.subject);
+    await t.domain.members.add(hx.id, carol.subject, 'operator', alex.subject);
+    // Device liveness here is 400 ms; a heartbeat every 100 ms keeps the shared link online across checks.
+    const heartbeat = setInterval(() => { try { hdev.send({ type: 'heartbeat', t: Date.now() }); } catch { /* closing */ } }, 100);
+
+    await check('a person\'s own user token drives the HTTP route, and a mismatched X-OV-Subject is refused', async () => {
+        // bob's token with no X-OV-Subject acts as himself, exactly like a WebSocket operator.
+        const own = t.call('POST', `/api/v1/robots/${hx.id}/commands`, { user: bob, body: { id: 'me-1', kind: 'drive', value: { throttle: 0.2 } } });
+        const c = await hdev.waitFor((m) => m.type === 'command' && m.ref === 'me-1');
+        assert.strictEqual(c.operator.subject, bob.subject);
+        hdev.send({ type: 'ack', id: c.id });
+        const r = await own;
+        assert.strictEqual(r.status, 200, r.text);
+        assert.strictEqual(r.json.result, 'ack');
+        // Naming someone else with a user token is refused, never ignored.
+        const mismatch = await t.call('POST', `/api/v1/robots/${hx.id}/commands`, { user: bob, headers: { 'X-OV-Subject': carol.subject }, body: { id: 'me-2', kind: 'drive', value: { throttle: 0.2 } } });
+        assert.strictEqual(mismatch.status, 403, mismatch.text);
+        assert.strictEqual(mismatch.json.code, 'bot.forbidden');
+    });
+
+    await check('the HTTP command route needs a subject from a service (422) and refuses an anonymous caller (401)', async () => {
+        const noSubject = await t.call('POST', `/api/v1/robots/${hx.id}/commands`, { token: svc, body: { id: 'nos-1', kind: 'drive', value: { throttle: 0.2 } } });
+        assert.strictEqual(noSubject.status, 422, noSubject.text);
+        assert.strictEqual(noSubject.json.code, 'bot.invalid_input');
+        const anon = await t.call('POST', `/api/v1/robots/${hx.id}/commands`, { token: null, body: { id: 'anon-1', kind: 'drive', value: { throttle: 0.2 } } });
+        assert.strictEqual(anon.status, 401, anon.text);
+        assert.strictEqual(anon.json.code, 'bot.sign_in');
+    });
+
+    await check('a latched e-stop and an offline device answer 409 over the HTTP route', async () => {
+        // A device-less robot of its own: offline first, then latched (the e-stop is checked before liveness).
+        const setup = await t.domain.robots.create({ owner: alex.subject, name: 'No device', profile_id: 'sim.rover' });
+        const robot = setup.robot;
+        await t.domain.members.add(robot.id, bob.subject, 'operator', alex.subject);
+        const send = (id) => t.call('POST', `/api/v1/robots/${robot.id}/commands`, { token: svc, headers: { 'X-OV-Subject': bob.subject }, body: { id, kind: 'drive', value: { throttle: 0.2 } } });
+        const offline = await send('off-1');
+        assert.strictEqual(offline.status, 409, offline.text);
+        assert.strictEqual(offline.json.code, 'bot.device_offline');
+        await t.domain.estop.set(robot.id, { latched: true, by: alex.subject, principalKind: 'user' });
+        const latched = await send('estop-1');
+        assert.strictEqual(latched.status, 409, latched.text);
+        assert.strictEqual(latched.json.code, 'bot.estop_latched');
+    });
+
+    await check('a different subject reusing an id is never served another subject\'s cached result', async () => {
+        const first = hcmd({ id: 'same-1', subject: bob.subject });
+        const c1 = await hdev.waitFor((m) => m.type === 'command' && m.ref === 'same-1');
+        hdev.send({ type: 'ack', id: c1.id });
+        assert.strictEqual((await first).json.result, 'ack');
+        // carol's id is her own key: it reaches the device again rather than answering bob's cached ack.
+        const second = hcmd({ id: 'same-1', subject: carol.subject });
+        const c2 = await hdev.waitFor((m) => m.type === 'command' && m.ref === 'same-1' && m.id !== c1.id);
+        hdev.send({ type: 'ack', id: c2.id });
+        const r2 = await second;
+        assert.strictEqual(r2.status, 200, r2.text);
+        assert.strictEqual(r2.json.result, 'ack');
+        assert.ok(!r2.json.cached, 'carol was served bob\'s cached result');
+    });
+
+    await check('the same id while the first command is in flight answers 409 bot.command_pending', async () => {
+        const first = hcmd({ id: 'race-1', subject: bob.subject });
+        const c = await hdev.waitFor((m) => m.type === 'command' && m.ref === 'race-1');   // reserved, awaiting the ack
+        const second = await hcmd({ id: 'race-1', subject: bob.subject });
+        assert.strictEqual(second.status, 409, second.text);
+        assert.strictEqual(second.json.code, 'bot.command_pending');
+        hdev.send({ type: 'ack', id: c.id });
+        const r1 = await first;
+        assert.strictEqual(r1.status, 200, r1.text);
+        assert.strictEqual(r1.json.result, 'ack');
+    });
+
+    await check('the command route rate-limits per acted-for person, not per service token', async () => {
+        const setup = await t.domain.robots.create({ owner: alex.subject, name: 'Flood rover', profile_id: 'sim.rover' });
+        const robot = setup.robot;
+        const floodA = t.network.newUser('floodA');
+        const floodB = t.network.newUser('floodB');
+        await t.domain.members.add(robot.id, floodA.subject, 'operator', alex.subject);
+        await t.domain.members.add(robot.id, floodB.subject, 'operator', alex.subject);
+        // No device: every counted call is refused 409 device_offline. The route allows 120/min per person.
+        const send = (subject) => t.call('POST', `/api/v1/robots/${robot.id}/commands`, { token: svc, headers: { 'X-OV-Subject': subject }, body: { kind: 'drive', value: { throttle: 0.2 } } });
+        // Start well inside a fresh 60 s window so the burst cannot straddle a window boundary.
+        const into = Date.now() % 60000;
+        if (into > 30000) await t.wait(60000 - into + 100);
+        const burst = await Promise.all(Array.from({ length: 120 }, () => send(floodA.subject)));
+        assert.ok(burst.every((r) => r.status === 409), 'the first 120 of A\'s calls are counted but not limited');
+        const overA = await send(floodA.subject);
+        assert.strictEqual(overA.status, 429, 'A exhausts their own bucket');
+        assert.strictEqual(overA.json.code, 'rate_limited');
+        const overB = await send(floodB.subject);
+        assert.strictEqual(overB.status, 409, overB.text);   // B's own bucket is untouched
+        assert.notStrictEqual(overB.json.code, 'rate_limited');
+    });
+
+    await check('a command the device never acks expires and answers the HTTP route', async () => {
+        const pending = hcmd({ id: 'never-1', subject: bob.subject });
+        await hdev.waitFor((m) => m.type === 'command' && m.ref === 'never-1');   // the device never acks
+        const r = await pending;   // resolves when the deadline passes (expireCommand)
+        assert.strictEqual(r.status, 200, r.text);
+        assert.strictEqual(r.json.result, 'expired');
+    });
+
+    // Last: hub.close() stops the hub for good, so this runs after every other check.
+    await check('hub.close() settles a pending command as expired so its HTTP request never hangs', async () => {
+        const pending = hcmd({ id: 'closing-1', subject: bob.subject });
+        await hdev.waitFor((m) => m.type === 'command' && m.ref === 'closing-1');   // in flight; the device never acks
+        await t.hub.close();
+        clearInterval(heartbeat);
+        const r = await pending;
+        assert.strictEqual(r.status, 200, r.text);
+        assert.strictEqual(r.json.result, 'expired');
+    });
+
     await t.close();
     done();
 })();

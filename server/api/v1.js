@@ -47,6 +47,9 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService }) {
     r.use(limits.reads('bot.read'));
     const manage = limits('bot.robot.manage', { minute: 30, hour: 300 });
     const control = limits('bot.control', { minute: 120, hour: 1200 });
+    // The command route counts against the acted-for person, not the service token: a bound channel's chat
+    // forwards many viewers' commands through one service, and each viewer gets their own bucket.
+    const commandControl = limits.actedFor('bot.control', { minute: 120, hour: 1200 });
     const pair = limits('bot.pair', { minute: 20, hour: 200 });
     const jobs = limits('bot.jobs', { minute: 120, hour: 1200 });
 
@@ -234,7 +237,7 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService }) {
     // ── Commands (the /control gate over HTTP: a service forwards a bound channel's chat commands) ─
     // The same onOperatorCommand path as the /control socket — the gate, the audit and the per-subject
     // idempotency key are shared. `id` is that idempotency key; a repeated id is answered from the cache.
-    r.post('/robots/:id/commands', control, wrap(async (req, res) => {
+    r.post('/robots/:id/commands', commandControl, wrap(async (req, res) => {
         requireControlCap(req);
         const subject = actedFor(req);
         const principal = req.principal.kind === 'service' ? { ...req.principal, subject } : req.principal;
@@ -307,7 +310,7 @@ function commandRefusalStatus(code) {
     if (code === 'bot.robot_not_found') return 404;
     if (code === 'bot.not_an_operator' || code === 'bot.read_only' || code === 'bot.forbidden' || code === 'bot.not_your_turn') return 403;
     if (code === 'bot.cooldown' || code === 'bot.turn_budget') return 429;
-    if (code === 'bot.device_offline' || code === 'bot.estop_latched') return 409;
+    if (code === 'bot.device_offline' || code === 'bot.estop_latched' || code === 'bot.command_pending') return 409;
     return 422;   // unknown_command, command_not_allowed, unknown_actuator, invalid_input, text_too_long
 }
 

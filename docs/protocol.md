@@ -297,7 +297,9 @@ twice.
 `X-OV-Subject: usr_…` naming the person it acts for. Without one the socket closes with code **4002**.
 The gate then applies the **acted-for subject's** role — a service acting for a viewer is a viewer.
 The same gate is reachable over HTTP as `POST /robots/:id/commands` (§3), so a bound channel's chat can
-forward commands without holding a socket.
+forward commands without holding a socket. The HTTP gate is the same gate but not the same join: a caller
+with no role is not put into a `queue` robot's queue (as a socket `join` would), so over HTTP a chat viewer
+needs an explicit owner or operator role — a no-role caller is refused `bot.not_an_operator`.
 
 ### Client → server
 
@@ -369,6 +371,8 @@ Refusal codes (the gate, in order): `bot.robot_not_found`, `bot.unknown_command`
 (the profile takes no such kind), `bot.estop_latched`, `bot.not_an_operator`, `bot.sign_in`,
 `bot.read_only`, `bot.command_not_allowed` (the role's allowlist), `bot.device_offline`, `bot.cooldown`,
 `bot.not_your_turn`, `bot.turn_budget`, `bot.unknown_actuator`, `bot.invalid_input`, `bot.text_too_long`.
+A `command` whose `id` is still in flight (the first one has not been acked) is answered `refused`
+`bot.command_pending` rather than a second device command or a silent wait.
 `halt` is never refused for the e-stop, the allowlist, a cooldown or the turn budget; it still needs a
 role that may drive (a queue robot's turn holder, not someone waiting) and an online device.
 
@@ -448,7 +452,7 @@ node token, and a service token is judged on `bot.job.dispatch` alone.
 | `POST /devices/bind` | a Network node token (audience `openvibe.bot`), no body | `201 { device_id, publish_key, whip_url, robot_id, profile }` — `POST /pair`'s answer without `credential`; again → the same device and a new publish key (the old one stops working); without OpenRe `video: "not_configured"` instead of the key. Refused: `401 bot.node_token_required`, `403 bot.node_not_bound` |
 | `POST /robots/:id/estop` | owner/operator, `bot.robot.control` | `{ robot }` |
 | `POST /robots/:id/estop/clear` | **owner only**, `bot.robot.control` | `{ robot }` |
-| `POST /robots/:id/commands` | owner/operator, `bot.robot.control` | `{ robot_id, id, result, code?, reason?, latency_ms?, cached? }` — one command through the same gate, audit and per-subject `id` idempotency key as `/control` (a bound channel's chat forwards here instead of a hardware socket). `result` is `ack`, `nack` or `expired` (a repeated `id` answers `cached: true`); a gate refusal is its code as an RFC 9457 problem: `403 bot.not_an_operator` / `bot.read_only` / `bot.not_your_turn`, `404 bot.robot_not_found`, `409 bot.device_offline` / `bot.estop_latched`, `422` the command-shape codes, `429 bot.cooldown` / `bot.turn_budget` |
+| `POST /robots/:id/commands` | owner/operator, `bot.robot.control` | `{ robot_id, id, result, code?, reason?, latency_ms?, cached? }` — one command through the same gate, audit and per-subject `id` idempotency key as `/control` (a bound channel's chat forwards here instead of a hardware socket). `result` is `ack`, `nack` or `expired` (a repeated `id` answers `cached: true`); a gate refusal is its code as an RFC 9457 problem: `403 bot.not_an_operator` / `bot.read_only` / `bot.not_your_turn`, `404 bot.robot_not_found`, `409 bot.device_offline` / `bot.estop_latched` / `bot.command_pending` (the same `id` is still in flight), `422` the command-shape codes, `429 bot.cooldown` / `bot.turn_budget`. A service acting for a subject is rate-limited as that person (`user:<subject>`), not as the service token |
 | `GET /robots/:id/audit?limit=&before=` | owner, or `bot.robot.read` | `{ audit[], next_before }` (newest first) |
 | `POST /jobs`, `POST /jobs/:id/cancel`, `GET /jobs/:id` | **a service only**, with `bot.job.dispatch` (Run → Bot; a person or a node token is `403 bot.forbidden`) | `201 { job, sent }` / `{ job, sent }` / `{ job, stdout }`; `422 bot.invalid_input` without `project_id`, `409 bot.class_unadvertised` when the device does not advertise the job's class, `404 bot.job_not_found` |
 | `POST /pair` | the one-time code is the credential | `201 { device_id, credential, publish_key, whip_url, robot_id, profile }`; with `BOT_PAIRING_AUTHORITY=network` always `410 bot.pairing_moved` (the `detail` names the Network URL) |
