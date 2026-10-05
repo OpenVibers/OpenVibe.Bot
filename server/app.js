@@ -90,7 +90,7 @@ function createApp(opts = {}) {
     release.mount(app, { registry: metrics.registry });
 
     const limits = createActorLimits({ config, valkey, now: opts.limitsNow || now, registry: metrics.registry, log });
-    app.use('/api/v1', express.json({ limit: '64kb' }), (req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); }, apiAuth.middleware, v1Router({ domain, apiAuth, limits, hub, jobs }));
+    app.use('/api/v1', express.json({ limit: '64kb' }), (req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); }, apiAuth.middleware, v1Router({ domain, apiAuth, limits, hub, jobs, config }));
     app.use('/auth', createSessionRoutes(config, userAuth, { fetchImpl }));
     app.use(viewerMiddleware(userAuth));
     app.use(createWebRoutes(config, { domain, sim, limits, log }));
