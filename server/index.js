@@ -28,6 +28,7 @@ async function main() {
     const m = await migrate(config, { serving: db });
     if (m.held.length) console.warn(`[Bot] migrations held: ${m.held.map((h) => `${h.id} (${h.reason})`).join('; ')}`);
     await seedProfiles(db, { log: console });
+    require('./kits').catalogue();   // the kit catalogue is validated at boot: a bad server/kits/*.json stops it here
     const valkey = createValkey({ url: config.valkey.url, prefix: config.valkey.prefix });
 
     const app = createApp({ config, db, valkey, registry });

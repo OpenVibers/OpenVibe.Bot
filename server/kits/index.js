@@ -4,7 +4,7 @@
  * Curated kit catalogue (plan T15 "Get a robot", the O29 metadata half): the kits a person can buy to get a
  * robot online, each bound to a shipped profile and carrying its parts list and build guide. Kits live as
  * server/kits/*.json and are validated here in the style of server/profiles/index.js — a typo or a kit bound
- * to a profile that does not ship refuses at load, never at a store page.
+ * to a profile that does not ship refuses at boot (server/index.js loads the catalogue), never at a store page.
  *
  * Metadata only: this is what to buy and how to build it. Pricing, shipping, returns and fulfilment are the
  * owner's (O29), not modelled here, so nothing in this catalogue carries a price.
@@ -84,8 +84,12 @@ function loadKits(dir = DIR) {
     return out;
 }
 
+// The shipped catalogue is read once: server/index.js loads it at boot (a bad file stops the boot there), and
+// every list()/get() after that is a lookup, not a directory read.
+let shipped = null;
+const catalogue = () => (shipped || (shipped = loadKits()));
 /** The catalogue as the API and the robots page present it. */
-function list() { return [...loadKits().values()]; }
-function get(id) { return loadKits().get(id) || null; }
+function list() { return [...catalogue().values()]; }
+function get(id) { return catalogue().get(id) || null; }
 
-module.exports = { validateKit, validatePart, loadKits, list, get, DIR };
+module.exports = { validateKit, validatePart, loadKits, catalogue, list, get, DIR };
