@@ -44,7 +44,7 @@ OpenVibe.Bot pairs a robot's machines, keeps their state and gates every operato
 |---|---|
 | `bot.robot.read` | `GET /robots`, `GET /robots/:id`, operators, devices, the audit and the streaming toggles, for a service acting for an owner |
 | `bot.robot.manage` | create, patch and delete a robot, pairing codes, operators, and the streaming toggles (`POST /robots/:id/streaming`) |
-| `bot.robot.control` | the e-stop set and clear (clear is owner-only) and the control gate |
+| `bot.robot.control` | the e-stop set and clear (clear is owner-only), the control gate and `POST /robots/:id/commands` (so a bound channel's chat can forward a command over HTTP instead of a hardware socket) |
 | `bot.device.connect` | rotate and revoke a device credential |
 | `bot.job.dispatch` | the internal Run → Bot jobs API (`POST /jobs`, `POST /jobs/:id/cancel`, `GET /jobs/:id`); services only |
 

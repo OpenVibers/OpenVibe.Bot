@@ -29,7 +29,7 @@
   "deployment": "Production at https://openvibe.bot on openvibe-ovh since 2026-10-02: release layout /opt/openvibe.bot, unit openvibe-bot.service (WorkingDirectory /opt/openvibe.bot, EnvironmentFile /etc/openvibe/bot.env, PORT 4630, TimeoutStopSec 10), behind the nginx vhost deploy/nginx/openvibe.bot.conf, deployed with `ov deploy bot`. Liveness /api/health and readiness /api/ready are loopback-only.",
   "features": [
     "device WebSocket /device: one outbound socket per machine, credential or Network node token, heartbeat and telemetry, commands never replayed after a reconnect",
-    "operator WebSocket /control and the REST API (/api/v1) over one command gate: roles, per-robot limits and allowlists, cooldowns and the turn budget",
+    "operator WebSocket /control and the REST API (/api/v1, including POST /robots/:id/commands so a bound channel's chat can forward a command over HTTP) over one command gate: roles, per-robot limits and allowlists, cooldowns and the turn budget",
     "pairing with one-time codes, minted by Bot or delegated to OpenVibe.Network (BOT_PAIRING_AUTHORITY=network); a node machine binds on first use and reauths every 300 s",
     "device credentials hashed at rest and rotatable; revoke closes the socket at once and revokes the Network principal for a node machine",
     "profiles instead of per-robot rows: adeept.adr036 (+ mecanum variant), cozmo, camera.onvif, sim.rover, seeded from server/profiles/*.json",

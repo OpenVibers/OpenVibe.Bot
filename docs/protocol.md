@@ -299,6 +299,10 @@ twice.
 **service token** with capability `bot.robot.control` (audience `openvibe.bot`) plus
 `X-OV-Subject: usr_…` naming the person it acts for. Without one the socket closes with code **4002**.
 The gate then applies the **acted-for subject's** role — a service acting for a viewer is a viewer.
+The same gate is reachable over HTTP as `POST /robots/:id/commands` (§3), so a bound channel's chat can
+forward commands without holding a socket. The HTTP gate is the same gate but not the same join: a caller
+with no role is not put into a `queue` robot's queue (as a socket `join` would), so over HTTP a chat viewer
+needs an explicit owner or operator role — a no-role caller is refused `bot.not_an_operator`.
 
 ### Client → server
 
@@ -370,6 +374,8 @@ Refusal codes (the gate, in order): `bot.robot_not_found`, `bot.unknown_command`
 (the profile takes no such kind), `bot.estop_latched`, `bot.not_an_operator`, `bot.sign_in`,
 `bot.read_only`, `bot.command_not_allowed` (the role's allowlist), `bot.device_offline`, `bot.cooldown`,
 `bot.not_your_turn`, `bot.turn_budget`, `bot.unknown_actuator`, `bot.invalid_input`, `bot.text_too_long`.
+A `command` whose `id` is still in flight (the first one has not been acked) is answered `refused`
+`bot.command_pending` rather than a second device command or a silent wait.
 `halt` is never refused for the e-stop, the allowlist, a cooldown or the turn budget; it still needs a
 role that may drive (a queue robot's turn holder, not someone waiting) and an online device.
 
@@ -426,7 +432,7 @@ the subject it acts for). Without a token, every route but `GET /profiles`, `GET
 and `POST /devices/bind` answers `401 bot.sign_in`: `GET|POST /robots`, `GET|PATCH|DELETE /robots/:id`,
 `POST /robots/:id/pairing-code`, `GET|POST /robots/:id/operators`, `DELETE /robots/:id/operators/:subject`,
 `GET /robots/:id/devices`, `POST /devices/:id/rotate|revoke`, `POST /robots/:id/estop`,
-`POST /robots/:id/estop/clear`, `GET /robots/:id/audit` and `GET|POST /robots/:id/streaming`. A node token gets `403 bot.forbidden` on the same
+`POST /robots/:id/estop/clear`, `POST /robots/:id/commands`, `GET /robots/:id/audit` and `GET|POST /robots/:id/streaming`. A node token gets `403 bot.forbidden` on the same
 routes. Both come before any lookup, so a real robot or device id answers exactly as a made-up one. The three
 jobs routes are service-only: the same `401 bot.sign_in` without a token, `403 bot.forbidden` for a person or a
 node token, and a service token is judged on `bot.job.dispatch` alone.
@@ -449,6 +455,7 @@ node token, and a service token is judged on `bot.job.dispatch` alone.
 | `POST /devices/bind` | a Network node token (audience `openvibe.bot`), no body | `201 { device_id, publish_key, whip_url, robot_id, profile }` — `POST /pair`'s answer without `credential`; again → the same device and a new publish key (the old one stops working); without OpenRe `video: "not_configured"` instead of the key. Refused: `401 bot.node_token_required`, `403 bot.node_not_bound` |
 | `POST /robots/:id/estop` | owner/operator, `bot.robot.control` | `{ robot }` |
 | `POST /robots/:id/estop/clear` | **owner only**, `bot.robot.control` | `{ robot }` |
+| `POST /robots/:id/commands` | owner/operator, `bot.robot.control` | `{ robot_id, id, result, code?, reason?, latency_ms?, cached? }` — one command through the same gate, audit and per-subject `id` idempotency key as `/control` (a bound channel's chat forwards here instead of a hardware socket). `result` is `ack`, `nack` or `expired` (a repeated `id` answers `cached: true`); a gate refusal is its code as an RFC 9457 problem: `403 bot.not_an_operator` / `bot.read_only` / `bot.not_your_turn`, `404 bot.robot_not_found`, `409 bot.device_offline` / `bot.estop_latched` / `bot.command_pending` (the same `id` is still in flight), `422` the command-shape codes, `429 bot.cooldown` / `bot.turn_budget`. A service acting for a subject is rate-limited as that person (`user:<subject>`) and also, as a service, at 1200 a minute and 12000 an hour on its own token (`bot.control.service`), so naming a fresh well-formed subject on every request never lifts every ceiling |
 | `GET /robots/:id/audit?limit=&before=` | owner, or `bot.robot.read` | `{ audit[], next_before }` (newest first) |
 | `GET /robots/:id/streaming` | a member, or `bot.robot.read` | `{ available, media{on}, live{on,effective}, stream_id }` (plus `reason` when unavailable), read from the robot's OpenRe stream; `available:false` is `not_configured` (OpenRe unset), `not_paired` (no stream yet) or `stream_missing` (OpenRe answered 404) |
 | `POST /robots/:id/streaming` | **the owner only**, or `bot.robot.manage` | body `{ to: "media"\|"live", on: bool }` → the new state (as `GET`). `media` sets the stream's `recording_mode` `vod`/`none` (record to OpenVibe.Media); `live` sets `mirror_to_live` (show on the owner's OpenVibe.Live channel). One audit row per real change (`streaming.media`/`streaming.live`); an idempotent repeat answers the state and writes none. `422 bot.invalid_streaming`; `409 bot.not_paired` / `bot.openre_not_configured` |
