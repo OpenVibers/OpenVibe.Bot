@@ -7,8 +7,9 @@
  * code here. Every value is HTML-escaped; nothing is inline (the CSP is `default-src 'self'`), so the client
  * (public/panel.js) reads what it needs from data-* attributes, and the icons are inline SVG markup.
  *
- *   renderPanel({ robot, profile, role, allowed_commands, holdResendMs, mode, signedIn })
- *                                   mode 'embed': the framed panel (no topbar, no owner form, links open a new tab)
+ *   renderPanel({ robot, profile, role, allowed_commands, holdResendMs, mode, signedIn, streaming, people })
+ *                                   mode 'embed': the framed panel (no topbar, no owner form, links open a new tab);
+ *                                   `people` (owner page only) the non-owner members for the People card
  *   renderEmbedRefused({ robotId })  the framed answer when the visitor may not see the robot
  *   renderWidget(widget, { profile, allowed_commands })
  *   renderRobotsPage({ robots, profiles, error, values })
@@ -254,7 +255,42 @@ ${toggle('live', s.live && s.live.on, 'Show on my OpenVibe.Live channel', 'Lets 
 /** A link out of a frame: always a new tab, never with a handle back to the framing page. */
 const outLink = (href, text, cls = 'button') => `<a class="${cls}" href="${esc(href)}" target="_blank" rel="noopener">${esc(text)}</a>`;
 
-function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs = 150, mode = 'page', signedIn = true, streaming = null }) {
+/**
+ * The owner's People card: who may drive (operators) and who may watch (viewers), each with Network's name
+ * (or the subject id when Network was not reachable while the page was drawn), and the @username add form.
+ * Rendered only for the owner's own page.
+ */
+function peopleCard(robot, people) {
+    const roleName = (r) => (r === 'viewer' ? 'Viewer' : 'Operator');
+    const row = (p) => {
+        const remove = `<form method="post" action="/robots/${esc(robot.id)}/operators/${esc(p.subject)}/remove"><button type="submit" class="quiet">Remove</button></form>`;
+        const who = p.username
+            ? `<b>${esc(p.display_name)}</b><small>@${esc(p.username)} · ${roleName(p.role)}</small>`
+            : `<b>${esc(p.subject)}</b><small>name unavailable</small>`;
+        return `<li class="person"><span class="who">${who}</span>${remove}</li>`;
+    };
+    const queue = robot.access_policy === 'queue' ? ' Anyone signed in can also take a turn: this robot uses the open queue.' : '';
+    return `<section class="setting-card people" aria-labelledby="people-h"><h2 id="people-h">People</h2>
+<p class="setting-note">Operators drive and can press the e-stop; viewers watch.${queue}</p>
+<ul class="people-list">
+<li class="person"><span class="who"><b>You</b><small>Owner</small></span></li>
+${(people || []).map(row).join('\n')}
+</ul>
+<form class="people-add" method="post" action="/robots/${esc(robot.id)}/operators"><label class="sr-only" for="people-name">Username</label><input id="people-name" name="username" placeholder="@username" required maxlength="41" autocomplete="off"><select name="role" aria-label="Role"><option value="operator">Operator</option><option value="viewer">Viewer</option></select><button type="submit">Add</button></form>
+</section>`;
+}
+
+/**
+ * The turn strip a signed-in non-member sees on a `queue` robot's panel: the active turn's countdown or their
+ * place in line, and a plain leave form that works without JavaScript (public/panel.js unhides it and paints
+ * the state). Hidden until a state frame says there is a queue view for this person.
+ */
+function turnStrip(robot, role) {
+    if (robot.access_policy !== 'queue' || role !== 'queue') return '';
+    return `<div class="turn" data-turn hidden><span class="turn-state" data-turn-state></span><span class="turn-meta" data-turn-meta></span><form method="post" action="/robots/${esc(robot.id)}/queue/leave" data-turn-leave><button type="submit" class="quiet">Leave the queue</button></form></div>`;
+}
+
+function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs = 150, mode = 'page', signedIn = true, streaming = null, people = null }) {
     const embed = mode === 'embed';
     const latched = !!(robot.estop && robot.estop.latched);
     const widgets = (profile.widgets || []).map((w, i) => ({ w, i }))
@@ -270,13 +306,14 @@ ${embed ? '' : topbar(`<span class="crumb">${esc(robot.name)}</span>`)}
 <div class="panel-head">
 <h1>${esc(robot.name)}</h1>
 <p class="meta"><span class="pill online" data-online-pill data-state="connecting"><span class="dot"></span><span data-online-label>Connecting…</span></span> <span class="pill">${esc(profile.name || robot.profile_id)}</span> <span class="pill role" data-role-label>${esc(ROLE_LABEL[role] || role)}</span></p>
+${turnStrip(robot, role)}
 </div>
 ${embed && role === 'watcher' && !signedIn ? `<p class="embed-sign-in">${outLink(`/panel/${robot.id}`, 'Sign in to control')}</p>` : ''}
 <p class="notice" data-notice role="alert" hidden></p>
 <div class="widgets">
 ${widgets.join('\n')}
 </div>
-${role === 'owner' && !embed ? `<div class="owner-settings">${embedForm(robot)}${streamingForm(robot, streaming)}</div>` : ''}
+${role === 'owner' && !embed ? `<div class="owner-settings">${embedForm(robot)}${streamingForm(robot, streaming)}${people ? peopleCard(robot, people) : ''}</div>` : ''}
 </main>`;
     return page(robot.name, body, { scripts: ['/panel/panel.js'], bodyClass: embed ? 'embed-page' : 'panel-page' });
 }

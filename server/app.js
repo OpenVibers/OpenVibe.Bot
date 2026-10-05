@@ -22,7 +22,7 @@ const { http } = require('openvibe-contracts');
 const { isLoopbackDirect } = require('openvibe-shared/metrics');
 const { loadConfig } = require('./config');
 const { openDb } = require('./db');
-const { createKeyProvider, createUserAuth, createNodePrincipals } = require('./network');
+const { createKeyProvider, createUserAuth, createNodePrincipals, createIdentity } = require('./network');
 const { createOpenRe } = require('./openre/client');
 const { createBotOutbox } = require('./events/outbox');
 const { createUsageRelay } = require('./jobs/metering');
@@ -54,6 +54,7 @@ function createApp(opts = {}) {
     const usage = opts.usage || createUsageRelay({ db, config, fetchImpl: opts.billingFetch || fetchImpl, now, log });
     const hub = opts.hub || createRealtime({ config, keys, userAuth, log, now });
     const nodes = opts.nodes || createNodePrincipals(config, { fetchImpl });
+    const identity = opts.identity || createIdentity(config, { fetchImpl });
     const openre = opts.openre !== undefined ? opts.openre : createOpenRe(config, { fetchImpl });
     const domain = createDomain({ db, config, outbox, link: hub, nodes, openre, now, log });
     hub.bindDomain(domain);
@@ -93,7 +94,7 @@ function createApp(opts = {}) {
     app.use('/api/v1', express.json({ limit: '64kb' }), (req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); }, apiAuth.middleware, v1Router({ domain, apiAuth, limits, hub, jobs, config }));
     app.use('/auth', createSessionRoutes(config, userAuth, { fetchImpl }));
     app.use(viewerMiddleware(userAuth));
-    app.use(createWebRoutes(config, { domain, sim, limits, log }));
+    app.use(createWebRoutes(config, { domain, sim, limits, identity, hub, log }));
 
     app.use((req, res) => {
         if (req.path.startsWith('/api/') || req.path.startsWith('/internal/')) return http.sendProblem(res, 404, 'not_found', { ctx: req.ov });

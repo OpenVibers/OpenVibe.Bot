@@ -15,6 +15,9 @@
  *                          otherwise 403 with a link out. Never redirects to sign in; framed only by the
  *                          BOT_EMBED_ORIGINS allow-list (CSP frame-ancestors), every other page by itself
  *   POST /robots/:id/embed the owner only: allow (embed_public=on) or stop (off) anonymous read-only embedding → 303 to its panel
+ *   POST /robots/:id/operators            the owner only: add a person by @username with a role → 303 to its panel
+ *   POST /robots/:id/operators/:subject/remove   the owner only: remove a person (never the owner row) → 303
+ *   POST /robots/:id/queue/leave          any signed-in person: leave the robot's turn queue → 303
  *   GET  /panel/panel.js, /panel/panel.css   the panel client and its sheet (public/, no build step)
  *
  * Not signed in → 302 to /auth/login?next=<the page>. No access → 403 (bot.not_an_operator / bot.forbidden).
@@ -33,7 +36,7 @@ const VERSION = require('../../package.json').version;
 const PUBLIC = path.join(__dirname, '..', '..', 'public');
 const HOLD_RESEND_MS = 150;
 
-function createWebRoutes(config, { domain = null, sim = null, limits = null, log = console } = {}) {
+function createWebRoutes(config, { domain = null, sim = null, limits = null, identity = null, hub = null, log = console } = {}) {
     const r = express.Router();
     r.get('/', (req, res) => res.type('text/plain').send(`OpenVibe.Bot ${VERSION} — ok (devices, pairing and control; API under /api/v1)\n`));
     r.get('/robots.txt', (req, res) => res.type('text/plain').send('User-agent: *\nDisallow: /\n'));
@@ -169,6 +172,48 @@ function createWebRoutes(config, { domain = null, sim = null, limits = null, log
         res.redirect(303, `/panel/${robot.id}`);
     }));
 
+    // The owner adds a person to the robot by their OpenVibe username. Network resolves the @name to a subject;
+    // an unknown name is 422 with that name in the detail. The owner (already the owner row) may not be added.
+    r.post('/robots/:id/operators', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        const robot = await domain.robots.get(req.params.id);
+        if (!robot) throw new BotError(404, 'bot.robot_not_found', 'no such robot');
+        if (robot.owner_subject !== me.subject) throw new BotError(403, 'bot.forbidden', 'only the owner may add people');
+        const role = String((req.body && req.body.role) || '');
+        if (!['operator', 'viewer'].includes(role)) throw new BotError(422, 'bot.invalid_input', 'role must be operator or viewer');
+        const username = String((req.body && req.body.username) || '').trim().replace(/^@/, '');
+        if (!username) throw new BotError(422, 'bot.invalid_input', 'a username is required');
+        if (!identity) throw new BotError(503, 'bot.network_unavailable', 'Network is not reachable to resolve that name');
+        const user = await identity.byUsername(username);
+        if (!user) throw new BotError(422, 'bot.unknown_user', `No OpenVibe account is called @${username}`);
+        if (user.subject === me.subject) throw new BotError(422, 'bot.invalid_input', 'you are the owner of this robot');
+        await domain.members.add(robot.id, user.subject, role, me.subject);
+        res.redirect(303, `/panel/${robot.id}`);
+    }));
+
+    // The owner removes a person. The domain's delete never touches the owner row.
+    r.post('/robots/:id/operators/:subject/remove', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        const robot = await domain.robots.get(req.params.id);
+        if (!robot) throw new BotError(404, 'bot.robot_not_found', 'no such robot');
+        if (robot.owner_subject !== me.subject) throw new BotError(403, 'bot.forbidden', 'only the owner may remove people');
+        await domain.members.remove(robot.id, req.params.subject);
+        res.redirect(303, `/panel/${robot.id}`);
+    }));
+
+    // Leave the turn queue: anyone signed in, whether or not they are a member; the panels are told at once.
+    r.post('/robots/:id/queue/leave', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        const robot = await domain.robots.get(req.params.id);
+        if (!robot) throw new BotError(404, 'bot.robot_not_found', 'no such robot');
+        await domain.queue.leave(robot.id, me.subject);
+        if (hub) hub.broadcast(robot.id);
+        res.redirect(303, `/panel/${robot.id}`);
+    }));
+
     /** As the /control join decides: a member's role, or a place in the queue on a `queue` robot; else null. */
     async function memberRole(robot, me) {
         const role = await domain.members.roleOf(robot.id, me.subject);
@@ -182,12 +227,29 @@ function createWebRoutes(config, { domain = null, sim = null, limits = null, log
         const streaming = role === 'owner' && mode === 'page'
             ? await domain.streaming.get(robot.id).catch(() => ({ available: false, reason: 'unavailable', media: { on: false }, live: { on: false } }))
             : null;
+        // The owner's People card: every member but the owner, with Network's name for each. A Network that
+        // does not answer leaves the subject id and a note (see renderPanel) instead of failing the panel.
+        const people = role === 'owner' && mode === 'page' ? await peopleFor(robot) : null;
         res.type('html').send(renderPanel({
-            robot: presentForPage(robot), profile, role, mode, signedIn, streaming,
+            robot: presentForPage(robot), profile, role, mode, signedIn, streaming, people,
             allowed_commands: role === 'watcher' ? [] : domain.control.allowedFor(robot, role, profile),
             // A held control is re-sent well inside the device's deadline, so it never stops between two frames.
             holdResendMs: Math.max(50, Math.min(HOLD_RESEND_MS, Math.floor(maxCommandMs / 2))),
         }));
+    }
+
+    /** The non-owner members with their Network names, or null names when Network cannot be asked. */
+    async function peopleFor(robot) {
+        const members = (await domain.members.list(robot.id)).filter((m) => m.subject !== robot.owner_subject);
+        let names = new Map();
+        if (members.length && identity) {
+            try { names = await identity.names(members.map((m) => m.subject)); }
+            catch (e) { log.warn(`[Bot] names for ${robot.id}: ${e.message}`); }
+        }
+        return members.map((m) => {
+            const n = names.get(m.subject);
+            return { subject: m.subject, role: m.role, username: n ? n.username : null, display_name: n ? n.display_name : null };
+        });
     }
 
     r.get('/panel/:id', page(async (req, res) => {

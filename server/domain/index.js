@@ -584,6 +584,17 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         await currentTurn(robotId);
         return queueState(robotId, subject);
     }
+    /**
+     * Leave the queue: remove the person's row (waiting or the active turn) and, when their turn ends,
+     * promote the oldest waiting one. Returns the leaver's view of the queue (null/mostly empty when gone).
+     */
+    async function leaveQueue(robotId, subject) {
+        const robot = await getRobot(robotId);
+        if (!robot) fail(404, 'bot.robot_not_found', 'no such robot');
+        await db.query('DELETE FROM robot_queue WHERE robot_id = $1 AND subject = $2', [robotId, subject]);
+        await currentTurn(robotId);
+        return queueState(robotId, subject);
+    }
     async function queueState(robotId, subject) {
         const robot = await getRobot(robotId);
         if (!robot) return null;
@@ -849,7 +860,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         devices: { byCredential, bindNode, issuePublishKey, revokeVideo, updateDeclared, revokeNode, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, touchSeen, setOnline },
         streaming: { get: streaming, set: setStreaming },
         estop: { set: setEstop, clear: clearEstop },
-        queue: { join: joinQueue, state: queueState, currentTurn, consume: consumeTurn, sweep: sweepQueues },
+        queue: { join: joinQueue, leave: leaveQueue, state: queueState, currentTurn, consume: consumeTurn, sweep: sweepQueues },
         audit: { record: auditCommand, list: listAudit, listPage: listAuditPage, prune: pruneAudit },
         control: { prepare, allowedFor, effectiveLimits, deviceLimits, buildValue, DEFAULT_ALLOW, KINDS },
     };
