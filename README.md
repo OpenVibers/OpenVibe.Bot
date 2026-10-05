@@ -14,6 +14,7 @@ OpenVibe.Bot pairs a robot's machines, keeps their state and gates every operato
 - Pairing: one-time codes with a short expiry, minted by Bot or, with `BOT_PAIRING_AUTHORITY=network`, by OpenVibe.Network.
 - The `/device` and `/control` WebSockets, the command gate and the latched e-stop.
 - The signed-in pages (`server/web/routes.js`): `/robots` to list and add robots, `/pair/:id` for a pairing code and the installer command, and `/panel/:id`, the panel rendered from the profile. A `sim.rover` robot is driven by an in-process simulator (`server/sim`), so the panel works before any hardware exists. It gets no jobs, and it is not counted as a device or reported online in the outbox. The panel (`public/panel.js`, no build step) drives with a touch joystick, the keyboard or a gamepad, shows a latency meter and one camera tile per camera the profile lists; the camera stays a placeholder until OpenRe.Stream can play a WHIP-published stream back to a browser.
+- Server-side ONVIF cameras (`camera.onvif`, `mapping.driver: onvif`): an in-process connector beside the simulator (`server/onvif`) attaches a camera configured with `BOT_ONVIF_CAMERAS`, writes a real `kind: server` device row, translates a `ptz` command into ONVIF `ContinuousMove`/`Stop` (with the profile's deadline as a deadman) and carries the camera's `GetStatus` readout in telemetry. Its credentials are secret references only (`username_ref`/`password_ref`).
 - The command audit (`command_audit`, kept 30 days) and the `bot.*` outbox events.
 - The robot's streaming and recording toggles, off by default: `media` records live sessions to OpenVibe.Media and `live` shows them on the owner's OpenVibe.Live channel. They live only on the robot's OpenRe stream (`recording_mode`, `mirror_to_live`); Bot stores no copy and the owner, not an operator, flips them (`GET`/`POST /api/v1/robots/:id/streaming`).
 - Dispatching `platform.job@1` jobs to a paired Node over `/device` (`server/jobs/index.js` over `server/jobs/dispatch.js`; the internal `bot.job.dispatch` API is `POST /api/v1/jobs`, `POST /jobs/:id/cancel`, `GET /jobs/:id`) and metering them per wall-clock second (`run_jobs`, `run_usage_outbox`; docs/protocol.md §1.2).
@@ -28,6 +29,7 @@ OpenVibe.Bot pairs a robot's machines, keeps their state and gates every operato
 ## Devices
 
 - A device (the machine that serves a robot) pairs with one pasted command, shown on the robot's pairing page: `curl -fsSL <BOT_INSTALLER_URL> | sh -s -- --robot rob_… --code XXXX-XXXX [--driver …]` (the Network form in `docs/protocol.md` §1). The `--driver` follows the robot's profile: `adeept` for `adeept.adr036`, `adeept-mecanum` for `adeept.adr036.mecanum`, `cozmo` for `cozmo`; any other profile gets none (`server/domain/index.js` `driverForProfile`), the installer's dry-run `none`.
+- A server-side ONVIF camera (`camera.onvif`) is not installed on a machine: it gets no `--driver` and Bot attaches it itself from `BOT_ONVIF_CAMERAS` (see Deploy), so its panel works as soon as the camera answers.
 - The robot's panel is `openvibe.bot/panel/<rob_…>` (`GET /panel/:id`, rendered from the profile; `docs/protocol.md` §3). The device-side bring-up steps for the Adeept ADR036 kit live with the driver, in OpenVibe.Node's `docs/hardware-adeept.md` (T15 step 1).
 
 ## Depends on
@@ -53,7 +55,7 @@ A person acts on their own robots with a Network user token; a service acts with
 
 ## Tests
 
-`npm test` runs `test/run.js`, the whole suite. `npm run test:pg` (`BOT_TEST_STORE=pg`) runs the same suite against PostgreSQL; the default store is in-process PGlite. The tests cover the device and operator WebSocket gates, the REST routes, the pairing paths, the profiles and the kit catalogue, the owner fence, the e-stop and the outbox.
+`npm test` runs `test/run.js`, the whole suite. `npm run test:pg` (`BOT_TEST_STORE=pg`) runs the same suite against PostgreSQL; the default store is in-process PGlite. The tests cover the device and operator WebSocket gates, the REST routes, the pairing paths, the profiles and the kit catalogue, the owner fence, the e-stop, the outbox and the server-side ONVIF camera (against a stub endpoint: `ptz` → `ContinuousMove`, telemetry → the `GetStatus` readout).
 
 ## Security
 
@@ -61,6 +63,7 @@ A person acts on their own robots with a Network user token; a service acts with
 - A person acts only as themself; naming anyone else is refused, never ignored, and a node token is refused on the person and service routes.
 - Pairing codes are one-time and short-lived; the e-stop is latched and only the owner clears it, while `halt` always passes the gate.
 - Every command, allowed or refused, is audited; the outbox carries ids, kinds and results — never a credential, a pairing code, a publish key or a WHIP URL.
+- A server-side ONVIF camera is reached only at the one URL configured in `BOT_ONVIF_CAMERAS` (http(s), one host, no embedded credentials), with a timeout and no redirects, so a camera cannot steer Bot elsewhere. Its ONVIF user and password are named by secret reference (`username_ref`/`password_ref`), read only when a request is built, sent as a WS-Security digest and never stored, answered or logged.
 - `/api/health` and `/api/ready` are loopback-only; nginx terminates TLS and upgrades `/device` and `/control`.
 
 ## Deploy
@@ -78,6 +81,8 @@ The embeddable panel is `GET /panel/:id/embed` (framed only by `BOT_EMBED_ORIGIN
 Set `BOT_WHIP_BASE` in `/etc/openvibe/bot.env` to the WHIP ingest base each device publishes to (`whip_url = <base>/<publish key>`, sent once with the pairing; OpenRe's is `https://ingest.openre.stream/whip`); leave it unset to pair devices without video.
 
 The publish key is always an ingest key OpenRe.Stream issued for the robot's stream (OpenRe's WHIP ingest admits no other): set `BOT_OPENRE_URL` and `BOT_OPENRE_TOKEN` (a Network service token holding `openre.stream.read`, `openre.stream.write` and `openre.key.rotate`, or `openre.stream.*` with `openre.key.rotate`; `BOT_OPENRE_TIMEOUT_MS`, default 8000, bounds each call). The same token covers the streaming toggles: `GET /api/v1/robots/:id/streaming` reads the stream with `openre.stream.read`, `POST` PATCHes `recording_mode`/`mirror_to_live` with `openre.stream.write`. Pairing creates the robot's OpenRe stream (or rotates the one it has), a credential rotation rotates its key, revoking a device or removing a robot revokes the key and ends the live session. Bot stores the stream id and the key's hint, never the key. With either variable unset, devices still pair but get no publish key and the answer says `"video": "not_configured"`; Bot mints no key of its own.
+
+Set `BOT_ONVIF_CAMERAS` (JSON, unset by default) to the server-side cameras Bot may connect to: a map from a robot id — or `"*"` for any `camera.onvif` robot not named — to `{ "url": "http://<host>/onvif/ptz_service", "username_ref": "CAM_USER", "password_ref": "CAM_PASSWORD" }`. The refs are the *names* of the secrets (env vars, or keys a deployment resolves through a secret store), read per request; the URL must be http(s), on one host and carry no credentials, and `BOT_ONVIF_TIMEOUT_MS` (default 5000) bounds each request. Anything else refuses to boot. A robot whose profile is `camera.onvif` and that has a configured camera attaches server-side at boot and when its panel is opened.
 
 `/install` is proxied to the app, which answers a 302 to OpenVibe.Node's installer script (`BOT_INSTALLER_SOURCE_URL`, by default the `install.sh` asset on OpenVibe.Node's [latest release](https://github.com/OpenVibers/OpenVibe.Node/releases/latest/download/) — a released, checksummed installer that never drifts with Node's `main`, whose CI keeps `dist/install.sh` byte-identical to `install/install.sh`; https on an allow-listed GitHub or openvibe.bot host, checked at boot, and no query parameter changes the target). The pairing's installer command adds `--driver adeept|adeept-mecanum|cozmo` for those profiles and nothing for the others (the dry-run `none`).
 

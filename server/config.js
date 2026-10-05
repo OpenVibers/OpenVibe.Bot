@@ -57,6 +57,44 @@ function frameAncestors(config) {
     return ["'self'", ...config.embed.origins].join(' ');
 }
 
+/**
+ * BOT_ONVIF_CAMERAS: the server-side cameras the `onvif` driver connects to (server/onvif), a JSON object
+ * keyed by robot id — or "*" for any ONVIF-profile robot not named. Each entry is the camera's ONVIF PTZ
+ * service URL plus the *names* of the secrets holding its user and password (username_ref/password_ref, an
+ * env var name or a secret store key); the values are read at request time and never live in the config or
+ * the profile. The URL must be http(s), on one host, and carry no embedded credentials. Anything else
+ * refuses to boot, so the connector can only ever POST to a camera someone configured deliberately.
+ */
+function parseOnvifCameras(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return {};
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch { throw new Error(`BOT_ONVIF_CAMERAS must be JSON: ${JSON.stringify(raw.slice(0, 80))}`); }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('BOT_ONVIF_CAMERAS must be a JSON object keyed by robot id (or "*")');
+    const out = {};
+    for (const [key, entry] of Object.entries(parsed)) {
+        if (!key.trim()) throw new Error('BOT_ONVIF_CAMERAS: a camera key is empty');
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new Error(`BOT_ONVIF_CAMERAS[${key}] must be an object`);
+        let u = null;
+        try { u = new URL(String(entry.url || '')); } catch { /* reported below */ }
+        if (!u || (u.protocol !== 'http:' && u.protocol !== 'https:')) throw new Error(`BOT_ONVIF_CAMERAS[${key}].url must be an http(s) ONVIF service URL`);
+        if (u.username || u.password) throw new Error(`BOT_ONVIF_CAMERAS[${key}].url must carry no credentials: name them with username_ref/password_ref`);
+        const ref = (name) => {
+            const v = entry[name];
+            if (v == null || v === '') return null;
+            if (typeof v !== 'string' || /\s/.test(v)) throw new Error(`BOT_ONVIF_CAMERAS[${key}].${name} must be a secret reference (an env var name or a secret store key)`);
+            return v;
+        };
+        const usernameRef = ref('username_ref');
+        const passwordRef = ref('password_ref');
+        if (!!usernameRef !== !!passwordRef) throw new Error(`BOT_ONVIF_CAMERAS[${key}] needs both username_ref and password_ref, or neither`);
+        const profileToken = entry.profile_token == null ? 'profile_1' : String(entry.profile_token);
+        if (!profileToken.trim()) throw new Error(`BOT_ONVIF_CAMERAS[${key}].profile_token must be a non-empty string`);
+        out[key] = { url: u.toString(), usernameRef, passwordRef, profileToken };
+    }
+    return out;
+}
+
 function loadConfig(env = process.env) {
     const nodeEnv = env.NODE_ENV || 'development';
     const isProduction = nodeEnv === 'production';
@@ -163,6 +201,13 @@ function loadConfig(env = process.env) {
         // so devices pair without video until the operator names an ingest base.
         media: {
             whipBase: trim(env.BOT_WHIP_BASE || ''),
+        },
+        // Server-side ONVIF cameras (driver `onvif`, server/onvif): the hosts Bot may connect to, keyed by
+        // robot id (or "*"), plus the timeout each request gets. Credentials are secret references only
+        // (username_ref/password_ref), resolved when the request is built; the config never holds a value.
+        onvif: {
+            cameras: parseOnvifCameras(env.BOT_ONVIF_CAMERAS),
+            timeoutMs: Math.max(100, int(env.BOT_ONVIF_TIMEOUT_MS, 5000)),
         },
         // OpenRe.Stream (T15 R5): the publish key is the ingest key of the robot's OpenRe stream, the only kind
         // OpenRe's WHIP worker admits. token is a Network service token holding openre.stream.read (the lookup
