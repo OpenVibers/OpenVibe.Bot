@@ -24,7 +24,9 @@ async function boot(opts = {}) {
     const network = await startNetwork();
     const events = await startEvents();
     // OpenRe issues every publish key; `openre: false` boots with BOT_OPENRE_* unset (pairing without video).
-    const openre = opts.openre === false ? null : await startOpenRe();
+    // It is given the Network stub too, so a token Bot minted for openvibe.openre (no static BOT_OPENRE_TOKEN)
+    // authenticates just as a minted one would at the real OpenRe.
+    const openre = opts.openre === false ? null : await startOpenRe({ network });
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-test-'));
     const env = {
         NODE_ENV: 'test',

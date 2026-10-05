@@ -2,7 +2,9 @@
 /**
  * Stand-ins for the services Bot talks to, each on a random port.
  *
- *   startNetwork()  JWKS and user/service JWTs (signUser, signService, newUser); node principals as
+ *   startNetwork()  JWKS and user/service JWTs (signUser, signService, newUser); POST /oauth/token mints
+ *                   client-credentials tokens and records every request in tokenCalls ({client_id, audience,
+ *                   scope}); node principals as
  *                   GET /internal/node-principals/:id and POST …/:id/revoke answer them (addNode, signNode,
  *                   nodes, revokes), scoped to the calling service like Network's own routes. Identity
  *                   resolution for people (identity.subject.resolve): GET /internal/identity/resolve?username=
@@ -13,8 +15,11 @@
  *                   GET /api/v1/streams/:id, POST /api/v1/streams, PATCH /api/v1/streams/:id (recording_mode /
  *                   mirror_to_live), POST …/:id/keys/rotate, DELETE …/:id (409 while live), behind one bearer
  *                   token whose capabilities OpenRe's guards check (setCaps(list) to narrow them; 403
- *                   capability.denied). streams, calls (every request, its token and X-OV-Subject), admits(key)
- *                   (OpenRe's resolveIngestKey: an active key or one in grace), failNext(status | 'hang')
+ *                   capability.denied). With `network` given, a service token Network minted for audience
+ *                   openvibe.openre is accepted too, its own `cap` claims being the capabilities (the minted
+ *                   path, 401 token.* otherwise). streams, calls (every request, its token and X-OV-Subject),
+ *                   admits(key) (OpenRe's resolveIngestKey: an active key or one in grace),
+ *                   failNext(status | 'hang', times = 1)
  */
 const http = require('http');
 const crypto = require('crypto');
@@ -35,6 +40,8 @@ async function startNetwork() {
     const privatePem = privateKey.export({ type: 'pkcs8', format: 'pem' });
     let issuer = 'http://network.test';
     let n = 100;
+    // Every client-credentials request Network's /oauth/token served: { client_id, audience, scope }.
+    const tokenCalls = [];
 
     function signService({ sub = 'svc:live', aud = ['openvibe.bot'], cap = [], expSec = 300 } = {}) {
         const now = Math.floor(Date.now() / 1000);
@@ -102,6 +109,7 @@ async function startNetwork() {
         if (req.url === '/api/health') return send(res, 200, { ok: true });
         if (req.url === '/oauth/token' && req.method === 'POST') {
             const body = Object.fromEntries(new URLSearchParams(await readBody(req)));
+            tokenCalls.push({ client_id: body.client_id, audience: body.audience || null, scope: body.scope || null });
             if (body.client_secret !== 'shh') return send(res, 401, { error: 'invalid_client' });
             const cap = String(body.scope || '').split(/\s+/).filter(Boolean);
             return send(res, 200, { access_token: signService({ sub: `svc:${body.client_id}`, aud: [body.audience || 'openvibe.bot'], cap }), token_type: 'Bearer', expires_in: 300 });
@@ -151,7 +159,7 @@ async function startNetwork() {
     });
     const url = await listen(server);
     issuer = url;
-    return { url, publicPem, signService, signUser, newUser, addNode, signNode, nodes, revokes, pairings, failPairings, users, failIdentity: (status) => { identityFailure = status; }, close: () => new Promise((r) => server.close(r)) };
+    return { url, publicPem, signService, signUser, newUser, addNode, signNode, nodes, revokes, pairings, tokenCalls, failPairings, users, failIdentity: (status) => { identityFailure = status; }, close: () => new Promise((r) => server.close(r)) };
 }
 
 async function startEvents() {
@@ -175,13 +183,14 @@ async function startEvents() {
 // openre.stream.write, keys/rotate openre.key.rotate (OpenRe server/api/v1.js guards).
 const OPENRE_CAPS = ['openre.stream.read', 'openre.stream.write', 'openre.key.rotate'];
 
-async function startOpenRe({ token = `ovt_${crypto.randomBytes(16).toString('hex')}`, caps = OPENRE_CAPS } = {}) {
+async function startOpenRe({ token = `ovt_${crypto.randomBytes(16).toString('hex')}`, caps = OPENRE_CAPS, network = null } = {}) {
     let granted = [...caps];
     // OpenRe's hasCap: the exact capability or a `.*` grant covering it.
-    const hasCap = (id) => granted.some((g) => g === id || (g.endsWith('.*') && id.startsWith(g.slice(0, -1))));
+    const hasCap = (caps_, id) => caps_.some((g) => g === id || (g.endsWith('.*') && id.startsWith(g.slice(0, -1))));
     const streams = new Map();
     const calls = [];
     let failure = null;
+    let failuresLeft = 0;   // how many further requests failNext answers before it clears
     let n = 0;
     const newKey = () => {
         const key = `ork_${crypto.randomBytes(32).toString('base64url')}`;
@@ -205,11 +214,25 @@ async function startOpenRe({ token = `ovt_${crypto.randomBytes(16).toString('hex
         const url = new URL(req.url, 'http://openre.test');
         calls.push({ method: req.method, path: url.pathname, query: url.search, body, subject, authorization: req.headers.authorization || null });
         if (failure === 'hang') return;   // never answered: the client's timeout ends it
-        if (failure) { const status = failure; failure = null; return problem(res, status, status >= 500 ? 'openre.internal' : 'openre.forbidden', `stubbed ${status}`); }
-        if (req.headers.authorization !== `Bearer ${token}`) return problem(res, 401, 'token.invalid', 'a service token is required');
+        if (failure != null && failuresLeft > 0) {
+            const status = failure;
+            if (--failuresLeft === 0) failure = null;
+            return problem(res, status, status >= 500 ? 'openre.internal' : 'openre.forbidden', `stubbed ${status}`);
+        }
+        // The operator's static token, or (with `network`) a token Bot minted for audience openvibe.openre
+        // whose `cap` claims are the capabilities, exactly as OpenRe's own guard checks them.
+        const presented = String(req.headers.authorization || '').startsWith('Bearer ') ? req.headers.authorization.slice(7) : null;
+        let shownCaps = null;
+        if (presented && presented === token) shownCaps = granted;
+        else if (presented && network) {
+            const r = serviceAuth.verifyServiceToken(presented, { publicKey: network.publicPem, issuer: network.url, audience: 'openvibe.openre' });
+            if (!r.ok) return problem(res, 401, r.code, r.reason);
+            shownCaps = r.claims.cap || [];
+        }
+        if (!shownCaps) return problem(res, 401, 'token.invalid', 'a service token is required');
         const m = /^\/api\/v1\/streams(?:\/([^/]+)(\/keys\/rotate)?)?$/.exec(url.pathname);
         const need = m && (m[2] ? 'openre.key.rotate' : req.method === 'GET' ? 'openre.stream.read' : 'openre.stream.write');
-        if (need && !hasCap(need)) return problem(res, 403, 'capability.denied', `${need} not granted`);
+        if (need && !hasCap(shownCaps, need)) return problem(res, 403, 'capability.denied', `${need} not granted`);
         if (!subject || !/^usr_/.test(subject)) return problem(res, 400, 'subject.invalid', 'X-OV-Subject must be a usr_… subject id');
         const mine = (id) => { const st = streams.get(id); return st && st.state !== 'archived' && st.owner === subject ? st : null; };
         if (url.pathname === '/api/v1/streams' && req.method === 'GET') {
@@ -258,7 +281,7 @@ async function startOpenRe({ token = `ovt_${crypto.randomBytes(16).toString('hex
     const url = await listen(server);
     return {
         url, token, streams, calls, admits,
-        failNext: (what) => { failure = what; },
+        failNext: (what, times = 1) => { failure = what; failuresLeft = what == null ? 0 : times; },
         setCaps: (list) => { granted = [...(list || caps)]; },
         close: () => { server.closeAllConnections(); return new Promise((r) => server.close(r)); },
     };
