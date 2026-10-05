@@ -99,6 +99,20 @@ const MINIMAL = {
         assert.strictEqual(missing.headers.get('content-type'), 'application/problem+json');
         assert.strictEqual(missing.json.code, 'bot.kit_not_found');
     });
+
+    await check('the robots page offers "Get a robot": the kit, its parts, its guide and a start with its profile chosen', async () => {
+        const alex = t.network.newUser('alex');
+        const page = (q = '') => fetch(`${t.base}/robots${q}`, { redirect: 'manual', headers: { Cookie: `ov_token=${t.network.signUser(alex)}` } }).then((r) => r.text());
+        const html = await page();
+        assert.match(html, /<h2 id="kits-h">Get a robot<\/h2>/);
+        assert.match(html, /Adeept ADR036 4WD Smart Car Kit for Raspberry Pi/);
+        assert.match(html, /What you need/);
+        assert.match(html, /href="https:\/\/www\.adeept\.com\/learn\/detail-97\.html" target="_blank" rel="noopener">Build guide/);
+        assert.match(html, /href="\/robots\?profile=adeept\.adr036#add-robot">Add this robot/);
+        assert.doesNotMatch(html, /\(O30\)/, 'no internal plan codes in public copy');
+        assert.match(await page('?profile=adeept.adr036'), /<option value="adeept\.adr036" selected>/, 'the kit start chooses its profile');
+        assert.doesNotMatch(await page('?profile=nope'), /<option value="nope"/);
+    });
     await t.close();
 
     done();

@@ -26,6 +26,7 @@ const express = require('express');
 const { getProfile, listProfiles } = require('../profiles');
 const { frameAncestors } = require('../config');
 const { BotError } = require('../util');
+const kits = require('../kits');
 const { renderPanel, renderEmbedRefused, renderRobotsPage, renderPairingPage } = require('./render');
 const VERSION = require('../../package.json').version;
 
@@ -82,7 +83,10 @@ function createWebRoutes(config, { domain = null, sim = null, limits = null, log
     async function robotsPage(req, res, me, extra = {}) {
         const robots = (await domain.robots.list(me.subject)).map(presentForPage);
         const profiles = (await listProfiles(domain.db)).map((p) => p.profile);
-        res.type('html').send(renderRobotsPage({ robots, profiles, ...extra }));
+        // A kit's "Add this robot" arrives as ?profile=<id>: the add form opens with that model chosen.
+        const asked = typeof req.query.profile === 'string' && profiles.some((p) => p.id === req.query.profile) ? req.query.profile : null;
+        const values = extra.values || (asked ? { profile_id: asked } : {});
+        res.type('html').send(renderRobotsPage({ robots, profiles, kits: kits.list(), ...extra, values }));
     }
 
     r.get('/robots', page(async (req, res) => robotsPage(req, res, requireUser(req))));
