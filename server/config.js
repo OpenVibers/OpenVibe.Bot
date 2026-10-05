@@ -9,6 +9,7 @@
  * per-device publish key over WHIP).
  */
 require('dotenv').config();
+const { isRobotId } = require('./util');
 
 const int = (v, d) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : d; };
 const bool = (v, d = false) => (v == null || v === '' ? d : ['1', 'true', 'yes', 'on'].includes(String(v).toLowerCase()));
@@ -59,21 +60,22 @@ function frameAncestors(config) {
 
 /**
  * BOT_ONVIF_CAMERAS: the server-side cameras the `onvif` driver connects to (server/onvif), a JSON object
- * keyed by robot id — or "*" for any ONVIF-profile robot not named. Each entry is the camera's ONVIF PTZ
- * service URL plus the *names* of the secrets holding its user and password (username_ref/password_ref, an
- * env var name or a secret store key); the values are read at request time and never live in the config or
- * the profile. The URL must be http(s), on one host, and carry no embedded credentials. Anything else
- * refuses to boot, so the connector can only ever POST to a camera someone configured deliberately.
+ * keyed by robot id — each key names exactly one robot, so no camera is ever shared between robots. Each
+ * entry is the camera's ONVIF PTZ service URL plus the *names* of the secrets holding its user and password
+ * (username_ref/password_ref, an env var name or a secret store key); the values are read at request time
+ * and never live in the config or the profile. The URL must be http(s), on one host, and carry no embedded
+ * credentials. Anything else — including a key that is not a robot id ("*" included) — refuses to boot, so
+ * the connector can only ever POST to a camera someone configured deliberately for one robot.
  */
 function parseOnvifCameras(value) {
     const raw = String(value || '').trim();
     if (!raw) return {};
     let parsed;
     try { parsed = JSON.parse(raw); } catch { throw new Error(`BOT_ONVIF_CAMERAS must be JSON: ${JSON.stringify(raw.slice(0, 80))}`); }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('BOT_ONVIF_CAMERAS must be a JSON object keyed by robot id (or "*")');
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('BOT_ONVIF_CAMERAS must be a JSON object keyed by robot id');
     const out = {};
     for (const [key, entry] of Object.entries(parsed)) {
-        if (!key.trim()) throw new Error('BOT_ONVIF_CAMERAS: a camera key is empty');
+        if (!isRobotId(key)) throw new Error(`BOT_ONVIF_CAMERAS: ${JSON.stringify(key)} is not a robot id (rob_…): each entry names one robot, and no key is a wildcard`);
         if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new Error(`BOT_ONVIF_CAMERAS[${key}] must be an object`);
         let u = null;
         try { u = new URL(String(entry.url || '')); } catch { /* reported below */ }
@@ -203,8 +205,9 @@ function loadConfig(env = process.env) {
             whipBase: trim(env.BOT_WHIP_BASE || ''),
         },
         // Server-side ONVIF cameras (driver `onvif`, server/onvif): the hosts Bot may connect to, keyed by
-        // robot id (or "*"), plus the timeout each request gets. Credentials are secret references only
-        // (username_ref/password_ref), resolved when the request is built; the config never holds a value.
+        // robot id (one camera per robot), plus the timeout each request gets. Credentials are secret
+        // references only (username_ref/password_ref), resolved when the request is built; the config never
+        // holds a value.
         onvif: {
             cameras: parseOnvifCameras(env.BOT_ONVIF_CAMERAS),
             timeoutMs: Math.max(100, int(env.BOT_ONVIF_TIMEOUT_MS, 5000)),

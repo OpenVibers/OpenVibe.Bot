@@ -14,7 +14,7 @@
  *                 ptz: { pan, tilt, zoom } | null } }
  *
  *   attach(robotId, profile)  start the camera if its profile is an `onvif` one AND BOT_ONVIF_CAMERAS names
- *                             it (or "*"); idempotent → true/false
+ *                             that robot's id (no wildcard); idempotent → true/false
  *   startAll()                every existing `onvif` robot at boot
  *   stop(robotId), stopAll(), running(robotId)
  *
@@ -30,14 +30,55 @@ const isOnvifProfile = (profile) => !!(profile && profile.mapping && profile.map
 
 const SOAP_NS = 'http://www.w3.org/2003/05/soap-envelope';
 const PTZ_NS = 'http://www.onvif.org/ver20/ptz/wsdl';
+const TDS_NS = 'http://www.onvif.org/ver10/device/wsdl';
 const SCHEMA_NS = 'http://www.onvif.org/ver10/schema';
 const WSSE_NS = 'http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd';
 const WSU_NS = 'http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd';
 const PASSWORD_DIGEST = 'http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest';
 const NONCE_ENCODING = 'http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-soap-message-security-1.0#Base64Binary';
+// A camera answer is read at most this far; a GetStatus reply is a few KB, so this only ever cuts an
+// endless or bogus body, which becomes an error instead of a request that never finishes.
+const MAX_RESPONSE_BYTES = 64 * 1024;
 
 const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
 const esc = (s) => String(s).replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c]));
+
+/**
+ * Read a fetch Response body up to `max` bytes, aborting the stream as soon as it grows past that. A camera
+ * that streams an endless or oversized answer becomes an error in bounded time, never a request that hangs.
+ */
+async function readCapped(res, max) {
+    if (!res.body || typeof res.body.getReader !== 'function') {
+        const text = await res.text().catch(() => '');
+        if (Buffer.byteLength(text, 'utf8') > max) throw new Error(`the camera answer exceeded ${max} bytes`);
+        return text;
+    }
+    const reader = res.body.getReader();
+    const chunks = [];
+    let total = 0;
+    for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        total += value.byteLength;
+        if (total > max) {
+            reader.cancel().catch(() => {});   // aborts the rest of the body; do not wait for it
+            throw new Error(`the camera answer exceeded ${max} bytes`);
+        }
+        chunks.push(Buffer.from(value));
+    }
+    return Buffer.concat(chunks).toString('utf8');
+}
+
+/** The camera's UTC time from a GetSystemDateAndTime answer, in epoch ms, or null when none can be read. */
+function parseCameraTime(xml) {
+    const utc = /<[^>]*UTCDateTime[^>]*>([\s\S]*?)<\/[^>]*UTCDateTime>/.exec(xml);
+    const src = utc ? utc[1] : xml;
+    const part = (tag) => { const m = new RegExp(`<[^>]*${tag}[^>]*>\\s*(\\d+)\\s*<`).exec(src); return m ? Number(m[1]) : null; };
+    const [year, month, day, hour, minute, second] = ['Year', 'Month', 'Day', 'Hour', 'Minute', 'Second'].map(part);
+    if ([year, month, day, hour, minute, second].some((v) => v == null)) return null;
+    const at = Date.UTC(year, month - 1, day, hour, minute, second);
+    return Number.isFinite(at) ? at : null;
+}
 
 function createOnvif({ config, domain, hub, now = () => Date.now(), log = console, fetchImpl = globalThis.fetch, env = process.env, resolveSecret = null } = {}) {
     const cameras = new Map();        // robot_id → connector state
@@ -47,12 +88,12 @@ function createOnvif({ config, domain, hub, now = () => Date.now(), log = consol
     const heartbeatMs = Math.max(50, Math.floor(config.device.heartbeatMs / 2));
     const every = (ms, fn) => { const t = setInterval(() => { try { fn(); } catch (e) { log.warn(`[Bot] onvif: ${e.message}`); } }, ms); if (t.unref) t.unref(); return t; };
 
-    const cameraFor = (robotId) => opts.cameras[robotId] || opts.cameras['*'] || null;
+    const cameraFor = (robotId) => opts.cameras[robotId] || null;
     const secret = resolveSecret || ((ref) => (ref ? env[ref] : null));
 
     // ── Attach and lifecycle ──────────────────────────────────────────────────────────────────────
     function start(robot, profile, camera, device) {
-        const cam = { robotId: robot.id, device, camera, profile, link: null, timers: [], stopTimer: null, estop: !!robot.estop_latched, readout: null, reachable: false, rttMs: null, at: now() };
+        const cam = { robotId: robot.id, robot, device, camera, profile, link: null, timers: [], stopTimer: null, estop: !!robot.estop_latched, readout: null, reachable: false, rttMs: null, clockOffsetMs: 0, at: now() };
         cameras.set(robot.id, cam);
         connect(cam);
         cam.timers.push(every(heartbeatMs, () => { if (cam.link) cam.link.deliver({ type: 'heartbeat', t: now(), rtt_ms: cam.rttMs }); }));
@@ -61,7 +102,9 @@ function createOnvif({ config, domain, hub, now = () => Date.now(), log = consol
     }
     function connect(cam) {
         cam.link = hub.attachSim(cam.device, { onFrame: (f) => onFrame(cam, f), onClose: () => halt(cam) });
-        if (cam.link) cam.link.ready.then(() => { refreshStatus(cam); telemetry(cam); }, () => {});
+        // Sync the camera's clock (unauthenticated, as ONVIF allows) before the first authenticated request,
+        // so a camera whose clock is a few seconds off still accepts the WS-Security digest.
+        if (cam.link) cam.link.ready.then(() => syncClock(cam), () => {}).then(() => { refreshStatus(cam); telemetry(cam); });
     }
 
     /** Start the camera for a robot whose profile's driver is `onvif` and that BOT_ONVIF_CAMERAS names (idempotent). */
@@ -133,15 +176,30 @@ function createOnvif({ config, domain, hub, now = () => Date.now(), log = consol
 
     function halt(cam) {
         stopTimerClear(cam);
-        request(cam, stopBody(cam)).catch(() => {});
+        stopWithRetry(cam);
     }
     function stopTimerClear(cam) { if (cam.stopTimer) clearTimeout(cam.stopTimer); cam.stopTimer = null; }
-    /** The deadman: a ContinuousMove stops by itself at the command's deadline unless a newer one arrived. */
+    /** A Stop is safety-critical: try once, retry a failure once, then log the robot id (never the URL or secrets). */
+    async function stopWithRetry(cam) {
+        try { await request(cam, stopBody(cam)); return; }
+        catch { /* one retry below */ }
+        try { await request(cam, stopBody(cam)); }
+        catch { log.warn(`[Bot] onvif: stop failed for robot ${cam.robotId}`); }
+    }
+    /**
+     * The deadman: a ContinuousMove stops by itself at the command's deadline unless a newer one arrived. A
+     * frame without a finite deadline (an older or direct caller) still gets one — the robot's own
+     * maxCommandMs — so a continuous move is never left running.
+     */
     function scheduleStop(cam, deadline) {
         stopTimerClear(cam);
-        if (!Number.isFinite(deadline)) return;
-        cam.stopTimer = setTimeout(() => { cam.stopTimer = null; request(cam, stopBody(cam)).catch(() => {}); }, Math.max(0, deadline - now()));
+        const at = Number.isFinite(deadline) ? deadline : now() + camMaxCommandMs(cam);
+        cam.stopTimer = setTimeout(() => { cam.stopTimer = null; stopWithRetry(cam); }, Math.max(0, at - now()));
         if (cam.stopTimer.unref) cam.stopTimer.unref();
+    }
+    function camMaxCommandMs(cam) {
+        try { return domain.control.effectiveLimits(cam.robot, cam.profile).maxCommandMs; }
+        catch { return config.control.maxCommandMs; }
     }
 
     // ── ONVIF over HTTP (the one configured host, with a timeout) ─────────────────────────────────
@@ -162,7 +220,9 @@ function createOnvif({ config, domain, hub, now = () => Date.now(), log = consol
         }
         cam.rttMs = Math.max(0, Math.round(now() - started));
         if (!res.ok) { cam.reachable = false; throw new Error(`the camera answered ${res.status}`); }
-        const text = await res.text().catch(() => '');
+        let text;
+        try { text = await readCapped(res, MAX_RESPONSE_BYTES); }
+        catch (e) { cam.reachable = false; throw e; }
         cam.reachable = true;
         return text;
     }
@@ -170,9 +230,23 @@ function createOnvif({ config, domain, hub, now = () => Date.now(), log = consol
     async function refreshStatus(cam) {
         try {
             const xml = await request(cam, statusBody(cam));
+            if (!/<[^>]*GetStatusResponse[\s>]/.test(xml)) return;   // never read a position out of any other reply
             const read = parseStatus(xml);
             if (read) cam.readout = read;
         } catch { /* telemetry carries reachable: false until the camera answers again */ }
+    }
+
+    /**
+     * Ask the camera for its time once (GetSystemDateAndTime is unauthenticated, as ONVIF allows) and remember
+     * the offset, so the WS-Security Created matches the camera's clock and a camera a few seconds off still
+     * accepts the digest. A camera without the call, or an answer we cannot read, leaves local time in place.
+     */
+    async function syncClock(cam) {
+        try {
+            const xml = await request(cam, envelope('', `<tds:GetSystemDateAndTime xmlns:tds="${TDS_NS}"/>`));
+            const at = parseCameraTime(xml);
+            if (at != null) cam.clockOffsetMs = at - now();
+        } catch { /* keep local time */ }
     }
 
     function telemetry(cam) {
@@ -197,7 +271,7 @@ function createOnvif({ config, domain, hub, now = () => Date.now(), log = consol
         const password = secret(cam.camera.passwordRef);
         if (!username || !password) return '';
         const nonce = crypto.randomBytes(16);
-        const created = new Date(now()).toISOString();
+        const created = new Date(now() + (cam.clockOffsetMs || 0)).toISOString();
         const digest = crypto.createHash('sha1').update(Buffer.concat([nonce, Buffer.from(created), Buffer.from(String(password))])).digest('base64');
         return `<s:Header><wsse:Security xmlns:wsse="${WSSE_NS}" xmlns:wsu="${WSU_NS}" s:mustUnderstand="1">`
             + `<wsse:UsernameToken><wsse:Username>${esc(username)}</wsse:Username>`
