@@ -103,6 +103,17 @@ const allowedFor = (profile, role) => [...(DEFAULT_ALLOW[role] || []).filter((k)
         }
     });
 
+    await check('a person\'s subject is percent-encoded in the remove form action', () => {
+        const p = profiles.find((x) => x.id === 'sim.rover');
+        const subject = 'usr_a/b?c#d e&';
+        const html = renderPanel({
+            robot: robotFor(p), profile: p, role: 'owner', allowed_commands: [],
+            people: [{ subject, role: 'operator', username: 'x', display_name: 'X' }],
+        });
+        assert.ok(html.includes(`/operators/${encodeURIComponent(subject)}/remove`), 'the subject is not percent-encoded in the URL');
+        assert.ok(!html.includes(`/operators/${subject}/remove`), 'the raw subject is in the URL');
+    });
+
     const t = await boot();
     const alex = t.network.newUser('alex');
     const bob = t.network.newUser('bob');

@@ -330,8 +330,9 @@ needs an explicit owner or operator role — a no-role caller is refused `bot.no
 | `error` | `code, detail` | a frame or join the server refused |
 
 `robot_state.queue` (only for a `queue` robot) is
-`{ robot_id, subject, active, turn_ends_at, turn_subject, position, budget, used }` — a waiting
-person's `position` is 1-based (0 while they hold the turn).
+`{ robot_id, subject, active, turn_ends_at, position, budget, used }` — `subject` is the reader's own,
+never another person's, so a waiting person's `position` is 1-based (0 while they hold the turn) and no
+member ever learns the active driver's subject.
 
 ### Examples
 
@@ -470,7 +471,11 @@ node token, and a service token is judged on `bot.job.dispatch` alone.
 
 Not in `/api/v1`: `GET /api/health`, `GET /api/ready`, `GET /metrics`, `GET /release.json`, the
 `/auth/*` SSO routes, `GET /` (a one-line text health placeholder), `GET /install` (a 302 to the installer),
-and the signed-in pages `GET|POST /robots`, `GET /pair/:id`, `GET /panel/:id` and `GET /panel/panel.{js,css}`
+and the signed-in pages `GET|POST /robots`, `GET /pair/:id`, `GET /panel/:id`, `GET /panel/panel.{js,css}`,
+the panel's owner-only forms `POST /robots/:id/operators` (body `username`, `role` `operator|viewer`; a leading
+`@` is stripped; an unknown name is `422 bot.unknown_user` with `No OpenVibe account is called @<name>`) and
+`POST /robots/:id/operators/:subject/remove` (the owner row cannot be removed), and `POST /robots/:id/queue/leave`
+(any signed-in person; the next in line is promoted)
 (`server/web/routes.js`; adding a robot and minting a code count against the `bot.robot.manage` per-person limit,
 30 a minute and 300 an hour, as on `/api/v1`; past it `429 rate_limited`).
 

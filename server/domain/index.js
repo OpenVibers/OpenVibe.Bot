@@ -101,13 +101,26 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     async function addOperator(robotId, subject, role, addedBy) {
         if (!['owner', 'operator', 'viewer'].includes(role)) fail(422, 'bot.invalid_role', 'role must be owner, operator or viewer');
         if (role === 'owner') fail(422, 'bot.invalid_role', 'ownership is not transferred by adding an operator');
+        const before = await roleOf(robotId, subject);
         await db.query(
             `INSERT INTO robot_operators (robot_id, subject, role, added_by, created_at) VALUES ($1, $2, $3, $4, $5)
              ON CONFLICT (robot_id, subject) DO UPDATE SET role = EXCLUDED.role, added_by = EXCLUDED.added_by`,
             [robotId, subject, role, addedBy || null, iso(now())]);
+        if (before !== role) membershipChanged(robotId, subject, 'your role on this robot changed');
     }
     async function removeOperator(robotId, subject) {
+        const before = await roleOf(robotId, subject);
         await db.query(`DELETE FROM robot_operators WHERE robot_id = $1 AND subject = $2 AND role <> 'owner'`, [robotId, subject]);
+        if (before && before !== 'owner') membershipChanged(robotId, subject, 'you were removed from this robot');
+    }
+    /**
+     * A membership change: the person's live /control sockets on the robot are dropped (so their join
+     * re-derives the role) and every panel of the robot is re-broadcast. The one place both the web form
+     * routes and the v1 API reach, since both change membership through addOperator/removeOperator.
+     */
+    function membershipChanged(robotId, subject, reason) {
+        if (link && link.dropSubject) link.dropSubject(robotId, subject, reason);
+        if (link && link.broadcast) link.broadcast(robotId);
     }
 
     // ── Robots ────────────────────────────────────────────────────────────────────────────────────
@@ -600,6 +613,17 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         await currentTurn(robotId);
         return queueState(robotId, subject);
     }
+    /**
+     * Leave the queue: remove the person's row (waiting or the active turn) and, when their turn ends,
+     * promote the oldest waiting one. Returns the leaver's view of the queue (null/mostly empty when gone).
+     */
+    async function leaveQueue(robotId, subject) {
+        const robot = await getRobot(robotId);
+        if (!robot) fail(404, 'bot.robot_not_found', 'no such robot');
+        await db.query('DELETE FROM robot_queue WHERE robot_id = $1 AND subject = $2', [robotId, subject]);
+        await currentTurn(robotId);
+        return queueState(robotId, subject);
+    }
     async function queueState(robotId, subject) {
         const robot = await getRobot(robotId);
         if (!robot) return null;
@@ -613,7 +637,6 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         return {
             robot_id: robotId, subject: subject || null, active: !!(active && active.subject === subject),
             turn_ends_at: active ? iso(new Date(active.turn_ends_at).getTime()) : null,
-            turn_subject: active ? active.subject : null,
             position: active && active.subject === subject ? 0 : position,
             budget: turnBudget(robot),
             used: active && active.subject === subject ? active.commands_used : 0,
@@ -865,7 +888,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         devices: { byCredential, bindNode, issuePublishKey, revokeVideo, updateDeclared, revokeNode, ensureServerDevice, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, touchSeen, setOnline },
         streaming: { get: streaming, set: setStreaming },
         estop: { set: setEstop, clear: clearEstop },
-        queue: { join: joinQueue, state: queueState, currentTurn, consume: consumeTurn, sweep: sweepQueues },
+        queue: { join: joinQueue, leave: leaveQueue, state: queueState, currentTurn, consume: consumeTurn, sweep: sweepQueues },
         audit: { record: auditCommand, list: listAudit, listPage: listAuditPage, prune: pruneAudit },
         control: { prepare, allowedFor, effectiveLimits, deviceLimits, buildValue, DEFAULT_ALLOW, KINDS },
     };

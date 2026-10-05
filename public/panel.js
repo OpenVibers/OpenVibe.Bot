@@ -477,6 +477,33 @@
         }
     }
 
+    // ── The turn queue strip (a `queue` robot's signed-in non-member) ─────────────────────────────────
+    const turnEl = $('[data-turn]');
+    const turnStateEl = $('[data-turn-state]');
+    const turnMetaEl = $('[data-turn-meta]');
+    let turnTimer = null;
+    const stopTurnTimer = () => { if (turnTimer) { clearInterval(turnTimer); turnTimer = null; } };
+    /** Paint the queue view from a state frame's `queue`: the active turn's countdown, a place in line, or hidden. */
+    function paintTurn(queue) {
+        stopTurnTimer();
+        if (!turnEl) return;
+        if (!queue || (!queue.active && !(queue.position > 0))) { turnEl.hidden = true; return; }
+        turnEl.hidden = false;
+        if (queue.active) {
+            const ends = queue.turn_ends_at ? new Date(queue.turn_ends_at).getTime() : null;
+            const paintLeft = () => {
+                const left = ends != null ? Math.max(0, Math.ceil((ends - Date.now()) / 1000)) : null;
+                turnStateEl.textContent = 'Your turn';
+                turnMetaEl.textContent = `${left == null ? '—' : `${left}s`} left · ${queue.used} of ${queue.budget} commands`;
+            };
+            paintLeft();
+            if (ends != null) turnTimer = setInterval(paintLeft, 1000);
+        } else {
+            turnStateEl.textContent = `You're #${queue.position} in line`;
+            turnMetaEl.textContent = '';
+        }
+    }
+
     function onFrame(m) {
         if (m.type === 'joined') {
             joined = true; retry = 0;
@@ -484,8 +511,10 @@
             notice('');
             enableControls();
             paint(m.state);
+            paintTurn(m.state && m.state.queue);
         } else if (m.type === 'robot_state') {
             paint(m.state);
+            paintTurn(m.state && m.state.queue);
         } else if (m.type === 'command_result') {
             roundTrip(m.id, m.result);
             if (m.result === 'refused' && m.code !== 'bot.cooldown') notice(m.reason || m.code);
@@ -501,6 +530,7 @@
         ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch { return; } onFrame(m); };
         ws.onclose = (e) => {
             releaseAll();
+            stopTurnTimer();
             joined = false;
             enableControls();
             setOnline('disconnected', 'Reconnecting…');

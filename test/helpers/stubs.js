@@ -4,7 +4,10 @@
  *
  *   startNetwork()  JWKS and user/service JWTs (signUser, signService, newUser); node principals as
  *                   GET /internal/node-principals/:id and POST …/:id/revoke answer them (addNode, signNode,
- *                   nodes, revokes), scoped to the calling service like Network's own routes
+ *                   nodes, revokes), scoped to the calling service like Network's own routes. Identity
+ *                   resolution for people (identity.subject.resolve): GET /internal/identity/resolve?username=
+ *                   and POST /internal/identity/resolve-batch, over the users newUser registers; failIdentity
+ *                   makes them answer a failure (Network down).
  *   startEvents()   POST /api/v1/events recording what Bot's outbox relays; GET /api/health
  *   startOpenRe()   OpenRe.Stream's stream routes Bot calls (server/api/v1.js there): GET /api/v1/streams?external_ref=,
  *                   GET /api/v1/streams/:id, POST /api/v1/streams, PATCH /api/v1/streams/:id (recording_mode /
@@ -75,9 +78,24 @@ async function startNetwork() {
     let pairingFailure = null;
     const failPairings = (status) => { pairingFailure = status; };
 
+    // Identity resolution for people (identity.subject.resolve). `users` is what newUser registered;
+    // failIdentity(status) makes both routes answer that status instead (Network down).
+    const users = new Map();            // subject → { subject, username, display_name }
+    const byName = new Map();           // lowercased username → subject
+    let identityFailure = null;
+    function rememberUser(u) { users.set(u.subject, u); byName.set(String(u.username).toLowerCase(), u.subject); }
     function newUser(username) {
-        return { subject: ids.newId('user'), username, display_name: username[0].toUpperCase() + username.slice(1) };
+        const u = { subject: ids.newId('user'), username, display_name: username[0].toUpperCase() + username.slice(1) };
+        rememberUser(u);
+        return u;
     }
+    const identityResolver = (req) => {
+        const h = String(req.headers.authorization || '');
+        if (!h.startsWith('Bearer ')) return false;
+        const r = serviceAuth.verifyServiceToken(h.slice(7), { publicKey: publicPem, issuer, audience: 'openvibe.network' });
+        return r.ok && (r.claims.cap || []).includes('identity.subject.resolve');
+    };
+    const identityView = (u) => ({ subject: u.subject, username: u.username, display_name: u.display_name });
 
     const server = http.createServer(async (req, res) => {
         if (req.url === '/api/.well-known/jwks') return send(res, 200, { public_key: publicPem, algorithm: 'RS256' });
@@ -87,6 +105,25 @@ async function startNetwork() {
             if (body.client_secret !== 'shh') return send(res, 401, { error: 'invalid_client' });
             const cap = String(body.scope || '').split(/\s+/).filter(Boolean);
             return send(res, 200, { access_token: signService({ sub: `svc:${body.client_id}`, aud: [body.audience || 'openvibe.bot'], cap }), token_type: 'Bearer', expires_in: 300 });
+        }
+        const idn = new URL(req.url, 'http://network.test');
+        if (idn.pathname === '/internal/identity/resolve' && req.method === 'GET') {
+            if (!identityResolver(req)) return send(res, 401, { code: 'token.invalid' });
+            if (identityFailure) return send(res, identityFailure, { code: 'identity.failed' });
+            const subject = byName.get(String(idn.searchParams.get('username') || '').toLowerCase());
+            const u = subject && users.get(subject);
+            return u ? send(res, 200, identityView(u)) : send(res, 404, { code: 'identity.subject_not_found' });
+        }
+        if (idn.pathname === '/internal/identity/resolve-batch' && req.method === 'POST') {
+            if (!identityResolver(req)) return send(res, 401, { code: 'token.invalid' });
+            if (identityFailure) return send(res, identityFailure, { code: 'identity.failed' });
+            const body = JSON.parse((await readBody(req)) || '{}');
+            const results = {};
+            for (const id of (Array.isArray(body.subject_ids) ? body.subject_ids : [])) {
+                const u = users.get(String(id));
+                results[String(id)] = u ? identityView(u) : null;
+            }
+            return send(res, 200, { results });
         }
         if (req.url === '/internal/node-pairings' && req.method === 'POST') {
             const service = nodeManager(req);
@@ -114,7 +151,7 @@ async function startNetwork() {
     });
     const url = await listen(server);
     issuer = url;
-    return { url, publicPem, signService, signUser, newUser, addNode, signNode, nodes, revokes, pairings, failPairings, close: () => new Promise((r) => server.close(r)) };
+    return { url, publicPem, signService, signUser, newUser, addNode, signNode, nodes, revokes, pairings, failPairings, users, failIdentity: (status) => { identityFailure = status; }, close: () => new Promise((r) => server.close(r)) };
 }
 
 async function startEvents() {
