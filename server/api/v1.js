@@ -42,14 +42,18 @@ const CAP = {
     dispatch: 'bot.job.dispatch',
 };
 
-function v1Router({ domain, apiAuth, limits, hub, jobs: jobService }) {
+function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config }) {
     const r = express.Router();
     r.use(limits.reads('bot.read'));
     const manage = limits('bot.robot.manage', { minute: 30, hour: 300 });
     const control = limits('bot.control', { minute: 120, hour: 1200 });
     // The command route counts against the acted-for person, not the service token: a bound channel's chat
-    // forwards many viewers' commands through one service, and each viewer gets their own bucket.
-    const commandControl = limits.actedFor('bot.control', { minute: 120, hour: 1200 });
+    // forwards many viewers' commands through one service, and each viewer gets their own bucket. A service
+    // is also capped by its own token (bot.control.service, 10× the per-person bucket): the subject is only
+    // shape-checked here, so a service naming a fresh well-formed viewer on every request would otherwise
+    // never reach a ceiling.
+    const commandControl = limits.actedFor('bot.control', { minute: 120, hour: 1200 },
+        { minute: config.actorLimits.controlServiceMinute, hour: config.actorLimits.controlServiceHour });
     const pair = limits('bot.pair', { minute: 20, hour: 200 });
     const jobs = limits('bot.jobs', { minute: 120, hour: 1200 });
 

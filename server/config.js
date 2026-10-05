@@ -147,6 +147,10 @@ function loadConfig(env = process.env) {
         actorLimits: {
             minute: Math.max(1, int(env.BOT_LIMITS_MINUTE, 120)),
             hour: Math.max(1, int(env.BOT_LIMITS_HOUR, 3000)),
+            // The command route also caps a service by its own token (server/api/v1.js; a service may name a
+            // different subject on every request, so the per-person bucket alone has no overall ceiling).
+            controlServiceMinute: Math.max(1, int(env.BOT_LIMITS_CONTROL_SERVICE_MINUTE, 1200)),
+            controlServiceHour: Math.max(1, int(env.BOT_LIMITS_CONTROL_SERVICE_HOUR, 12000)),
         },
 
         jobs: {

@@ -3,6 +3,7 @@
 // operator, cooldowns, the latched e-stop (owner-cleared only), the turn queue and a service acting for
 // a viewer. Every decision is audited.
 const assert = require('assert');
+const { ids } = require('openvibe-contracts');
 const { boot, check, done } = require('./helpers/app');
 const { loadProfiles } = require('../server/profiles');
 const plugins = require('./helpers/plugins');
@@ -443,6 +444,28 @@ const plugins = require('./helpers/plugins');
         const r = await pending;
         assert.strictEqual(r.status, 200, r.text);
         assert.strictEqual(r.json.result, 'expired');
+    });
+
+    // After the shared hub is closed, and in an app of its own so the extra boot's work can disturb no other
+    // check. A small per-service cap (the default is 1200/min) tests the rotation without a 1200-request burst:
+    // a service names a different well-formed subject on every request, so its per-person buckets never trip
+    // and only its own token's ceiling holds.
+    await check('a service cannot escape the command route\'s cap by rotating through fresh subjects', async () => {
+        const u = await boot({ env: { BOT_LIMITS_CONTROL_SERVICE_MINUTE: '30', BOT_LIMITS_CONTROL_SERVICE_HOUR: '300' } });
+        try {
+            const owner = u.network.newUser('rotator');
+            const { robot } = await u.domain.robots.create({ owner: owner.subject, name: 'Rotating rover', profile_id: 'sim.rover' });
+            const rotating = u.network.signService({ sub: 'svc:rotating', cap: ['bot.robot.control'], aud: ['openvibe.bot'] });
+            const send = () => u.call('POST', `/api/v1/robots/${robot.id}/commands`, {
+                token: rotating, headers: { 'X-OV-Subject': ids.newId('user') },   // usr_…, but no member
+                body: { id: ids.newId('user'), kind: 'drive', value: { throttle: 0.2 } },
+            });
+            const counted = await Promise.all(Array.from({ length: 30 }, send));
+            assert.ok(counted.every((r) => r.status === 403), `the first 30 rotated subjects are counted but not limited: ${counted.filter((r) => r.status !== 403).map((r) => r.status).join(',')}`);
+            const over = await send();
+            assert.strictEqual(over.status, 429, over.text);
+            assert.strictEqual(over.json.code, 'rate_limited');
+        } finally { await u.close(); }
     });
 
     await t.close();

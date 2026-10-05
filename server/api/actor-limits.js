@@ -40,15 +40,30 @@ function createActorLimits({ config, valkey = null, now = () => Date.now(), regi
      * call is counted against `user:<subject>` exactly as that person's own token is, so one shared service
      * token never puts every viewer in one bucket. A person's own token is keyed as before; an invalid subject
      * is left for the route to refuse.
+     *
+     * Pass `service` to also count a service principal in its own bucket (`<name>.service`, keyed on its
+     * `principal.sub`): `userSubject` only checks the `usr_…` shape, so a service naming a fresh well-formed
+     * subject on every request would otherwise mint a new `user:<subject>` bucket each time and never reach a
+     * ceiling. That bucket is counted first, while `req.limitSubject` is still unset, so it can never be
+     * attributed to the person.
      */
-    limiter.actedFor = (name, own = {}) => {
-        const limit = limiter(name, own);
+    limiter.actedFor = (name, own = {}, service = null) => {
+        const perSubject = limiter(name, own);
+        const perService = service ? limiter(`${name}.service`, service) : null;
+        const namedSubject = (req) => {
+            const s = req.headers['x-ov-subject'] || req.body?.owner;
+            if (s == null || s === '') return null;
+            try { return userSubject(s, 'subject'); } catch { return null; }   // the route refuses it
+        };
         return (req, res, next) => {
-            if (req.principal && req.principal.kind === 'service') {
-                const s = req.headers['x-ov-subject'] || req.body?.owner;
-                if (s != null && s !== '') { try { req.limitSubject = userSubject(s, 'subject'); } catch { /* the route refuses it */ } }
-            }
-            return limit(req, res, next);
+            if (!req.principal || req.principal.kind !== 'service') return perSubject(req, res, next);
+            const countSubject = () => {
+                const s = namedSubject(req);
+                if (s != null) req.limitSubject = s;
+                return perSubject(req, res, next);
+            };
+            if (!perService) return countSubject();
+            return perService(req, res, (err) => (err ? next(err) : countSubject()));
         };
     };
     return limiter;
