@@ -243,9 +243,10 @@ heartbeat or any frame brings it back. Commands are never replayed after a recon
 ### 1.2 Jobs (platform.job-frame@1)
 
 Bot is the dispatcher of plan T14: it hands a `platform.job@1` job to a paired OpenVibe.Node over this socket
-and meters it. There is no HTTP route; the Run service (which owns `run.job.*`) calls
-`server/jobs/dispatch.js` `dispatch(db, nodeId, job, { link, project, subject, provider })` and
-`cancel(db, jobId, { link })`. Each frame carries the envelope (`v`, `seq`, `ts`, `type`) and is validated
+and meters it. The Run service (which owns `run.job.*`) calls it over the internal HTTP API under the
+`bot.job.dispatch` capability: `POST /api/v1/jobs`, `POST /api/v1/jobs/:id/cancel` and `GET /api/v1/jobs/:id`
+(`server/api/v1.js`) wrap `server/jobs/dispatch.js` `dispatch(db, nodeId, job, { link, project, subject, provider })`
+and `cancel(db, jobId, { link })`. Each frame carries the envelope (`v`, `seq`, `ts`, `type`) and is validated
 against `platform.job-frame@1` from the pinned openvibe-contracts; an invalid one is answered `error`
 `bot.bad_frame`, and one naming a job of another device `error` `bot.unknown_job` (nothing changes).
 
@@ -421,7 +422,9 @@ and `POST /devices/bind` answers `401 bot.sign_in`: `GET|POST /robots`, `GET|PAT
 `POST /robots/:id/pairing-code`, `GET|POST /robots/:id/operators`, `DELETE /robots/:id/operators/:subject`,
 `GET /robots/:id/devices`, `POST /devices/:id/rotate|revoke`, `POST /robots/:id/estop`,
 `POST /robots/:id/estop/clear` and `GET /robots/:id/audit`. A node token gets `403 bot.forbidden` on the same
-routes. Both come before any lookup, so a real robot or device id answers exactly as a made-up one.
+routes. Both come before any lookup, so a real robot or device id answers exactly as a made-up one. The three
+jobs routes are service-only: the same `401 bot.sign_in` without a token, `403 bot.forbidden` for a person or a
+node token, and a service token is judged on `bot.job.dispatch` alone.
 
 | Method & path | Auth (capability) | Answer |
 |---|---|---|
@@ -442,6 +445,7 @@ routes. Both come before any lookup, so a real robot or device id answers exactl
 | `POST /robots/:id/estop` | owner/operator, `bot.robot.control` | `{ robot }` |
 | `POST /robots/:id/estop/clear` | **owner only**, `bot.robot.control` | `{ robot }` |
 | `GET /robots/:id/audit?limit=&before=` | owner, or `bot.robot.read` | `{ audit[], next_before }` (newest first) |
+| `POST /jobs`, `POST /jobs/:id/cancel`, `GET /jobs/:id` | **a service only**, with `bot.job.dispatch` (Run → Bot; a person or a node token is `403 bot.forbidden`) | `201 { job, sent }` / `{ job, sent }` / `{ job, stdout }`; `422 bot.invalid_input` without `project_id`, `409 bot.class_unadvertised` when the device does not advertise the job's class, `404 bot.job_not_found` |
 | `POST /pair` | the one-time code is the credential | `201 { device_id, credential, publish_key, whip_url, robot_id, profile }`; with `BOT_PAIRING_AUTHORITY=network` always `410 bot.pairing_moved` (the `detail` names the Network URL) |
 
 Not in `/api/v1`: `GET /api/health`, `GET /api/ready`, `GET /metrics`, `GET /release.json`, the

@@ -23,6 +23,7 @@
  * | POST   /robots/:id/estop                        | bot.robot.control      | owner or operator                   |
  * | POST   /robots/:id/estop/clear                  | bot.robot.control      | the owner only                      |
  * | GET    /robots/:id/audit                        | bot.robot.read         | owner (paged)                       |
+ * | POST   /jobs, /jobs/:id/cancel, GET /jobs/:id   | bot.job.dispatch       | — (services only)                   |
  * | POST   /pair                                    | — (one-time code)      | the agent (code is the credential)  |
  *
  * With BOT_PAIRING_AUTHORITY=network the pairing codes are Network's and POST /pair answers 410 bot.pairing_moved.
@@ -31,12 +32,15 @@ const express = require('express');
 const { http } = require('openvibe-contracts');
 const { fail, userSubject, isRobotId, json } = require('../util');
 const { getProfile, listProfiles } = require('../profiles');
+const { dispatch, cancel } = require('../jobs/dispatch');
+const { get: getJob } = require('../jobs/store');
 
 const CAP = {
     read: 'bot.robot.read',
     manage: 'bot.robot.manage',
     control: 'bot.robot.control',
     connect: 'bot.device.connect',
+    dispatch: 'bot.job.dispatch',
 };
 
 function v1Router({ domain, apiAuth, limits, hub }) {
@@ -45,6 +49,7 @@ function v1Router({ domain, apiAuth, limits, hub }) {
     const manage = limits('bot.robot.manage', { minute: 30, hour: 300 });
     const control = limits('bot.control', { minute: 120, hour: 1200 });
     const pair = limits('bot.pair', { minute: 20, hour: 200 });
+    const jobs = limits('bot.jobs', { minute: 120, hour: 1200 });
 
     const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
     const me = (req) => (req.principal.kind === 'user' ? req.principal.subject : null);
@@ -70,6 +75,12 @@ function v1Router({ domain, apiAuth, limits, hub }) {
     const requireManage = (req, extra) => { if (req.principal.kind === 'service' && !apiAuth.granted(req.principal, CAP.manage)) fail(403, 'capability.denied', `${CAP.manage} not granted`); return actedFor(req, extra); };
     const requireRead = (req) => { fence(req); if (req.principal.kind === 'service' && !apiAuth.granted(req.principal, CAP.read)) fail(403, 'capability.denied', `${CAP.read} not granted`); };
     const requireControlCap = (req) => { if (req.principal.kind === 'service' && !apiAuth.granted(req.principal, CAP.control)) fail(403, 'capability.denied', `${CAP.control} not granted`); };
+    /** Run → Bot job dispatch is a service-to-service call: only a service token holding bot.job.dispatch. */
+    const requireJobDispatch = (req) => {
+        if (req.principal.kind === 'anonymous') fail(401, 'bot.sign_in', 'sign in to do that');
+        if (req.principal.kind !== 'service') fail(403, 'bot.forbidden', 'job dispatch is a service-to-service call');
+        if (!apiAuth.granted(req.principal, CAP.dispatch)) fail(403, 'capability.denied', `${CAP.dispatch} not granted`);
+    };
 
     // Both fence before the lookup: without a token (or with a node token) a real robot id and a made-up one
     // get the same answer.
@@ -233,6 +244,29 @@ function v1Router({ domain, apiAuth, limits, hub }) {
         res.json({ audit: rows.map(auditPresent), next_before: rows.length ? rows[rows.length - 1].id : null });
     }));
 
+    // ── Jobs (Run → Bot: hand a platform.job@1 to a paired Node, server/jobs/dispatch.js) ─────────
+    // Internal and service-to-service only: OpenVibe.Run's Network service token, never a person's.
+    r.post('/jobs', jobs, wrap(async (req, res) => {
+        requireJobDispatch(req);
+        const project = req.body?.project_id;
+        if (project == null || project === '') fail(422, 'bot.invalid_input', 'project_id is required (Run is the payer)');
+        const { job, sent } = await dispatch(domain.db, req.body?.node_id, req.body?.job, {
+            link: hub, project, subject: req.body?.subject ?? null, provider: req.body?.provider ?? null,
+        });
+        res.status(201).json({ job: presentJob(job), sent });
+    }));
+    r.post('/jobs/:id/cancel', jobs, wrap(async (req, res) => {
+        requireJobDispatch(req);
+        const { job, sent } = await cancel(domain.db, req.params.id, { link: hub });
+        res.json({ job: presentJob(job), sent });
+    }));
+    r.get('/jobs/:id', wrap(async (req, res) => {
+        requireJobDispatch(req);
+        const row = await getJob(domain.db, req.params.id);
+        if (!row) fail(404, 'bot.job_not_found', 'no such job');
+        res.json({ job: presentJob(row), stdout: hub.jobStdout(row.id) });
+    }));
+
     // ── Pairing without a prior socket (the agent may POST instead of using the WS) ───────────────
     r.post('/pair', pair, wrap(async (req, res) => {
         const result = await domain.pairing.redeem({
@@ -255,6 +289,19 @@ function v1Router({ domain, apiAuth, limits, hub }) {
     }));
 
     return r;
+}
+
+/** The job as the dispatch API answers it: the run_jobs row (server/jobs/store.js) plus its original platform.job@1. */
+function presentJob(row) {
+    return {
+        id: row.id, node_id: row.node_id, class: row.class, state: row.state,
+        project_id: row.project_id, subject: row.subject, provider: row.provider,
+        cancel_requested: row.cancel_requested, fault_code: row.fault_code,
+        sent_at: row.sent_at, started_ms: row.started_ms, finished_at: row.finished_at,
+        exit_reason: row.exit_reason, exit_code: row.exit_code, wall_ms: row.wall_ms,
+        usage_read: row.usage_read, result: json(row.result, null), job: json(row.job, null),
+        created_at: row.created_at, updated_at: row.updated_at,
+    };
 }
 
 function auditPresent(a) {

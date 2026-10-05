@@ -2,8 +2,9 @@
 
 /**
  * The dispatcher (plan T14 step L1): Bot hands platform.job@1 jobs to a paired Node over the device link and
- * meters them (platform.job-frame@1, docs/protocol.md "Jobs"). There is no HTTP route: the Run service, which
- * owns run.job.*, calls this module later.
+ * meters them (platform.job-frame@1, docs/protocol.md "Jobs"). The Run service, which owns run.job.*, calls it
+ * over the internal HTTP API (bot.job.dispatch): POST /api/v1/jobs, POST /api/v1/jobs/:id/cancel and
+ * GET /api/v1/jobs/:id (server/api/v1.js).
  *
  *   dispatch(db, nodeId, job, { link, project, subject, provider })   validate, store, send (`job`)
  *   cancel(db, jobId, { link })                                        `job_cancel`
