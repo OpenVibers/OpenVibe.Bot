@@ -434,7 +434,10 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         const key = `${conn.subject || `${conn.principal.kind}:${conn.principal.id || ''}`}|${id}`;
         const cached = results.get(key);
         if (cached) return sendFrame(conn, 'command_result', { id, result: cached.result, reason: cached.reason, cached: true });
-        if (inflight.has(key)) return sendFrame(conn, 'command_result', { id, result: 'pending', cached: true });
+        // The same id is still awaiting its ack/nack: never a second device command, and never a silent wait.
+        // A refusal code (not `result: pending`) so the HTTP route answers 409 bot.command_pending like the
+        // other refusals; the first request still gets its own result.
+        if (inflight.has(key)) return sendFrame(conn, 'command_result', { id, result: 'refused', code: 'bot.command_pending', reason: 'the same command id is still in flight' });
         // Reserved before the first await: two frames with one id are handled concurrently, and only the first may
         // reach the robot. Every path below either hands the reservation to a pending command or releases it.
         inflight.set(key, null);
@@ -478,6 +481,39 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     }
 
     function cacheResult(key, r) { results.set(key, { ...r, at: now() }); if (results.size > 4096) results.delete(results.keys().next().value); }
+
+    /**
+     * One operator command off the REST route POST /robots/:id/commands (api/v1.js): the same gate, audit
+     * and per-operator idempotency as the /control socket, but the command_result is returned instead of
+     * written to a socket. `principal` is the caller ({ kind, sub, cap } for a service), `subject` who it
+     * acts for. Resolves with { id, result, code?, reason?, latency_ms?, cached? }.
+     */
+    function operatorCommand(robotId, principal, subject, msg) {
+        return new Promise((resolve, reject) => {
+            let settled = false;
+            const finish = (result) => { if (!settled) { settled = true; resolve(result); } };
+            // Every path through onOperatorCommand answers with a command_result: a cache hit or a gate
+            // refusal at once, and a device command on its ack/nack or on expireCommand (which is always
+            // scheduled). So the HTTP request is answered without a timeout of its own.
+            const conn = {
+                ws: {
+                    readyState: OPEN,
+                    send(raw) {
+                        let frame; try { frame = JSON.parse(String(raw)); } catch { return; }
+                        if (frame.type !== 'command_result') return;
+                        const r = { id: frame.id != null ? String(frame.id) : null, result: frame.result };
+                        if (frame.code != null) r.code = frame.code;
+                        if (frame.reason != null) r.reason = frame.reason;
+                        if (frame.latency_ms != null) r.latency_ms = frame.latency_ms;
+                        if (frame.cached) r.cached = true;
+                        finish(r);
+                    },
+                },
+                seq: 0, principal, subject, robotId, role: null,
+            };
+            onOperatorCommand(conn, msg).catch((e) => { if (!settled) { settled = true; reject(e); } });
+        });
+    }
 
     async function onOperatorEstop(conn, latched) {
         if (!conn.robotId) return sendError(conn, 'bot.not_joined', 'join a robot first');
@@ -669,14 +705,21 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         bindDomain(d) { domain = d; },
         bindJobs(j) { jobs = j; },
         handleUpgrade, attachSim, detachSim,
-        isOnline, deviceState, sendToDevice, sendToRobotDevices, broadcast, closeDevice, robotState, refreshConfig, pushEstop, closeWatchers,
+        isOnline, deviceState, sendToDevice, sendToRobotDevices, broadcast, closeDevice, robotState, refreshConfig, pushEstop, closeWatchers, operatorCommand,
         // Real devices only: a simulator is not a machine anyone runs.
         onlineCount() { let n = 0; for (const c of deviceConns.values()) if (c.online && !c.sim) n++; return n; },
         devices() { return [...deviceConns.values()].filter((c) => !c.sim).map((c) => ({ device_id: c.device.id, online: c.online })); },
         async close() {
             closed = true;
             for (const t of timers) clearInterval(t);
-            for (const p of pendingCmds.values()) if (p.timer) clearTimeout(p.timer);
+            // A command the device never acked settles as `expired` before the hub forgets it, so every HTTP
+            // request waiting on operatorCommand gets exactly one answer instead of hanging until the process dies.
+            for (const p of pendingCmds.values()) {
+                if (p.timer) clearTimeout(p.timer);
+                inflight.delete(p.key);
+                cacheResult(p.key, { result: 'expired', reason: 'the server closed before the device acknowledged' });
+                sendFrame(p.conn, 'command_result', { id: p.opId, result: 'expired', reason: 'the server closed before the device acknowledged' });
+            }
             pendingCmds.clear();
             inflight.clear();
             for (const conn of [...deviceConns.values()]) { try { conn.ws.close(1001, 'server closing'); } catch { /* gone */ } }
