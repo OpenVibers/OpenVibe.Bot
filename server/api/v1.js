@@ -22,6 +22,7 @@
  * | POST   /devices/bind                            | — (a node token)       | a machine paired for Bot on Network |
  * | POST   /robots/:id/estop                        | bot.robot.control      | owner or operator                   |
  * | POST   /robots/:id/estop/clear                  | bot.robot.control      | the owner only                      |
+ * | POST   /robots/:id/commands                     | bot.robot.control      | owner or operator                   |
  * | GET    /robots/:id/audit                        | bot.robot.read         | owner (paged)                       |
  * | POST   /jobs, /jobs/:id/cancel, GET /jobs/:id   | bot.job.dispatch       | — (services only)                   |
  * | POST   /pair                                    | — (one-time code)      | the agent (code is the credential)  |
@@ -230,6 +231,20 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService }) {
         res.json({ robot: domain.present.robot(await domain.robots.get(req.params.id)) });
     }));
 
+    // ── Commands (the /control gate over HTTP: a service forwards a bound channel's chat commands) ─
+    // The same onOperatorCommand path as the /control socket — the gate, the audit and the per-subject
+    // idempotency key are shared. `id` is that idempotency key; a repeated id is answered from the cache.
+    r.post('/robots/:id/commands', control, wrap(async (req, res) => {
+        requireControlCap(req);
+        const subject = actedFor(req);
+        const principal = req.principal.kind === 'service' ? { ...req.principal, subject } : req.principal;
+        const result = await hub.operatorCommand(req.params.id, principal, subject, {
+            id: req.body?.id, kind: req.body?.kind, value: req.body?.value, ms: req.body?.ms,
+        });
+        if (result.result === 'refused') fail(commandRefusalStatus(result.code), result.code, result.reason || null);
+        res.json({ robot_id: req.params.id, ...result });
+    }));
+
     // ── Audit ─────────────────────────────────────────────────────────────────────────────────────
     r.get('/robots/:id/audit', wrap(async (req, res) => {
         await ownerOrRead(req, req.params.id);
@@ -285,6 +300,15 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService }) {
     }));
 
     return r;
+}
+
+/** The HTTP status a refused command's gate code answers with (the /control refusal codes, docs/protocol.md §2). */
+function commandRefusalStatus(code) {
+    if (code === 'bot.robot_not_found') return 404;
+    if (code === 'bot.not_an_operator' || code === 'bot.read_only' || code === 'bot.forbidden' || code === 'bot.not_your_turn') return 403;
+    if (code === 'bot.cooldown' || code === 'bot.turn_budget') return 429;
+    if (code === 'bot.device_offline' || code === 'bot.estop_latched') return 409;
+    return 422;   // unknown_command, command_not_allowed, unknown_actuator, invalid_input, text_too_long
 }
 
 function auditPresent(a) {

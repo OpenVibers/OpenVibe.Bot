@@ -275,6 +275,56 @@ const plugins = require('./helpers/plugins');
         assert.strictEqual(await anon.waitForClose(), 4002, 'an anonymous socket is refused');
     });
 
+    await check('a service token forwards a command over HTTP and the device\'s ack comes back', async () => {
+        const { robot, pairing } = await t.robot(alex);
+        await invite(robot.id, bob.subject, 'operator');
+        const dev = await deviceFor(robot.id, pairing.code);
+        const svc = t.network.signService({ sub: 'svc:live', cap: ['bot.robot.control'], aud: ['openvibe.bot'] });
+        const call = (id) => t.call('POST', `/api/v1/robots/${robot.id}/commands`, {
+            token: svc, headers: { 'X-OV-Subject': bob.subject }, body: { id, kind: 'drive', value: { throttle: 0.2 } },
+        });
+        const pending = call('chat-1');   // the route waits for the command_result, so ack before awaiting it
+        const c = await dev.waitFor((m) => m.type === 'command' && m.ref === 'chat-1');
+        assert.strictEqual(c.kind, 'drive');
+        dev.send({ type: 'ack', id: c.id });
+        const r = await pending;
+        assert.strictEqual(r.status, 200, r.text);
+        assert.strictEqual(r.json.result, 'ack');
+        assert.strictEqual(r.json.id, 'chat-1');
+        const audit = await t.domain.audit.list(robot.id, { limit: 5 });
+        assert.ok(audit.some((x) => x.kind === 'drive' && x.result === 'ack' && x.operator_kind === 'service'), 'the HTTP command is audited like a socket one');
+        // The id is the same per-subject idempotency key as the socket: a repeated id is answered from the cache.
+        const again = await call('chat-1');
+        assert.strictEqual(again.json.cached, true);
+        assert.strictEqual(again.json.result, 'ack');
+        dev.close();
+    });
+
+    await check('the HTTP command route refuses a service acting for a viewer, and a service without bot.robot.control', async () => {
+        const { robot, pairing } = await t.robot(alex);
+        await deviceFor(robot.id, pairing.code);
+        const svc = t.network.signService({ sub: 'svc:live', cap: ['bot.robot.control'], aud: ['openvibe.bot'] });
+        const command = (id, subject, token = svc) => t.call('POST', `/api/v1/robots/${robot.id}/commands`, {
+            token, headers: { 'X-OV-Subject': subject }, body: { id, kind: 'drive', value: { throttle: 0.2 } },
+        });
+        // A chat viewer with no role on the robot is refused exactly as a /control join would refuse them.
+        const stranger = t.network.newUser('chatviewer');
+        const r = await command('s1', stranger.subject);
+        assert.strictEqual(r.status, 403, r.text);
+        assert.strictEqual(r.json.code, 'bot.not_an_operator');
+        // An invited viewer has a role, but the gate keeps them read-only (the socket's answer, over HTTP).
+        const invited = t.network.newUser('memberviewer');
+        await invite(robot.id, invited.subject, 'viewer');
+        const ro = await command('s2', invited.subject);
+        assert.strictEqual(ro.status, 403, ro.text);
+        assert.strictEqual(ro.json.code, 'bot.read_only');
+        // Without bot.robot.control a service cannot use the route at all.
+        const weak = t.network.signService({ sub: 'svc:live', cap: ['bot.robot.read'], aud: ['openvibe.bot'] });
+        const denied = await command('s3', bob.subject, weak);
+        assert.strictEqual(denied.status, 403);
+        assert.strictEqual(denied.json.code, 'capability.denied');
+    });
+
     await t.close();
     done();
 })();
