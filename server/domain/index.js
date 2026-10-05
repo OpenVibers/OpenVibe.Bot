@@ -399,6 +399,22 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
             [hash, iso(now())]);
     }
     async function getDevice(id) { return db.maybe('SELECT * FROM devices WHERE id = $1', [id]); }
+    /**
+     * The device row for a server-side connector (server/onvif): a real kind 'server' row, so the owner sees
+     * the camera as a device of the robot, keyed by a deterministic id so a restart reuses it instead of
+     * adding one per boot. It holds no credential: the connector attaches in-process, never over /device, so
+     * the stored hash is of a random token nothing is ever given (and a revoked row is left alone).
+     */
+    async function ensureServerDevice({ id, robotId, name, drivers = [], capabilities = {} }) {
+        const inserted = await db.maybe(
+            `INSERT INTO devices (id, robot_ids, name, kind, agent_version, drivers, capabilities, credential_hash, created_at, updated_at)
+             VALUES ($1, $2::jsonb, $3, 'server', NULL, $4::jsonb, $5::jsonb, $6, $7, $7)
+             ON CONFLICT (id) DO UPDATE SET robot_ids = EXCLUDED.robot_ids, name = EXCLUDED.name,
+                 drivers = EXCLUDED.drivers, capabilities = EXCLUDED.capabilities, updated_at = EXCLUDED.updated_at
+             WHERE devices.revoked_at IS NULL RETURNING *`,
+            [id, JSON.stringify([robotId]), name, JSON.stringify(drivers), JSON.stringify(capabilities), hashSecret(token(32)), iso(now())]);
+        return inserted || db.maybe('SELECT * FROM devices WHERE id = $1 AND revoked_at IS NULL', [id]);
+    }
     async function listDevicesForRobot(robotId) {
         return db.many('SELECT * FROM devices WHERE robot_ids @> $1::jsonb ORDER BY created_at DESC', [JSON.stringify([robotId])]);
     }
@@ -846,7 +862,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         robots: { create: createRobot, list: listRobots, get: getRobot, update: updateRobot, setEmbedPublic, remove: removeRobot },
         members: { roleOf, add: addOperator, remove: removeOperator, list: listOperators },
         pairing: { create: createPairingCode, redeem, prune: prunePairingCodes, installerCommand, driverForProfile, whipUrl },
-        devices: { byCredential, bindNode, issuePublishKey, revokeVideo, updateDeclared, revokeNode, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, touchSeen, setOnline },
+        devices: { byCredential, bindNode, issuePublishKey, revokeVideo, updateDeclared, revokeNode, ensureServerDevice, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, touchSeen, setOnline },
         streaming: { get: streaming, set: setStreaming },
         estop: { set: setEstop, clear: clearEstop },
         queue: { join: joinQueue, state: queueState, currentTurn, consume: consumeTurn, sweep: sweepQueues },
