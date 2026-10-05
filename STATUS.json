@@ -33,6 +33,7 @@
     "pairing with one-time codes, minted by Bot or delegated to OpenVibe.Network (BOT_PAIRING_AUTHORITY=network); a node machine binds on first use and reauths every 300 s",
     "device credentials hashed at rest and rotatable; revoke closes the socket at once and revokes the Network principal for a node machine",
     "profiles instead of per-robot rows: adeept.adr036 (+ mecanum variant), cozmo, camera.onvif, sim.rover, seeded from server/profiles/*.json",
+    "curated kit catalogue (server/kits/*.json; GET /api/v1/kits, /kits/:id): each kit's parts list and build guide, validated and bound to a shipped profile — the Adeept ADR036 first; metadata only (pricing, shipping and returns are O29)",
     "a latched e-stop only the owner clears, with halt always allowed, and a device-side deadman deadline on the motion kinds",
     "command audit kept 30 days, and the bot.robot.online/offline, bot.estop.set/cleared and bot.command.refused outbox events",
     "public robot-profile catalogue (GET /profiles, /profiles/:id); robots are private to their owner, with public control only as a timed turn queue",

@@ -9,6 +9,7 @@ OpenVibe.Bot pairs a robot's machines, keeps their state and gates every operato
 ## Owns
 
 - Robots, their profiles and each robot's limits, `allow` lists, roles and operators.
+- The curated kit catalogue (`server/kits/*.json`, `GET /api/v1/kits`, `/kits/:id`): each kit's parts list and build guide, bound to a shipped profile (the Adeept ADR036 first). Metadata only — pricing, shipping and returns are the owner's (O29).
 - Devices (the machines that serve a robot) and the credentials that identify them: hashed at rest, rotated and revoked, never readable back.
 - Pairing: one-time codes with a short expiry, minted by Bot or, with `BOT_PAIRING_AUTHORITY=network`, by OpenVibe.Network.
 - The `/device` and `/control` WebSockets, the command gate and the latched e-stop.
@@ -52,7 +53,7 @@ A person acts on their own robots with a Network user token; a service acts with
 
 ## Tests
 
-`npm test` runs `test/run.js`, the whole suite. `npm run test:pg` (`BOT_TEST_STORE=pg`) runs the same suite against PostgreSQL; the default store is in-process PGlite. The tests cover the device and operator WebSocket gates, the REST routes, the pairing paths, the owner fence, the e-stop and the outbox.
+`npm test` runs `test/run.js`, the whole suite. `npm run test:pg` (`BOT_TEST_STORE=pg`) runs the same suite against PostgreSQL; the default store is in-process PGlite. The tests cover the device and operator WebSocket gates, the REST routes, the pairing paths, the profiles and the kit catalogue, the owner fence, the e-stop and the outbox.
 
 ## Security
 

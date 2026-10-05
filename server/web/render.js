@@ -215,13 +215,13 @@ function renderWidget(w, { profile = {}, allowed_commands = [] } = {}) {
 const toggle = (name, on, title, note, disabled = false, was = false) => `${was ? `<input type="hidden" name="${esc(name)}_was" value="${on ? 'on' : 'off'}">` : ''}<input type="hidden" name="${esc(name)}" value="off">
 <label class="toggle"><input type="checkbox" name="${esc(name)}" value="on"${on ? ' checked' : ''}${disabled ? ' disabled' : ''}><span><b>${esc(title)}</b><small>${esc(note)}</small></span></label>`;
 
-/** The owner's embed switch: plain markup, works without JavaScript. */
-function embedForm(robot) {
-    return `<section class="setting-card" aria-labelledby="embed-h"><h2 id="embed-h">Embedding</h2>
-<form class="embed-form" method="post" action="/robots/${esc(robot.id)}/embed" data-embed-form>
+/** The owner's embed switch: plain markup, works without JavaScript. On the panel it is a card; in the robots list, a compact row. */
+function embedForm(robot, { card = true } = {}) {
+    const form = `<form class="embed-form${card ? '' : ' embed-inline'}" method="post" action="/robots/${esc(robot.id)}/embed" data-embed-form>
 ${toggle('embed_public', robot.embed_public, 'Let anyone watch where it is embedded', "A page that embeds this robot shows its video and readouts to everyone; never the controls.")}
 <button type="submit">Save</button>
-</form></section>`;
+</form>`;
+    return card ? `<section class="setting-card" aria-labelledby="embed-h"><h2 id="embed-h">Embedding</h2>\n${form}</section>` : form;
 }
 
 // Why the streaming switches cannot be used right now, in the owner's words (domain.streaming reasons, plus
@@ -290,15 +290,37 @@ function renderEmbedRefused({ robotId }) {
     return page('Not shared', body, { bodyClass: 'embed-page' });
 }
 
-function renderRobotsPage({ robots = [], profiles = [], error = null, values = {} }) {
+/**
+ * "Get a robot": the curated kits (server/kits), each with what it is, the parts to buy, its build guide and a
+ * one-click start that opens the add form with the kit's tested profile chosen. Metadata only: no prices or
+ * shop links until the owner settles supply (plan O29).
+ */
+function kitsSection(kits = [], profiles = []) {
+    const shipped = new Set(profiles.map((p) => p.id));
+    const usable = kits.filter((k) => shipped.has(k.profile_id));
+    if (!usable.length) return '';
+    const part = (p) => `<li><span class="part-qty">${esc(p.qty)}×</span><span>${esc(p.name)}${p.note ? `<small>${esc(p.note)}</small>` : ''}</span></li>`;
+    const card = (k) => {
+        const need = k.parts.filter((p) => p.required !== false).length;
+        return `<li class="kit card"><div class="kit-head">${icon('robot', 'icon kit-icon')}<div><h3>${esc(k.name)}</h3>${k.vendor ? `<span class="pill">${esc(k.vendor)}</span>` : ''}</div></div>
+<p class="kit-desc">${esc(k.description || '')}</p>
+<details class="kit-parts"><summary>What you need <span class="muted">(${esc(need)} ${need === 1 ? 'part' : 'parts'})</span></summary><ul>${k.parts.map(part).join('')}</ul></details>
+<p class="kit-actions"><a class="button primary" href="/robots?profile=${encodeURIComponent(k.profile_id)}#add-robot">Add this robot</a> ${outLink(k.build_guide_url, 'Build guide', 'button quiet')}</p></li>`;
+    };
+    return `<section class="kits" aria-labelledby="kits-h"><h2 id="kits-h">Get a robot</h2>
+<p class="muted">Curated kits with a ready-made profile: build one, pair it, and its panel already knows every motor and sensor.</p>
+<ul class="kit-list">${usable.map(card).join('')}</ul></section>`;
+}
+
+function renderRobotsPage({ robots = [], profiles = [], kits = [], error = null, values = {} }) {
     const names = new Map(profiles.map((p) => [p.id, p.name]));
     const list = robots.length
         ? `<ul class="robots">${robots.map((r) => `<li class="robot-card"><a class="robot-name" href="/panel/${esc(r.id)}">${icon('robot')}<span>${esc(r.name)}</span></a>`
             + `<span class="robot-meta"><span class="pill">${esc(names.get(r.profile_id) || r.profile_id)}</span> <span class="pill">${esc(POLICY_LABEL[r.access_policy] || r.access_policy)}</span></span>`
-            + `<span class="robot-actions"><a class="button" href="/panel/${esc(r.id)}">Open panel</a> <a class="button quiet pair" href="/pair/${esc(r.id)}">${icon('plug')}<span>Pair a device</span></a></span>${embedForm(r)}</li>`).join('')}</ul>`
+            + `<span class="robot-actions"><a class="button" href="/panel/${esc(r.id)}">Open panel</a> <a class="button quiet pair" href="/pair/${esc(r.id)}">${icon('plug')}<span>Pair a device</span></a></span>${embedForm(r, { card: false })}</li>`).join('')}</ul>`
         : `<div class="empty">${icon('robot', 'icon empty-icon')}<p class="empty-title">No robots yet.</p><p>Add one below. A simulated rover needs no hardware and drives straight away.</p></div>`;
     const option = (v, label, selected) => `<option value="${esc(v)}"${selected ? ' selected' : ''}>${esc(label)}</option>`;
-    const form = `<form class="add-robot card" method="post" action="/robots">
+    const form = `<form class="add-robot card" id="add-robot" method="post" action="/robots">
 <h2>Add a robot</h2>
 ${error ? `<p class="error" role="alert">${esc(error)}</p>` : ''}
 <label class="field"><span class="field-label">Name</span><input type="text" name="name" maxlength="80" required autocomplete="off" placeholder="e.g. Kitchen rover" value="${esc(values.name || '')}"></label>
@@ -306,7 +328,7 @@ ${error ? `<p class="error" role="alert">${esc(error)}</p>` : ''}
 <label class="field"><span class="field-label">Who may drive</span><select name="access_policy">${POLICIES.map(([v, label]) => option(v, label, v === (values.access_policy || 'private'))).join('')}</select></label>
 <button type="submit" class="primary">Add robot</button>
 </form>`;
-    return page('Your robots', `${topbar()}\n<main class="page">\n<h1>Your robots</h1>\n${list}\n${form}\n</main>`);
+    return page('Your robots', `${topbar()}\n<main class="page">\n<h1>Your robots</h1>\n${list}\n${form}\n${kitsSection(kits, profiles)}\n</main>`);
 }
 
 function renderPairingPage({ robot, pairing, profile = null }) {
