@@ -36,7 +36,7 @@ const VERSION = require('../../package.json').version;
 const PUBLIC = path.join(__dirname, '..', '..', 'public');
 const HOLD_RESEND_MS = 150;
 
-function createWebRoutes(config, { domain = null, sim = null, limits = null, identity = null, hub = null, log = console } = {}) {
+function createWebRoutes(config, { domain = null, sim = null, onvif = null, limits = null, identity = null, hub = null, log = console } = {}) {
     const r = express.Router();
     r.get('/', (req, res) => res.type('text/plain').send(`OpenVibe.Bot ${VERSION} — ok (devices, pairing and control; API under /api/v1)\n`));
     r.get('/robots.txt', (req, res) => res.type('text/plain').send('User-agent: *\nDisallow: /\n'));
@@ -56,7 +56,13 @@ function createWebRoutes(config, { domain = null, sim = null, limits = null, ide
         const row = await getProfile(domain.db, robot.profile_id, robot.profile_version);
         return row ? row.profile : null;
     };
-    const startSim = (robot, profile) => (sim ? sim.attach(robot, profile).catch((e) => { log.warn(`[Bot] simulator for ${robot.id}: ${e.message}`); return false; }) : Promise.resolve(false));
+    // A sim or configured-ONVIF robot needs no machine to install: attach its in-process device if the profile
+    // is one (and, for ONVIF, BOT_ONVIF_CAMERAS names it). Anything else falls through to the pairing page.
+    const attachInProcess = async (robot, profile) => {
+        if (sim && await sim.attach(robot, profile).catch((e) => { log.warn(`[Bot] simulator for ${robot.id}: ${e.message}`); return false; })) return true;
+        if (onvif && await onvif.attach(robot, profile).catch((e) => { log.warn(`[Bot] onvif for ${robot.id}: ${e.message}`); return false; })) return true;
+        return false;
+    };
     // Counted by who is signed in (req.principal, as /api/v1 counts), or by address before the sign-in redirect.
     const manage = limits
         ? [(req, res, next) => { if (req.viewer && !req.principal) req.principal = req.viewer; next(); }, limits('bot.robot.manage', { minute: 30, hour: 300 })]
@@ -108,7 +114,7 @@ function createWebRoutes(config, { domain = null, sim = null, limits = null, ide
         }
         // A simulated robot needs no machine: straight to its panel. Otherwise the code create minted is shown here.
         const profile = await profileOf(robot);
-        if (await startSim(robot, profile)) return res.redirect(303, `/panel/${robot.id}`);
+        if (await attachInProcess(robot, profile)) return res.redirect(303, `/panel/${robot.id}`);
         return res.status(201).type('html').send(renderPairingPage({ robot: domain.present.robot(robot), pairing, profile }));
     }));
 
@@ -220,7 +226,7 @@ function createWebRoutes(config, { domain = null, sim = null, limits = null, ide
         return role || (robot.access_policy === 'queue' ? 'queue' : null);
     }
     async function sendPanel(res, robot, profile, role, mode = 'page', signedIn = true) {
-        await startSim(robot, profile);
+        await attachInProcess(robot, profile);
         const { maxCommandMs } = domain.control.effectiveLimits(robot, profile);
         // Only the owner's own page shows the streaming switches; an OpenRe that does not answer leaves them
         // greyed out with a reason instead of failing the panel.

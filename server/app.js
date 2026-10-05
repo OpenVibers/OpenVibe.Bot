@@ -29,6 +29,7 @@ const { createUsageRelay } = require('./jobs/metering');
 const { createDomain } = require('./domain');
 const { createRealtime } = require('./realtime');
 const { createSimulator } = require('./sim');
+const { createOnvif } = require('./onvif');
 const { createApiAuth } = require('./api/auth');
 const { v1Router } = require('./api/v1');
 const { createJobs } = require('./jobs');
@@ -62,6 +63,9 @@ function createApp(opts = {}) {
     const jobs = createJobs({ db: () => domain.db, hub, usage, log, now });
     hub.bindJobs(jobs);
     const sim = opts.sim || createSimulator({ config, domain, hub, now, log });
+    // Server-side ONVIF cameras (server/onvif): the same in-process attach as the simulator, but with a real
+    // kind 'server' device row and an outbound ONVIF request per ptz command.
+    const onvif = opts.onvif || createOnvif({ config, domain, hub, now, log, fetchImpl, env: opts.env });
     const apiAuth = createApiAuth({ config, keys, userAuth });
     const release = require('openvibe-shared/release').createRelease({ service: 'bot', root: path.join(__dirname, '..') });
 
@@ -94,7 +98,7 @@ function createApp(opts = {}) {
     app.use('/api/v1', express.json({ limit: '64kb' }), (req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); }, apiAuth.middleware, v1Router({ domain, apiAuth, limits, hub, jobs, config }));
     app.use('/auth', createSessionRoutes(config, userAuth, { fetchImpl }));
     app.use(viewerMiddleware(userAuth));
-    app.use(createWebRoutes(config, { domain, sim, limits, identity, hub, log }));
+    app.use(createWebRoutes(config, { domain, sim, onvif, limits, identity, hub, log }));
 
     app.use((req, res) => {
         if (req.path.startsWith('/api/') || req.path.startsWith('/internal/')) return http.sendProblem(res, 404, 'not_found', { ctx: req.ov });
@@ -113,7 +117,7 @@ function createApp(opts = {}) {
         return res.status(500).type('text/plain').send('Something went wrong\n');
     });
 
-    Object.assign(app.locals, { config, db, valkey, domain, keys, outbox, usage, hub, jobs, sim, userAuth, metrics });
+    Object.assign(app.locals, { config, db, valkey, domain, keys, outbox, usage, hub, jobs, sim, onvif, userAuth, metrics });
     return app;
 }
 

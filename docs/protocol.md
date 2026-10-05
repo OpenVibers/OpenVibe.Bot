@@ -156,6 +156,12 @@ against these):
 | `camera.onvif` | server driver `onvif` | `ptz {pan, tilt, zoom}` −1..1 |
 | `sim.rover` | server driver `sim` | `drive {throttle, steer}` |
 
+The two server drivers are not machines that connect: Bot attaches them in-process (`server/sim`,
+`server/onvif`). A `sim` device needs nothing; an `onvif` camera is configured with `BOT_ONVIF_CAMERAS`
+(its URL plus `username_ref`/`password_ref` secret references — never the profile) and Bot translates each
+`ptz` command into an ONVIF `ContinuousMove` (`Stop` at the deadline, on `halt` or on the e-stop), carrying
+the camera's `GetStatus` position in telemetry under `camera`.
+
 **A device's `estop_state` is a report, never a clear.** `latched: true` latches each robot the device is
 attached to (if it is not already latched). `latched: false` is recorded as the device's reported state
 only (`robot_state.state.device_estop`); it never clears Bot's latch — clearing is the owner's alone
