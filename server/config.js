@@ -213,9 +213,14 @@ function loadConfig(env = process.env) {
             timeoutMs: Math.max(100, int(env.BOT_ONVIF_TIMEOUT_MS, 5000)),
         },
         // OpenRe.Stream (T15 R5): the publish key is the ingest key of the robot's OpenRe stream, the only kind
-        // OpenRe's WHIP worker admits. token is a Network service token holding openre.stream.read (the lookup
-        // by external ref), openre.stream.write and openre.key.rotate; it is never logged or returned. Either unset: devices pair without video (no
-        // publish_key, `video: "not_configured"`) and Bot mints no key of its own.
+        // OpenRe's WHIP worker admits. By default Bot mints its own Network service token (audience
+        // openvibe.openre, client `bot`) holding openre.stream.read (the lookup by external ref),
+        // openre.stream.write, openre.key.rotate and openre.session.read/openre.output.read/openre.output.write
+        // (session status and outputs, for later panel video and restreaming); BOT_OPENRE_TOKEN, an
+        // operator-minted token with the same grant, overrides it. The token is never logged or returned. With
+        // BOT_OPENRE_URL unset, or neither an operator token nor the Network client credentials
+        // (OV_OAUTH_CLIENT_SECRET, OV_NETWORK_INTERNAL_URL): devices pair without video (no publish_key,
+        // `video: "not_configured"`) and Bot mints no key of its own.
         openre: {
             url: trim(env.BOT_OPENRE_URL || ''),
             token: String(env.BOT_OPENRE_TOKEN || '').trim(),

@@ -116,8 +116,11 @@ without video.
 
 `publish_key` is an ingest key OpenRe.Stream issued, the only kind its WHIP ingest admits: each robot has one
 OpenRe stream (external ref `bot:robot:<robot id>`, protocol `webrtc`, no recording), created at its first
-pairing with `BOT_OPENRE_URL`/`BOT_OPENRE_TOKEN` set and found again by that ref (the token needs
-`openre.stream.read`, `openre.stream.write` and `openre.key.rotate`; `openre.stream.*` covers the first two).
+pairing with `BOT_OPENRE_URL` set and found again by that ref. Bot authenticates with its own Network service
+token (audience `openvibe.openre`), minted from its OAuth client, holding `openre.stream.read`,
+`openre.stream.write`, `openre.key.rotate` and `openre.session.read`/`openre.output.read`/`openre.output.write`
+(the last three for later panel video and restreaming); `BOT_OPENRE_TOKEN`, an operator-minted service token
+with that grant (`openre.stream.*` covers the two read/write ones), overrides the minted one.
 A pairing or `POST /devices/bind` rotates the stream's key with no grace (the robot's previous device stops publishing), a
 credential rotation with the credential's grace, a revocation with no grace and the live session ended;
 removing the robot does the same and archives the stream when nothing is live. Bot stores the stream id and
@@ -126,8 +129,8 @@ reads the stream (`openre.stream.read`) and `POST` PATCHes `recording_mode`/`mir
 (`openre.stream.write`); Bot keeps neither, the OpenRe stream is the only copy.
 OpenRe refusing is `502 bot.openre_refused` (its problem code in `detail`),
 not answering `503 bot.openre_unavailable`; a pairing that fails so leaves the code unused and no device.
-With `BOT_OPENRE_URL` or `BOT_OPENRE_TOKEN` unset the answers carry `"video": "not_configured"` and neither
-`publish_key` nor `whip_url`.
+With `BOT_OPENRE_URL` unset, or neither `BOT_OPENRE_TOKEN` nor the Network client credentials available, the
+answers carry `"video": "not_configured"` and neither `publish_key` nor `whip_url`.
 
 ### 1.1 Command values (the profile's `commands`)
 

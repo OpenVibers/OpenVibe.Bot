@@ -4,10 +4,17 @@
 // returns; a re-pair and a credential rotation rotate that stream's key, a revocation rotates it with no grace
 // and ends the session, a robot's removal also archives the stream when nothing is live. OpenRe refusing or
 // not answering is a clean error with nothing half-written; Bot's token for OpenRe is never logged or
-// answered; with BOT_OPENRE_* unset devices pair without video and Bot mints no key of its own.
+// answered. Without a static BOT_OPENRE_TOKEN Bot mints its own from its Network client (audience
+// openvibe.openre), and a 401 makes it mint once more and retry; with neither credential devices pair without
+// video and Bot mints no key of its own.
 const assert = require('assert');
+const { serviceAuth } = require('openvibe-contracts');
 const { boot, check, done } = require('./helpers/app');
 const { createOpenRe } = require('../server/openre/client');
+
+// Network's grant to the `bot` client on audience openvibe.openre (OpenVibe.Network DEFAULT_GRANTS).
+const MINTED_AUDIENCE = 'openvibe.openre';
+const MINTED_SCOPE = 'openre.stream.read openre.stream.write openre.key.rotate openre.session.read openre.output.read openre.output.write';
 
 const WHIP_BASE = 'https://ingest.test/whip';
 
@@ -28,9 +35,14 @@ const WHIP_BASE = 'https://ingest.test/whip';
         return { robot, paired: paired.json };
     }
 
-    await check('the client is null without a URL and a token, and its errors never carry the token', async () => {
+    await check('the client is null without a URL, a token or a Network client, and its errors never carry the token', async () => {
         assert.strictEqual(createOpenRe({ openre: { url: '', token: 'x', timeoutMs: 100 } }), null);
+        // No static token and no Network client credentials: nothing to authenticate with.
         assert.strictEqual(createOpenRe({ openre: { url: 'http://openre.test', token: '', timeoutMs: 100 } }), null);
+        assert.strictEqual(createOpenRe({ openre: { url: 'http://openre.test', token: '', timeoutMs: 100 }, network: { internalUrl: 'http://network.test' }, oauth: { clientId: 'bot' } }), null);
+        assert.strictEqual(createOpenRe({ openre: { url: 'http://openre.test', token: '', timeoutMs: 100 }, network: {}, oauth: { clientId: 'bot', clientSecret: 'shh' } }), null);
+        // A URL is still required even with a Network client.
+        assert.strictEqual(createOpenRe({ openre: { url: '', token: '', timeoutMs: 100 }, network: { internalUrl: 'http://network.test' }, oauth: { clientId: 'bot', clientSecret: 'shh' } }), null);
         const secret = 'ovt_never_shown_anywhere';
         const down = createOpenRe({ openre: { url: 'http://openre.test', token: secret, timeoutMs: 100 } }, { fetchImpl: async () => { throw new Error(`connect ECONNREFUSED Bearer ${secret}`); } });
         const e = await down.create({}, alex.subject).then(() => null, (x) => x);
@@ -224,10 +236,11 @@ const WHIP_BASE = 'https://ingest.test/whip';
         assert.ok(t.openre.admits(paired.publish_key));
     });
 
-    await check('Bot\'s OpenRe token is never logged and never in an answer', async () => {
+    await check('Bot\'s OpenRe token is never logged and never in an answer; a static token means Network is not asked', async () => {
         assert.ok(t.openre.calls.every((c) => c.authorization === `Bearer ${t.openre.token}` || c.authorization === null));
         assert.ok(!t.logs.join('\n').includes(t.openre.token), 'the token was logged');
         assert.ok(!responses.some((text) => text.includes(t.openre.token)), 'an answer carried the token');
+        assert.strictEqual(t.network.tokenCalls.length, 0, 'BOT_OPENRE_TOKEN was set: Bot minted no token of its own');
     });
 
     await t.close();
@@ -255,5 +268,58 @@ const WHIP_BASE = 'https://ingest.test/whip';
         assert.strictEqual(del.status, 204, del.text);
     });
     await u.close();
+
+    // ── No static token: Bot mints its own from its Network client ────────────────────────────────
+    const m = await boot({ env: { BOT_OPENRE_TOKEN: '' } });
+    const mia = m.network.newUser('mia');
+    const redeemM = (body) => m.call('POST', '/api/v1/pair', { token: null, body });
+
+    await check('without a static token Bot mints a token for audience openvibe.openre with the Network grant\'s scope', async () => {
+        const before = m.network.tokenCalls.length;
+        const { robot, pairing } = await m.robot(mia);
+        const paired = await redeemM({ robot: robot.id, code: pairing.code });
+        assert.strictEqual(paired.status, 201, paired.text);
+        assert.ok(paired.json.publish_key && m.openre.admits(paired.json.publish_key), 'the device got an OpenRe-issued key');
+        // One mint serves the whole pairing: the find and the create reuse the cached token.
+        assert.deepStrictEqual(m.network.tokenCalls.slice(before),
+            [{ client_id: 'bot', audience: MINTED_AUDIENCE, scope: MINTED_SCOPE }]);
+        const create = m.openre.calls.at(-1);
+        assert.strictEqual(create.method, 'POST');
+        assert.strictEqual(create.subject, mia.subject);
+        assert.ok(create.authorization.startsWith('Bearer '), 'a bearer was sent');
+        assert.notStrictEqual(create.authorization, `Bearer ${m.openre.token}`, 'the static token was not what was sent');
+        const v = serviceAuth.verifyServiceToken(create.authorization.slice(7), { publicKey: m.network.publicPem, issuer: m.network.url, audience: MINTED_AUDIENCE });
+        assert.ok(v.ok, v.reason);
+        assert.strictEqual(v.claims.sub, 'svc:bot');
+        assert.deepStrictEqual([...v.claims.cap].sort(), MINTED_SCOPE.split(' ').sort());
+    });
+
+    await check('a 401 from OpenRe drops the minted token and retries the call once', async () => {
+        const tokensBefore = m.network.tokenCalls.length;
+        const callsBefore = m.openre.calls.length;
+        const { robot, pairing } = await m.robot(mia);
+        m.openre.failNext(401);
+        const paired = await redeemM({ robot: robot.id, code: pairing.code });
+        assert.strictEqual(paired.status, 201, paired.text);
+        assert.ok(m.openre.admits(paired.json.publish_key));
+        assert.strictEqual(m.network.tokenCalls.length - tokensBefore, 1, 'exactly one replacement token was minted');
+        const calls = m.openre.calls.slice(callsBefore);
+        assert.strictEqual(calls[0].method, 'GET');
+        assert.strictEqual(calls[1].method, 'GET');
+        assert.strictEqual(calls[1].query, calls[0].query, 'the same call was tried again');
+        assert.notStrictEqual(calls[1].authorization, calls[0].authorization, 'the retry carried a fresh token');
+    });
+
+    await check('a second 401 is a refusal, not an endless retry', async () => {
+        const { robot, pairing } = await m.robot(mia);
+        const callsBefore = m.openre.calls.length;
+        m.openre.failNext(401, 2);
+        const r = await redeemM({ robot: robot.id, code: pairing.code });
+        assert.strictEqual(r.status, 502, r.text);
+        assert.strictEqual(r.json.code, 'bot.openre_refused');
+        assert.strictEqual(m.openre.calls.length - callsBefore, 2, 'the call was tried exactly twice');
+    });
+
+    await m.close();
     done();
 })();

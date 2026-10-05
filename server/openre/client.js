@@ -5,10 +5,15 @@
  *
  * OpenRe's WHIP worker admits only keys in its own store (resolveIngestKey), so a device's publish key is
  * always an OpenRe ingest key: Bot creates one stream per robot (external ref bot:robot:<id>) and hands the
- * device the key OpenRe returns, shown once and never stored here. Calls carry BOT_OPENRE_TOKEN, a Network
- * service token holding openre.stream.read (find), openre.stream.write (create, archive) and openre.key.rotate
- * (rotate), and act for the robot's owner
+ * device the key OpenRe returns, shown once and never stored here. Calls act for the robot's owner
  * (X-OV-Subject), so OpenRe limits them to that owner's streams.
+ *
+ * By default Bot mints its own Network service token (audience openvibe.openre) from its OAuth client
+ * credentials, with openre.stream.read (find), openre.stream.write (create, archive, streaming toggles),
+ * openre.key.rotate (rotate) and openre.session.read/openre.output.read/openre.output.write (session status
+ * and outputs, for panel video and restreaming later). An operator-minted BOT_OPENRE_TOKEN overrides it. The
+ * token is cached until 60 s before expiry; a 401 from OpenRe (rotated key, clock) drops the cached token and
+ * the call is tried once more.
  *
  *   find(ref, owner)                      GET /api/v1/streams?external_ref=… → the stream, or null
  *   get(id, owner)                        GET /api/v1/streams/:id → the stream, or null on 404
@@ -20,21 +25,48 @@
  *
  * A refusal (4xx) throws 502 bot.openre_refused with OpenRe's problem code and detail; no answer, a timeout
  * or a 5xx throws 503 bot.openre_unavailable. A 404 for a named stream (get, update, rotate, archive) answers null. The token is
- * never logged, returned or put in an error. Unset BOT_OPENRE_URL or BOT_OPENRE_TOKEN: createOpenRe → null.
+ * never logged, returned or put in an error. Unset BOT_OPENRE_URL, or neither an operator BOT_OPENRE_TOKEN
+ * nor the Network client credentials: createOpenRe → null.
  */
+const { serviceAuth } = require('openvibe-contracts');
 const { BotError } = require('../util');
+
+// Network's grant to the `bot` client on audience openvibe.openre (Network server/identity/principals.js
+// DEFAULT_GRANTS). session.read/output.read/output.write are for later panel video and restreaming.
+const OPENRE_AUDIENCE = 'openvibe.openre';
+const OPENRE_SCOPE = 'openre.stream.read openre.stream.write openre.key.rotate openre.session.read openre.output.read openre.output.write';
 
 function createOpenRe(config, { fetchImpl = globalThis.fetch } = {}) {
     const { url, token, timeoutMs } = config.openre || {};
-    if (!url || !token) return null;
+    if (!url) return null;
+    // An operator-minted BOT_OPENRE_TOKEN wins; otherwise Bot mints its own from its Network client.
+    const { clientId, clientSecret } = config.oauth || {};
+    const internalUrl = (config.network || {}).internalUrl;
+    const tokens = !token && clientSecret && internalUrl
+        ? serviceAuth.createTokenClient({
+            tokenUrl: `${internalUrl}/oauth/token`, clientId, clientSecret, audience: OPENRE_AUDIENCE, scope: OPENRE_SCOPE, fetchImpl,
+        })
+        : null;
+    if (!token && !tokens) return null;
 
-    async function call(method, path, { owner, body, named = false } = {}) {
-        let res;
+    /** The Authorization header of this call: the operator's token, or a freshly cached minted one. */
+    async function authorization() {
+        if (!tokens) return `Bearer ${token}`;
         try {
-            res = await fetchImpl(`${url}${path}`, {
+            return (await tokens.authHeaders()).Authorization;
+        } catch (e) {
+            throw new BotError(503, 'bot.openre_unavailable', 'Bot could not mint its OpenRe token from Network');
+        }
+    }
+
+    /** One attempt; a transport failure or a timeout becomes bot.openre_unavailable. */
+    async function send(method, path, { owner, body }) {
+        const bearer = await authorization();
+        try {
+            return await fetchImpl(`${url}${path}`, {
                 method,
                 headers: {
-                    Authorization: `Bearer ${token}`, Accept: 'application/json', 'X-OV-Subject': owner,
+                    Authorization: bearer, Accept: 'application/json', 'X-OV-Subject': owner,
                     ...(body ? { 'Content-Type': 'application/json' } : {}),
                 },
                 ...(body ? { body: JSON.stringify(body) } : {}),
@@ -43,6 +75,16 @@ function createOpenRe(config, { fetchImpl = globalThis.fetch } = {}) {
         } catch (e) {
             const why = e && (e.name === 'TimeoutError' || e.name === 'AbortError') ? `no answer within ${timeoutMs} ms` : 'unreachable';
             throw new BotError(503, 'bot.openre_unavailable', `OpenRe did not answer for the robot's video: ${why}`);
+        }
+    }
+
+    async function call(method, path, opts = {}) {
+        const { named = false } = opts;
+        let res = await send(method, path, opts);
+        // A minted token OpenRe no longer accepts (rotated signing key, clock): drop it and try once more.
+        if (res.status === 401 && tokens) {
+            tokens.invalidate();
+            res = await send(method, path, opts);
         }
         if (res.status === 204) return {};
         const out = await res.json().catch(() => null);
