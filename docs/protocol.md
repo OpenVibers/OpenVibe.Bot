@@ -245,8 +245,10 @@ heartbeat or any frame brings it back. Commands are never replayed after a recon
 Bot is the dispatcher of plan T14: it hands a `platform.job@1` job to a paired OpenVibe.Node over this socket
 and meters it. The Run service (which owns `run.job.*`) calls it over the internal HTTP API under the
 `bot.job.dispatch` capability: `POST /api/v1/jobs`, `POST /api/v1/jobs/:id/cancel` and `GET /api/v1/jobs/:id`
-(`server/api/v1.js`) wrap `server/jobs/dispatch.js` `dispatch(db, nodeId, job, { link, project, subject, provider })`
-and `cancel(db, jobId, { link })`. Each frame carries the envelope (`v`, `seq`, `ts`, `type`) and is validated
+(`server/api/v1.js`) call the jobs service `server/jobs/index.js` `createJobs({ db, hub, usage, log, now })`, which
+wraps `server/jobs/dispatch.js` `dispatch(db, nodeId, job, { link, project, subject, provider })` and
+`cancel(db, jobId, { link })` and holds the one `createJobFrames` instance (and its stdout rings) that both this
+socket and `GET /api/v1/jobs/:id` use. Each frame carries the envelope (`v`, `seq`, `ts`, `type`) and is validated
 against `platform.job-frame@1` from the pinned openvibe-contracts; an invalid one is answered `error`
 `bot.bad_frame`, and one naming a job of another device `error` `bot.unknown_job` (nothing changes).
 

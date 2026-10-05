@@ -31,6 +31,7 @@ const { createRealtime } = require('./realtime');
 const { createSimulator } = require('./sim');
 const { createApiAuth } = require('./api/auth');
 const { v1Router } = require('./api/v1');
+const { createJobs } = require('./jobs');
 const { createActorLimits } = require('./api/actor-limits');
 const { createSessionRoutes, viewerMiddleware } = require('./web/session');
 const { createWebRoutes } = require('./web/routes');
@@ -51,11 +52,14 @@ function createApp(opts = {}) {
     const outbox = opts.outbox || createBotOutbox({ db, config, fetchImpl: opts.eventsFetch, now, log });
     // Job usage readings → Billing (server/jobs/metering.js); started by server/index.js with the other jobs.
     const usage = opts.usage || createUsageRelay({ db, config, fetchImpl: opts.billingFetch || fetchImpl, now, log });
-    const hub = opts.hub || createRealtime({ config, keys, userAuth, usage, log, now });
+    const hub = opts.hub || createRealtime({ config, keys, userAuth, log, now });
     const nodes = opts.nodes || createNodePrincipals(config, { fetchImpl });
     const openre = opts.openre !== undefined ? opts.openre : createOpenRe(config, { fetchImpl });
     const domain = createDomain({ db, config, outbox, link: hub, nodes, openre, now, log });
     hub.bindDomain(domain);
+    // One jobs service for the device socket and the jobs API, so both see the same stdout rings.
+    const jobs = createJobs({ db: () => domain.db, hub, usage, log, now });
+    hub.bindJobs(jobs);
     const sim = opts.sim || createSimulator({ config, domain, hub, now, log });
     const apiAuth = createApiAuth({ config, keys, userAuth });
     const release = require('openvibe-shared/release').createRelease({ service: 'bot', root: path.join(__dirname, '..') });
@@ -86,7 +90,7 @@ function createApp(opts = {}) {
     release.mount(app, { registry: metrics.registry });
 
     const limits = createActorLimits({ config, valkey, now: opts.limitsNow || now, registry: metrics.registry, log });
-    app.use('/api/v1', express.json({ limit: '64kb' }), (req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); }, apiAuth.middleware, v1Router({ domain, apiAuth, limits, hub }));
+    app.use('/api/v1', express.json({ limit: '64kb' }), (req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); }, apiAuth.middleware, v1Router({ domain, apiAuth, limits, hub, jobs }));
     app.use('/auth', createSessionRoutes(config, userAuth, { fetchImpl }));
     app.use(viewerMiddleware(userAuth));
     app.use(createWebRoutes(config, { domain, sim, limits, log }));
@@ -108,7 +112,7 @@ function createApp(opts = {}) {
         return res.status(500).type('text/plain').send('Something went wrong\n');
     });
 
-    Object.assign(app.locals, { config, db, valkey, domain, keys, outbox, usage, hub, sim, userAuth, metrics });
+    Object.assign(app.locals, { config, db, valkey, domain, keys, outbox, usage, hub, jobs, sim, userAuth, metrics });
     return app;
 }
 
