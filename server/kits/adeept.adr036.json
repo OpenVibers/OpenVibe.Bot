@@ -1,0 +1,23 @@
+{
+  "id": "adeept.adr036",
+  "name": "Adeept ADR036 4WD Smart Car Kit for Raspberry Pi",
+  "vendor": "Adeept",
+  "description": "The first curated OpenVibe robot (O30): the Adeept 4WD Smart Car with the Robot HAT — four DC motors and pan/tilt servos on a PCA9685, an ADS7830 battery readout, WS2812 lights, a buzzer, ultrasound and line tracking. The OpenVibe Node agent drives the HAT directly, so the kit's stock control server is never exposed.",
+  "profile_id": "adeept.adr036",
+  "build_guide_url": "https://www.adeept.com/learn/detail-97.html",
+  "parts": [
+    { "name": "Adeept ADR036 4WD Smart Car Kit (acrylic chassis and hardware)", "qty": 1, "note": "Adeept's tutorial download page is the build guide" },
+    { "name": "Adeept Robot HAT (PCA9685 motor/servo driver, ADS7830 battery ADC)", "qty": 1, "note": "Comes with the kit; also charges the 18650 pack over USB-C" },
+    { "name": "TT DC motors", "qty": 4 },
+    { "name": "Wheels", "qty": 4 },
+    { "name": "AD002 pan/tilt servos", "qty": 2 },
+    { "name": "Raspberry Pi camera module", "qty": 1 },
+    { "name": "Ultrasonic range sensor", "qty": 1 },
+    { "name": "Line-tracking module", "qty": 1 },
+    { "name": "WS2812 RGB LED module", "qty": 1 },
+    { "name": "Buzzer", "qty": 1, "note": "On the Robot HAT" },
+    { "name": "Raspberry Pi 4B or 5 (2 GB or more)", "qty": 1, "note": "Not included in the Adeept kit" },
+    { "name": "microSD card, 16 GB or more", "qty": 1, "note": "Raspberry Pi OS Bookworm, 64-bit" },
+    { "name": "18650 Li-ion cells", "qty": 2, "note": "The Robot HAT charges the pack over USB-C" }
+  ]
+}

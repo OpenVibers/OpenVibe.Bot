@@ -9,6 +9,7 @@
  * | Method & path                                  | Capability (services)  | People                              |
  * |------------------------------------------------|------------------------|-------------------------------------|
  * | GET    /profiles, /profiles/:id                | — (public)             | anyone                              |
+ * | GET    /kits, /kits/:id                        | — (public)             | anyone                              |
  * | GET    /robots                                 | bot.robot.read         | own robots (?owner= only themself)  |
  * | POST   /robots                                 | bot.robot.manage       | the owner (new robot + pairing code)|
  * | GET    /robots/:id                             | bot.robot.read         | a member (owner/operator/viewer)    |
@@ -32,6 +33,7 @@ const express = require('express');
 const { http } = require('openvibe-contracts');
 const { fail, userSubject, isRobotId, json } = require('../util');
 const { getProfile, listProfiles } = require('../profiles');
+const kits = require('../kits');
 
 const CAP = {
     read: 'bot.robot.read',
@@ -119,6 +121,16 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService }) {
         const p = await getProfile(domain.db, req.params.id);
         if (!p) fail(404, 'bot.profile_not_found', 'no such profile');
         res.json({ profile: p.profile });
+    }));
+
+    // ── Kits (public read; the "Get a robot" catalogue, server/kits/*.json) ────────────────────────
+    r.get('/kits', wrap(async (req, res) => {
+        res.json({ kits: kits.list() });
+    }));
+    r.get('/kits/:id', wrap(async (req, res) => {
+        const kit = kits.get(req.params.id);
+        if (!kit) fail(404, 'bot.kit_not_found', 'no such kit');
+        res.json({ kit });
     }));
 
     // ── Robots ────────────────────────────────────────────────────────────────────────────────────
