@@ -7,7 +7,8 @@
  *                   nodes, revokes), scoped to the calling service like Network's own routes
  *   startEvents()   POST /api/v1/events recording what Bot's outbox relays; GET /api/health
  *   startOpenRe()   OpenRe.Stream's stream routes Bot calls (server/api/v1.js there): GET /api/v1/streams?external_ref=,
- *                   POST /api/v1/streams, POST …/:id/keys/rotate, DELETE …/:id (409 while live), behind one bearer
+ *                   GET /api/v1/streams/:id, POST /api/v1/streams, PATCH /api/v1/streams/:id (recording_mode /
+ *                   mirror_to_live), POST …/:id/keys/rotate, DELETE …/:id (409 while live), behind one bearer
  *                   token whose capabilities OpenRe's guards check (setCaps(list) to narrow them; 403
  *                   capability.denied). streams, calls (every request, its token and X-OV-Subject), admits(key)
  *                   (OpenRe's resolveIngestKey: an active key or one in grace), failNext(status | 'hang')
@@ -150,6 +151,7 @@ async function startOpenRe({ token = `ovt_${crypto.randomBytes(16).toString('hex
         return { id: `key_${++n}`, key, hint: key.slice(-4), status: 'active', grace_until: null };
     };
     const view = (st) => ({ id: st.id, owner: { type: 'user', id: st.owner }, protocols: st.protocols, state: st.state, external_refs: st.refs,
+        recording_mode: st.recording_mode, recording_visibility: st.recording_visibility, playback_visibility: st.playback_visibility, mirror_to_live: st.mirror_to_live,
         keys: st.keys.filter((k) => k.status !== 'revoked').map((k) => ({ id: k.id, hint: k.hint, status: k.status })) });
     const problem = (res, status, code, detail) => { res.writeHead(status, { 'Content-Type': 'application/problem+json' }); res.end(JSON.stringify({ type: 'about:blank', status, code, detail })); };
     function admits(key) {
@@ -183,13 +185,22 @@ async function startOpenRe({ token = `ovt_${crypto.randomBytes(16).toString('hex
             if (refs.some((r) => [...streams.values()].some((x) => x.state !== 'archived' && x.refs.some((y) => y.service === r.service && y.type === r.type && y.id === r.id)))) {
                 return problem(res, 409, 'openre.ref_taken', 'already belongs to another stream definition');
             }
-            const st = { id: `str_${++n}`, owner: subject, protocols: body.protocols, refs, state: 'active', live: false, keys: [newKey()] };
+            const st = { id: `str_${++n}`, owner: subject, protocols: body.protocols, refs, state: 'active', live: false, keys: [newKey()],
+                recording_mode: body.recording_mode || 'none', recording_visibility: body.recording_visibility || null,
+                playback_visibility: body.playback_visibility || null, mirror_to_live: !!body.mirror_to_live };
             streams.set(st.id, st);
             const k = st.keys[0];
             return send(res, 201, { stream: view(st), key: { id: k.id, key: k.key, hint: k.hint, shown_once: true } });
         }
         const st = m && m[1] && mine(decodeURIComponent(m[1]));
         if (m && m[1] && !st) return problem(res, 404, 'openre.stream_not_found', 'no such stream definition');
+        if (st && !m[2] && req.method === 'GET') return send(res, 200, { stream: view(st) });
+        if (st && !m[2] && req.method === 'PATCH') {
+            // Only the streaming toggles are writable here, as OpenRe's PATCH accepts: the rest stays put.
+            if (body && body.recording_mode !== undefined) st.recording_mode = body.recording_mode;
+            if (body && body.mirror_to_live !== undefined) st.mirror_to_live = !!body.mirror_to_live;
+            return send(res, 200, { stream: view(st) });
+        }
         if (st && m[2] && req.method === 'POST') {
             const grace = Math.max(0, Number(body && body.grace_seconds) || 0);
             const old = st.keys.filter((k) => k.status === 'active');

@@ -24,6 +24,8 @@
  * | POST   /robots/:id/estop/clear                  | bot.robot.control      | the owner only                      |
  * | POST   /robots/:id/commands                     | bot.robot.control      | owner or operator                   |
  * | GET    /robots/:id/audit                        | bot.robot.read         | owner (paged)                       |
+ * | GET    /robots/:id/streaming                    | bot.robot.read         | a member                            |
+ * | POST   /robots/:id/streaming                    | bot.robot.manage       | the owner                           |
  * | POST   /jobs, /jobs/:id/cancel, GET /jobs/:id   | bot.job.dispatch       | — (services only)                   |
  * | POST   /pair                                    | — (one-time code)      | the agent (code is the credential)  |
  *
@@ -219,6 +221,19 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config }) {
         hub.closeDevice(req.params.id, 'revoked');   // revocation disconnects the device at once
         if (networkError) throw networkError;          // revoked here; the owner retries for Network or OpenRe
         res.json({ device: domain.present.device(revoked) });
+    }));
+
+    // ── Streaming (the owner's OpenRe toggles, read from OpenRe; Bot stores no copy) ───────────────
+    // Reading is a member read, like GET /robots/:id. Changing is the owner's alone (`manage`, not
+    // `control`): whether a robot's camera is recorded or shown on the owner's channel is their call.
+    r.get('/robots/:id/streaming', wrap(async (req, res) => {
+        await member(req, req.params.id);
+        res.json(await domain.streaming.get(req.params.id));
+    }));
+    r.post('/robots/:id/streaming', manage, wrap(async (req, res) => {
+        const robot = await owner(req, req.params.id);
+        const subject = req.principal.kind === 'user' ? me(req) : userSubject(req.headers['x-ov-subject'] || req.body?.owner, 'subject');
+        res.json(await domain.streaming.set(req.params.id, { subject, kind: req.principal.kind }, { to: req.body?.to, on: req.body?.on }));
     }));
 
     // ── E-stop ────────────────────────────────────────────────────────────────────────────────────

@@ -332,6 +332,60 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         const clean = base ? String(base).replace(/\/+$/, '') : '';
         return clean && publishKey ? `${clean}/${encodeURIComponent(publishKey)}` : null;
     }
+    // ── Streaming toggles (the owner's OpenRe stream is the single source of truth) ────────────────
+    // Bot stores no copy: `media` is the stream's recording_mode ('vod' on, 'none' off) and `live` its
+    // mirror_to_live. `live` is the owner's consent, but OpenRe mirrors a session into their Live channel
+    // only once Live plays OpenRe streams for that channel, so the answer always carries `effective`.
+    const LIVE_EFFECTIVE = 'when your Live channel plays OpenRe streams';
+    const streamingState = (robot, stream) => ({
+        available: true,
+        media: { on: stream.recording_mode === 'vod' },
+        live: { on: !!stream.mirror_to_live, effective: LIVE_EFFECTIVE },
+        stream_id: robot.openre_stream_id,
+    });
+    /** The offline shape: nothing to read, with why — OpenRe unset, no stream yet, or OpenRe lost it. */
+    const streamingUnavailable = (robot, reason) => ({
+        available: false, reason, stream_id: robot.openre_stream_id || null,
+        media: { on: false }, live: { on: false, effective: LIVE_EFFECTIVE },
+    });
+    /**
+     * The robot's streaming toggles, read from its OpenRe stream. `available: false` with reason
+     * 'not_configured' (OpenRe unset), 'not_paired' (the robot has no stream yet) or 'stream_missing'
+     * (OpenRe answers 404).
+     */
+    async function streaming(robotId) {
+        const robot = await getRobot(robotId);
+        if (!robot) fail(404, 'bot.robot_not_found', 'no such robot');
+        if (!openre) return streamingUnavailable(robot, 'not_configured');
+        if (!robot.openre_stream_id) return streamingUnavailable(robot, 'not_paired');
+        const stream = await openre.get(robot.openre_stream_id, robot.owner_subject);
+        if (!stream) return streamingUnavailable(robot, 'stream_missing');
+        return streamingState(robot, stream);
+    }
+    /**
+     * Turn `media` (recording_mode 'vod'/'none') or `live` (mirror_to_live) on or off on the robot's OpenRe
+     * stream, and audit the change once (kind streaming.media/streaming.live, value { on }). Idempotent:
+     * setting the value it already has answers the state and writes no audit row.
+     */
+    async function setStreaming(robotId, actor, { to, on } = {}) {
+        const robot = await getRobot(robotId);
+        if (!robot) fail(404, 'bot.robot_not_found', 'no such robot');
+        if (!['media', 'live'].includes(to) || typeof on !== 'boolean') fail(422, 'bot.invalid_streaming', "to must be 'media' or 'live' and on must be true or false");
+        if (!openre) fail(409, 'bot.openre_not_configured', 'OpenRe is not configured here');
+        if (!robot.openre_stream_id) fail(409, 'bot.not_paired', 'the robot has no OpenRe stream yet; pair a device first');
+        const current = await openre.get(robot.openre_stream_id, robot.owner_subject);
+        if (!current) fail(409, 'bot.not_paired', 'OpenRe no longer has the robot\'s stream; pair a device again');
+        const already = to === 'media' ? current.recording_mode === 'vod' : !!current.mirror_to_live;
+        if (already === on) return streamingState(robot, current);
+        const fields = to === 'media' ? { recording_mode: on ? 'vod' : 'none' } : { mirror_to_live: on };
+        const updated = await openre.update(robot.openre_stream_id, fields, robot.owner_subject);
+        if (!updated) fail(409, 'bot.not_paired', 'OpenRe no longer has the robot\'s stream; pair a device again');
+        await auditCommand({
+            robotId, subject: actor && actor.subject, operatorKind: actor && actor.kind, role: 'owner',
+            kind: `streaming.${to}`, value: { on }, result: 'ack',
+        });
+        return streamingState(robot, updated);
+    }
     async function prunePairingCodes() {
         await db.query('DELETE FROM pairing_codes WHERE expires_at < $1', [iso(now() - 24 * 3600 * 1000)]);
     }
@@ -793,6 +847,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         members: { roleOf, add: addOperator, remove: removeOperator, list: listOperators },
         pairing: { create: createPairingCode, redeem, prune: prunePairingCodes, installerCommand, driverForProfile, whipUrl },
         devices: { byCredential, bindNode, issuePublishKey, revokeVideo, updateDeclared, revokeNode, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, touchSeen, setOnline },
+        streaming: { get: streaming, set: setStreaming },
         estop: { set: setEstop, clear: clearEstop },
         queue: { join: joinQueue, state: queueState, currentTurn, consume: consumeTurn, sweep: sweepQueues },
         audit: { record: auditCommand, list: listAudit, listPage: listAuditPage, prune: pruneAudit },

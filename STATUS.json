@@ -41,7 +41,8 @@
     "panel input: a touch joystick, the keyboard and a gamepad (Gamepad API), each held control re-sent while held and zeroed at once on release; a latency meter (round-trip median and telemetry age); one camera tile per camera the profile lists (a placeholder until OpenRe can play a WHIP stream back); a live online indicator on /pair/:id read from /control",
     "platform.job@1 jobs dispatched to a paired Node over /device (platform.job-frame@1: resent unacked on reconnect, only to an advertised runtime class) and metered per second into run_usage_outbox for billing.usage.record",
     "embed opt-in: robots.embed_public (migration 0005), set only by the owner with POST /robots/:id/embed, web-only (not in /api/v1); BOT_EMBED_ORIGINS is the validated frame-ancestors allow-list for the embeddable panel (default OpenVibe.Live)",
-    "embeddable panel: GET /panel/:id/embed framed only by BOT_EMBED_ORIGINS (no cookie, never a sign-in redirect; a member keeps their role, anyone else watches an embed_public robot) and the anonymous read-only /watch socket carrying the public state (online, e-stop, latency, battery, the profile's readouts), capped per address and per robot"
+    "embeddable panel: GET /panel/:id/embed framed only by BOT_EMBED_ORIGINS (no cookie, never a sign-in redirect; a member keeps their role, anyone else watches an embed_public robot) and the anonymous read-only /watch socket carrying the public state (online, e-stop, latency, battery, the profile's readouts), capped per address and per robot",
+    "streaming and recording toggles per robot, off by default and owner-only: media records live sessions to OpenVibe.Media (the OpenRe stream's recording_mode vod/none) and live shows them on the owner's OpenVibe.Live channel (mirror_to_live), read at GET /api/v1/robots/:id/streaming and set at POST /api/v1/robots/:id/streaming; Bot stores no copy, each real change audits once"
   ],
   "updated": "2026-10-04"
 }
