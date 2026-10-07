@@ -41,7 +41,7 @@ OpenVibe.Bot pairs a robot's machines, keeps their state and gates every operato
 - OpenVibe.Network: user and service tokens, node tokens, pairing when the authority is `network`, and identity resolution (a `@username` to a subject, and subjects to names, for the panel's People card).
 - OpenRe.Stream: the WHIP ingest base (`BOT_WHIP_BASE`) devices publish to.
 - OpenVibe.Billing: job usage readings go to `billing.usage.record` (`BOT_BILLING_URL`, `BOT_BILLING_TOKEN`); unset, they wait in `run_usage_outbox`.
-- `openvibe-contracts` v0.96.0, `openvibe-sdk` v0.26.0 and `openvibe-shared` v2.10.1 (package.json).
+- `openvibe-contracts` v0.106.0, `openvibe-sdk` v0.26.0 and `openvibe-shared` v2.11.0 (package.json).
 
 ## Capabilities
 
