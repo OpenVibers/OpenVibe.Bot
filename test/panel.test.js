@@ -129,7 +129,10 @@ const allowedFor = (profile, role) => [...(DEFAULT_ALLOW[role] || []).filter((k)
 
     await check('/ is the front page (test/home.test.js); /robots.txt and /install are unchanged; the pages need a session', async () => {
         assert.match(await (await get('/')).text(), /<h1>Drive your robot/);
-        assert.strictEqual(await (await get('/robots.txt')).text(), 'User-agent: *\nDisallow: /\n');
+        const robots = await (await get('/robots.txt')).text();
+        assert.match(robots, /^Allow: \/\$$/m, 'the front page is crawlable');
+        for (const p of ['/auth/', '/api/', '/robots', '/pair/', '/panel/', '/install']) assert.ok(robots.includes(`Disallow: ${p}\n`), p);
+        assert.match(robots, /^Sitemap: http:\/\/bot\.test\/sitemap\.xml$/m);
         assert.strictEqual((await get('/install')).status, 302);
         for (const p of ['/robots', '/panel/rob_x', '/pair/rob_x']) {
             const r = await get(p);

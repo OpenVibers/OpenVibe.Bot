@@ -3,7 +3,7 @@
 /**
  * Per-actor rate limits at /api/v1 (openvibe-sdk/limits). Counted by who calls, as api/auth.js resolved
  * req.principal. Past a limit the route answers 429 problem+json `rate_limited` with Retry-After.
- * Never limited: /api/health, /api/ready, /release.json, /metrics and the one-line GET /.
+ * Never limited: /api/health, /api/ready, /release.json, /metrics and the front page GET /.
  */
 const { createActorLimiter, createValkeyLimitStore, defaultActor } = require('openvibe-sdk/limits');
 const { userSubject } = require('../util');

@@ -65,13 +65,13 @@ function sections({ signedIn }) {
             { icon: 'ov:error', title: 'Safe by default', text: 'Per-robot limits, cooldowns and a turn budget on every command. The emergency stop is latched: only the owner clears it, and a halt always gets through.' },
             { icon: 'ov:history', title: 'Every command on the record', text: 'Allowed or refused, each command is audited and kept for 30 days.' },
             { icon: 'ov:account', title: 'Share control', text: 'Add people by @username as operators or viewers, or open a queue where visitors take turns.' },
-            { icon: 'ov:live', title: 'Show it on your channel', text: 'Let OpenVibe.Live frame the robot\'s read-only panel, so viewers watch it drive.' },
+            { icon: 'ov:live', title: 'Show it on your channel', text: 'Let OpenVibe.Live frame the robot\'s read-only panel, so viewers follow its state as someone drives it.' },
             { icon: 'ov:code', title: 'An API with the same gate', text: 'A REST API for your own apps, held to the same roles, limits and e-stop as the panel.' },
         ],
     }) + showcase.features({
         title: 'Robots it drives today',
         items: [
-            { icon: 'ov:check', title: 'Adeept 4WD Smart Car', text: 'The Raspberry Pi kit, with its parts list and build guide, in the standard and the mecanum-wheel build. The first robot on OpenVibe.Bot.' },
+            { icon: 'ov:check', title: 'Adeept 4WD Smart Car', text: 'The Raspberry Pi kit, with its parts list and build guide; a mecanum-wheel build has its own profile. The first robot on OpenVibe.Bot.' },
             { icon: 'ov:check', title: 'Cozmo', text: 'Through the device agent on a computer next to it.' },
             { icon: 'ov:check', title: 'A simulated rover', text: 'Runs inside Bot, so you can try the whole panel with no hardware.' },
         ],
@@ -101,6 +101,7 @@ function renderHome({ config, signedIn = false }) {
         navbar: nav, footer, home: '/', navLinks: [{ label: 'Robots', href: '/robots' }],
         head: [
             appIcon.headTags({ site: 'bot' }),
+            '<link rel="manifest" href="/manifest.webmanifest">',
             `<link rel="stylesheet" href="${ovServe.url(showcase.STYLESHEET)}">`,
         ].join('\n'),
         body: `<div id="navbar-mount"></div>

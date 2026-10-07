@@ -26,7 +26,7 @@ OpenVibe.Bot pairs a robot's machines, keeps their state and gates every operato
 - Identity, subjects and tokens (OpenVibe.Network) and the robot's record on Network.
 - Video: a device publishes over WHIP to OpenRe.Stream; Bot only hands out the URL at pairing.
 - The agent that runs on the robot; it ships with the T15 device-agent job.
-- The public openvibe.bot front page and legal pages, built by OpenVibe.Sites.
+- The legal pages (`/terms`, `/privacy`, `/dmca`) and `sitemap.xml`: the frozen OpenVibe.Sites files.
 
 ## Devices
 

@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * The non-API surface: a one-line text placeholder at `/` for the health of the process, `/install`, a 302 to
+ * The non-API surface: the front page at `/` (web/home.js), `/robots.txt`, `/install`, a 302 to
  * OpenVibe.Node's installer script (the one-paste command, ADR-043), and the signed-in pages (the five-minute
  * path and the profile-rendered panel, plan T15 step 3):
  *
@@ -38,7 +38,9 @@ const HOLD_RESEND_MS = 150;
 
 function createWebRoutes(config, { domain = null, sim = null, onvif = null, limits = null, identity = null, hub = null, log = console } = {}) {
     const r = express.Router();
-    r.get('/robots.txt', (req, res) => res.type('text/plain').send('User-agent: *\nDisallow: /\n'));
+    // The public front page is crawlable; sign-in, the API and every signed-in or per-robot page are not.
+    r.get('/robots.txt', (req, res) => res.type('text/plain').send(['User-agent: *', 'Allow: /$', 'Disallow: /auth/', 'Disallow: /api/',
+        'Disallow: /robots', 'Disallow: /pair/', 'Disallow: /panel/', 'Disallow: /install', `Sitemap: ${config.baseUrl}/sitemap.xml`, ''].join('\n')));
     // `curl -fsSL` follows the redirect. The target is config only (checked at boot): no query parameter steers it.
     r.get('/install', (req, res) => res.redirect(302, config.installer.sourceUrl));
     if (!domain) return r;

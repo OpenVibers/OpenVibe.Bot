@@ -16,6 +16,7 @@ const { boot, check, done } = require('./helpers/app');
         assert.strictEqual(r.status, 200);
         assert.match(r.headers.get('content-type'), /^text\/html/);
         assert.strictEqual(r.headers.get('cache-control'), 'private, no-cache');
+        assert.strictEqual(r.headers.get('vary'), 'Cookie');
         const csp = r.headers.get('content-security-policy');
         assert.match(csp, /connect-src 'self' https:\/\/openvibe\.network https:\/\/events\.openvibe\.network/);
         assert.match(csp, /frame-ancestors 'none'/);
@@ -52,9 +53,13 @@ const { boot, check, done } = require('./helpers/app');
 
     await check('the vhost proxies / and /shared/ to the app and keeps the legal pages on the Sites files', async () => {
         const conf = fs.readFileSync(path.join(__dirname, '..', 'deploy', 'nginx', 'openvibe.bot.conf'), 'utf8');
-        assert.match(conf, /location = \/ \{\s*proxy_pass http:\/\/127\.0\.0\.1:4630;\s*\}/);
         assert.match(conf, /location \^~ \/shared\/ \{\s*proxy_pass http:\/\/127\.0\.0\.1:4630;\s*\}/);
         assert.ok(!conf.includes('alias /opt/openvibe.sites/dist/_shared/'), 'no second copy of the shared assets');
+        assert.match(conf, /location = \/index\.html \{ return 301 \/; \}/, 'the replaced Sites page is never served by name');
+        assert.match(conf, /location = \/robots\.txt \{\s*proxy_pass http:\/\/127\.0\.0\.1:4630;\s*\}/);
+        assert.match(conf, /location = \/release\.json \{\s*proxy_pass http:\/\/127\.0\.0\.1:4630;\s*\}/);
+        assert.match(conf, /location = \/status\.json \{ return 404; \}/);
+        assert.match(conf, /location = \/ \{\s*limit_req zone=ovbot_api/);
         assert.match(conf, /root \/opt\/openvibe\.sites\/dist\/openvibe\.bot;/);
     });
 
