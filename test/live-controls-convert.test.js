@@ -63,7 +63,7 @@ const EXPORT = {
         await check('the dry-run plan names each robot, its buttons, operators and drops', () => {
             assert.deepStrictEqual(plan.summary, { configs: 2, to_convert: 1, skipped: 1, buttons: 3, operators: 1 });
             assert.strictEqual(cfg.status, 'convert');
-            assert.strictEqual(cfg.robot.name, "alice's controls");
+            assert.strictEqual(cfg.robot.name, 'Camp controls', 'named after the Live config');
             assert.strictEqual(cfg.robot.profile_id, 'relay.generic');
             assert.strictEqual(cfg.robot.access_policy, 'private');
             assert.deepStrictEqual(cfg.buttons.map((b) => b.name), ['wave', 'grip_it', 'spin_wheel']);
@@ -78,11 +78,31 @@ const EXPORT = {
             assert.ok(cfg.buttons[0].notes.some((n) => /overrides/.test(n)));
         });
 
-        await check('a hold key becomes hold, a reserved key is dropped, an over-long label truncated', () => {
+        await check('Space never becomes a key; a config with nothing to convert makes no robot; one owner\'s configs get distinct names', () => {
+            const owners = [{ id: 7, username: 'erin', subject_id: 'usr_01J8Z4M2Q0R7T9YV3K6N8P1W3A' }];
+            const doc = {
+                exported_at: '2026-10-07T12:00:00Z', owners, whitelist: [], latest_stream_controls: [],
+                configs: [{ id: 21, user_id: 7, name: 'Rig' }, { id: 22, user_id: 7, name: 'Rig' }, { id: 23, user_id: 7, name: 'Empty' }],
+                buttons: [
+                    { id: 31, config_id: 21, label: 'Honk', command: 'honk', key_binding: 'Space', cooldown_ms: 0, is_enabled: 1, sort_order: 0 },
+                    { id: 32, config_id: 22, label: 'Wave', command: 'wave', key_binding: 'g', cooldown_ms: 0, is_enabled: 1, sort_order: 0 },
+                    { id: 33, config_id: 23, label: 'Off', command: 'off', key_binding: 'o', cooldown_ms: 0, is_enabled: 0, sort_order: 0 },
+                ],
+            };
+            const p = buildPlan(doc);
+            const [a, b, c] = p.configs;
+            assert.strictEqual(a.buttons[0].key, null);
+            assert.ok(a.buttons[0].notes.some((n) => /dropped: the panel stops the robot/.test(n)));
+            assert.deepStrictEqual([a.robot.name, b.robot.name], ['Rig', 'Rig (2)']);
+            assert.deepStrictEqual([c.status, c.robot], ['empty', null]);
+            assert.strictEqual(p.summary.to_convert, 2);
+        });
+
+        await check('a hold key becomes hold, a drive key survives on the relay profile, an over-long label truncated', () => {
             const grip = cfg.buttons[1];
             assert.strictEqual(grip.hold, true);
-            assert.strictEqual(grip.key, null);
-            assert.ok(grip.notes.some((n) => /drives and stops/.test(n)), 'the reserved key is reported');
+            assert.strictEqual(grip.key, 'w', 'relay.generic does not drive, so W stays the button\'s key');
+            assert.ok(!grip.notes.some((n) => /dropped/.test(n)));
             const spin = cfg.buttons[2];
             assert.strictEqual(spin.label.length, 40);
             assert.ok(spin.notes.some((n) => /truncated/.test(n)));
@@ -105,7 +125,7 @@ const EXPORT = {
             const text = formatPlan(plan);
             assert.match(text, /1 to convert, 1 skipped/);
             assert.match(text, /- wave  "Wave harder"  ← "wave"  key KeyG  cooldown 250ms/);
-            assert.match(text, /robot "alice's controls"/);
+            assert.match(text, /robot "Camp controls"/);
             assert.match(text, /SKIPPED: Live user 80 \(dave\) has no Network subject/);
         });
 
@@ -124,7 +144,7 @@ const EXPORT = {
             robotId = results[0].robot_id;
             const robot = await t.domain.robots.get(robotId);
             assert.strictEqual(robot.owner_subject, ALICE);
-            assert.strictEqual(robot.name, "alice's controls");
+            assert.strictEqual(robot.name, 'Camp controls');
             assert.strictEqual(robot.access_policy, 'private');
             assert.ok(robot.profile_id.startsWith('local.rob_'), 'the robot carries a robot-local profile');
 
@@ -133,7 +153,7 @@ const EXPORT = {
             assert.deepStrictEqual(Object.keys(local.profile.commands.button.names), ['wave', 'grip_it', 'spin_wheel']);
             assert.strictEqual(local.profile.commands.button.names.wave.cooldown_ms, 250, 'the stream override is stored');
             assert.strictEqual(local.profile.commands.button.names.grip_it.hold, true);
-            assert.strictEqual(local.profile.commands.button.names.grip_it.key, undefined, 'the reserved key was dropped');
+            assert.strictEqual(local.profile.commands.button.names.grip_it.key, 'w');
 
             const members = await t.domain.members.list(robotId);
             assert.deepStrictEqual(members.map((m) => [m.subject, m.role]).sort(), [[ALICE, 'owner'], [BOB, 'operator']]);
