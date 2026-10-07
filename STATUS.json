@@ -9,7 +9,7 @@
   "packages": [
     "openvibe-contracts v0.96.0",
     "openvibe-sdk v0.26.0",
-    "openvibe-shared v2.5.0"
+    "openvibe-shared v2.10.1"
   ],
   "capabilities": [
     "bot.robot.read",
@@ -47,5 +47,5 @@
     "streaming and recording toggles per robot, off by default and owner-only: media records live sessions to OpenVibe.Media (the OpenRe stream's recording_mode vod/none) and live shows them on the owner's OpenVibe.Live channel (mirror_to_live), read at GET /api/v1/robots/:id/streaming and set at POST /api/v1/robots/:id/streaming; Bot stores no copy, each real change audits once",
     "server-side ONVIF cameras (profile camera.onvif, driver onvif, server/onvif): an in-process device beside the simulator attaches a camera configured with BOT_ONVIF_CAMERAS (its URL plus username_ref/password_ref secret references, never in the profile or in clear), writes a real kind server device row, translates ptz commands to ONVIF ContinuousMove/Stop with the profile deadline as a deadman, and carries the camera's GetStatus readout in telemetry; every request goes only to the configured host, with a timeout and no redirects"
   ],
-  "updated": "2026-10-04"
+  "updated": "2026-10-07"
 }

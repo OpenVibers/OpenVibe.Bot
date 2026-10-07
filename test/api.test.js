@@ -9,7 +9,7 @@ const { boot, check, done } = require('./helpers/app');
     const bob = t.network.newUser('bob');
     const stranger = t.network.newUser('stranger');
 
-    await check('health, ready, release.json and the one-line GET /', async () => {
+    await check('health, ready, release.json and the GET / front page', async () => {
         const h = await t.call('GET', '/api/health', { token: null });
         assert.strictEqual(h.json.service, 'bot');
         assert.strictEqual(h.json.devices_online, 0);
@@ -21,8 +21,7 @@ const { boot, check, done } = require('./helpers/app');
         assert.deepStrictEqual(require('openvibe-contracts').validate('registry.release-manifest@1', rel.json).errors, []);
         const home = await t.call('GET', '/', { token: null });
         assert.strictEqual(home.status, 200);
-        assert.match(home.headers.get('content-type'), /text\/plain/);
-        assert.strictEqual(home.text.trim().split('\n').length, 1);
+        assert.match(home.headers.get('content-type'), /text\/html/);   // the front page, test/home.test.js
     });
 
     await check('profiles are public reads; an unknown profile is a problem+json 404', async () => {

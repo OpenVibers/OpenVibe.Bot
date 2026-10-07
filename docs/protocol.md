@@ -473,7 +473,7 @@ node token, and a service token is judged on `bot.job.dispatch` alone.
 | `POST /pair` | the one-time code is the credential | `201 { device_id, credential, publish_key, whip_url, robot_id, profile }`; with `BOT_PAIRING_AUTHORITY=network` always `410 bot.pairing_moved` (the `detail` names the Network URL) |
 
 Not in `/api/v1`: `GET /api/health`, `GET /api/ready`, `GET /metrics`, `GET /release.json`, the
-`/auth/*` SSO routes, `GET /` (a one-line text health placeholder), `GET /install` (a 302 to the installer),
+`/auth/*` SSO routes, `GET /` (the front page, `server/web/home.js`), `GET /install` (a 302 to the installer),
 and the signed-in pages `GET|POST /robots`, `GET /pair/:id`, `GET /panel/:id`, `GET /panel/panel.{js,css}`,
 the panel's owner-only forms `POST /robots/:id/operators` (body `username`, `role` `operator|viewer`; a leading
 `@` is stripped; an unknown name is `422 bot.unknown_user` with `No OpenVibe account is called @<name>`) and
