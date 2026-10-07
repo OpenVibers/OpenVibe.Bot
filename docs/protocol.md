@@ -295,10 +295,11 @@ No field depends on when or how often a frame arrived, and no rating field is se
 NOTHING`). `run_jobs.usage_read` (seconds queued) only moves forward. Every reason is billed for the seconds the
 process held, never beyond the job's own `limits.wall_ms` (a later second is not metered and `wall_ms` is capped
 there). The relay posts each reading to OpenVibe.Billing's `billing.usage.record` (`POST <BOT_BILLING_URL>/api/v1/usage`,
-`Authorization: Bearer <BOT_BILLING_TOKEN>`), one per request; 201 (written) and 200 (identical replay) mark it
-sent. 400/409/413/422 mark it rejected (kept, never resent). Anything else, and `BOT_BILLING_URL` or
-`BOT_BILLING_TOKEN` unset, leaves it queued and retried with backoff: a reading is never dropped and never billed
-twice.
+`Authorization: Bearer <token>` with the operator's `BOT_BILLING_TOKEN` or a Network service token Bot mints for
+audience `openvibe.billing`), one per request; 201 (written) and 200 (identical replay) mark it
+sent. 400/409/413/422 mark it rejected (kept, never resent). Anything else, and `BOT_BILLING_URL` unset (or no
+token and no Network client to mint one), leaves it queued and retried with backoff: a reading is never dropped
+and never billed twice.
 
 ## 2. `/control` — the operator WebSocket
 
