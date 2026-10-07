@@ -5,9 +5,9 @@
   "runtime": "node 22, express 4, ws; PostgreSQL 18 via openvibe-sdk/db (pg, or embedded PGlite in tests); Valkey optional; no build step",
   "port": 4630,
   "domain": "openvibe.bot (www -> apex; /device and /control WebSockets; /install)",
-  "contracts": "openvibe-contracts v0.110.0",
+  "contracts": "openvibe-contracts v0.112.0",
   "packages": [
-    "openvibe-contracts v0.110.0",
+    "openvibe-contracts v0.112.0",
     "openvibe-sdk v0.35.0",
     "openvibe-shared v2.13.0"
   ],
@@ -32,7 +32,7 @@
     "operator WebSocket /control and the REST API (/api/v1, including POST /robots/:id/commands so a bound channel's chat can forward a command over HTTP) over one command gate: roles, per-robot limits and allowlists, cooldowns and the turn budget",
     "pairing with one-time codes, minted by Bot or delegated to OpenVibe.Network (BOT_PAIRING_AUTHORITY=network); a node machine binds on first use and reauths every 300 s",
     "device credentials hashed at rest and rotatable; revoke closes the socket at once and revokes the Network principal for a node machine",
-    "catalogue profiles adeept.adr036 (+ mecanum variant), cozmo, camera.onvif and sim.rover seeded from server/profiles/*.json; owner-edited robot-local button and video-click profiles stored with each robot",
+    "catalogue profiles adeept.adr036 (+ mecanum variant), cozmo, camera.onvif, sim.rover and relay.generic (the bare relay robot OpenVibe.Live's controls convert to) seeded from server/profiles/*.json; owner-edited robot-local button and video-click profiles stored with each robot",
     "curated kit catalogue (server/kits/*.json; GET /api/v1/kits, /kits/:id): each kit's parts list and build guide, validated and bound to a shipped profile — the Adeept ADR036 first; metadata only (pricing, shipping and returns are O29)",
     "a latched e-stop only the owner clears, with halt always allowed, and a device-side deadman deadline on the motion kinds",
     "command audit kept 30 days, and the bot.robot.online/offline, bot.estop.set/cleared and bot.command.refused outbox events",

@@ -11,7 +11,7 @@ const plugins = require('./helpers/plugins');
 const domain = createDomain({ db: null, outbox: null, config: { control: { maxCommandMs: 300, cooldownMs: 0 }, device: { heartbeatMs: 1000 }, media: {} } });
 const build = (profile, kind, value, limits = {}) => domain.control.buildValue(kind, value, domain.control.effectiveLimits({ limits }, profile), profile);
 // The panel widgets that send commands; each must say which.
-const CONTROL_WIDGETS = new Set(['drive', 'pan-tilt', 'servo', 'lights', 'horn', 'speaker', 'display', 'ptz', 'head', 'lift']);
+const CONTROL_WIDGETS = new Set(['drive', 'pan-tilt', 'servo', 'lights', 'horn', 'speaker', 'display', 'ptz', 'head', 'lift', 'buttons', 'video_click']);
 // A 1x1 PNG.
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
@@ -39,6 +39,15 @@ function samples(profile, kind, names) {
         return out;
     }
     if (kind === 'say') return [{ text: 'hello there' }, { text: '  padded  ' }];
+    if (kind === 'button') {
+        const out = [];
+        for (const [name, b] of Object.entries(spec.names)) {
+            out.push({ name });
+            if (b.hold) out.push({ name, state: 'down' }, { name, state: 'up' });
+        }
+        return out;
+    }
+    if (kind === 'point') return [{ x: 0.5, y: 0.5 }, { x: 0, y: 1 }];
     const out = [];   // display
     if (spec.modes.includes('text')) out.push({ text: 'hi' });
     if (spec.modes.includes('face')) for (const face of spec.faces) out.push({ face }, { face: face.toUpperCase() });
@@ -49,8 +58,8 @@ function samples(profile, kind, names) {
 (async () => {
     const profiles = loadProfiles();
 
-    await check('the five shipped profiles load and validate', () => {
-        assert.deepStrictEqual([...profiles.keys()].sort(), ['adeept.adr036', 'adeept.adr036.mecanum', 'camera.onvif', 'cozmo', 'sim.rover']);
+    await check('the six shipped profiles load and validate', () => {
+        assert.deepStrictEqual([...profiles.keys()].sort(), ['adeept.adr036', 'adeept.adr036.mecanum', 'camera.onvif', 'cozmo', 'relay.generic', 'sim.rover']);
         for (const p of profiles.values()) {
             assert.ok(p.capabilities.length > 0, `${p.id} capabilities`);
             assert.ok(p.widgets.length > 0, `${p.id} widgets`);
@@ -89,6 +98,15 @@ function samples(profile, kind, names) {
     await check('camera.onvif is PTZ only and sim.rover is drive + camera', () => {
         assert.deepStrictEqual(profiles.get('camera.onvif').capabilities.slice().sort(), ['camera', 'ptz']);
         assert.deepStrictEqual(profiles.get('sim.rover').capabilities.slice().sort(), ['camera', 'drive.differential']);
+    });
+
+    await check('relay.generic is the bare relay robot: buttons only, no drive, no hardware of its own', () => {
+        const p = profiles.get('relay.generic');
+        assert.deepStrictEqual(p.capabilities, ['relay']);
+        assert.strictEqual(p.mapping.driver, 'relay');
+        assert.strictEqual(p.mapping.plugin, 'relay');
+        assert.ok(!p.commands.drive && !p.commands.ptz && !p.commands.actuator, 'no drive of its own');
+        assert.ok(p.commands.button.names.relay, 'the catalogue carries one button the local profile replaces');
     });
 
     await check('limits default to max_command_ms 300 and heartbeat_ms 1000', () => {
