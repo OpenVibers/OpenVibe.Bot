@@ -292,7 +292,7 @@ function localProfileForm(robot, profile, settings = {}) {
 </div>
 </fieldset>`).join('');
     return `<section class="setting-card" aria-labelledby="buttons-h"><h2 id="buttons-h">Buttons</h2>
-<p class="setting-note">Each button sends its name to the robot. A key works while the panel has focus; the drive keys and Space stay with driving.</p>
+<p class="setting-note">Each button sends its name to the robot. A key works while the panel has focus. Space always stops, and on a robot that drives its drive keys stay with driving.</p>
 ${settings.error ? `<p class="error" role="alert">${esc(settings.error)}</p>` : ''}
 <form method="post" action="/robots/${esc(robot.id)}/profile" data-profile-form>
 <input type="hidden" name="count" value="${shown.length}">

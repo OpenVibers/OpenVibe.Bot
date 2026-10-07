@@ -246,4 +246,21 @@ async function listProfiles(db) {
     return db.many('SELECT DISTINCT ON (id) id, version, profile FROM robot_profiles WHERE robot_id IS NULL ORDER BY id, version DESC');
 }
 
-module.exports = { validateProfile, loadProfiles, seedProfiles, getProfile, listProfiles, CAPABILITIES, WIDGETS, DRIVERS, COMMAND_KINDS };
+/** Space stops and Escape releases everything on every panel (public/panel.js): no button ever takes them. */
+const ALWAYS_RESERVED_KEYS = new Set(['space', ' ', 'escape']);
+/** The panel's drive keys (public/panel.js KEYS): reserved only on a profile that drives. */
+const DRIVE_KEYS = new Set(['w', 'a', 's', 'd', 'q', 'e', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright',
+    'keyw', 'keya', 'keys', 'keyd', 'keyq', 'keye']);
+const drives = (profile) => Boolean(profile && ((profile.commands && profile.commands.drive) || (profile.widgets || []).some((w) => w.type === 'drive')));
+
+/** Why a button may not take `key` on `profile` (null when it may): the panel's stop/release keys, and its drive keys on a robot that drives. */
+function reservedKeyReason(key, profile) {
+    const raw = String(key == null ? '' : key);
+    const k = raw === ' ' ? ' ' : raw.trim().toLowerCase();   // a bare space is the Space key, not "no key"
+    if (!k) return null;
+    if (ALWAYS_RESERVED_KEYS.has(k)) return 'the panel stops the robot with it';
+    if (DRIVE_KEYS.has(k) && drives(profile)) return 'the panel drives the robot with it';
+    return null;
+}
+
+module.exports = { validateProfile, loadProfiles, seedProfiles, getProfile, listProfiles, reservedKeyReason, CAPABILITIES, WIDGETS, DRIVERS, COMMAND_KINDS };

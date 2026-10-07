@@ -17,7 +17,7 @@
 const {
     BotError, fail, prefixedId, iso, token, hashSecret, secretEquals, json, text, storable, isRobotId,
 } = require('../util');
-const { getProfile, validateProfile } = require('../profiles');
+const { getProfile, validateProfile, reservedKeyReason } = require('../profiles');
 const { ENVELOPE } = require('../events/outbox');
 
 const DEFAULT_ALLOW = {
@@ -65,9 +65,6 @@ function noteToHz(note) {
 }
 
 
-/** The panel's drive and stop keys (public/panel.js KEYS, Space and Escape): a profile button never takes one. */
-const RESERVED_BUTTON_KEYS = new Set(['space', ' ', 'escape', 'w', 'a', 's', 'd', 'q', 'e', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright',
-    'keyw', 'keya', 'keys', 'keyd', 'keyq', 'keye']);
 function createDomain({ db, config, outbox, link = null, nodes = null, openre = null, now = () => Date.now(), log = console }) {
     // ── Presenters ────────────────────────────────────────────────────────────────────────────────
     const presentRobot = (r) => (r ? {
@@ -187,14 +184,14 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         const robot = await getRobot(robotId);
         if (!robot) fail(404, 'bot.robot_not_found', 'no such robot');
         if (!actor || actor.subject !== robot.owner_subject) fail(403, 'bot.forbidden', 'only the owner may edit buttons');
-        for (const [name, b] of Object.entries(buttons || {})) {
-            if (b.key && RESERVED_BUTTON_KEYS.has(String(b.key).toLowerCase()))
-                fail(422, 'bot.invalid_input', `${b.key} drives or stops the robot; give ${name} another key`);
-        }
         const local = await localProfile(robotId);
         const sourceId = local ? local.source_profile_id : robot.profile_id;
         const source = await getProfile(db, sourceId);
         if (!source) fail(422, 'bot.unknown_profile', 'catalogue profile is missing');
+        for (const [name, b] of Object.entries(buttons || {})) {
+            const why = b.key && reservedKeyReason(b.key, source.profile);
+            if (why) fail(422, 'bot.invalid_input', `${b.key}: ${why}; give ${name} another key`);
+        }
         // Profile IDs are lowercase by contract; robot ULIDs are uppercase.
         const id = `local.${robotId.toLowerCase()}`;
         const base = source.profile;

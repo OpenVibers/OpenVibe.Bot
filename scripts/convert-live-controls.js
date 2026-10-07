@@ -27,10 +27,11 @@ const path = require('path');
 
 const NAME_RE = /^[a-z][a-z0-9_]{0,31}$/;
 const MAX_LABEL = 40;
-// The panel's drive and stop keys: a converted Live key that is one of these is dropped (server/domain).
-const RESERVED_KEYS = new Set(['space', ' ', 'escape', 'w', 'a', 's', 'd', 'q', 'e', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright',
-    'keyw', 'keya', 'keys', 'keyd', 'keyq', 'keye']);
 const RELAY_PROFILE = 'relay.generic';
+// The keys a button may take are decided against the profile it lands on (server/profiles reservedKeyReason): the
+// relay profile does not drive, so Live's W/A/S/D/Q/E bindings survive; Space and Escape never do.
+const { reservedKeyReason } = require('../server/profiles');
+const RELAY_PROFILE_DOC = require('../server/profiles/relay.generic.json');
 
 // ── The plan (pure: built from the export document alone; no database, no writes) ────────────────
 const asArray = (v) => (Array.isArray(v) ? v : []);
@@ -67,7 +68,8 @@ function labelFor(raw, fallback, notes) {
 function keyFor(raw, notes) {
     const key = String(raw == null ? '' : raw).trim();
     if (!key) return null;
-    if (RESERVED_KEYS.has(key.toLowerCase())) { notes.push(`key ${JSON.stringify(key)} dropped: the panel drives and stops with it`); return null; }
+    const why = reservedKeyReason(key, RELAY_PROFILE_DOC);
+    if (why) { notes.push(`key ${JSON.stringify(key)} dropped: ${why}`); return null; }
     if (key.length > 16) { notes.push(`key ${JSON.stringify(key)} dropped: at most 16 characters`); return null; }
     return key;
 }
@@ -110,6 +112,7 @@ function buildPlan(doc) {
     const subjectOf = (userId) => { const o = owners.get(userId); return o && o.subject_id ? o.subject_id : null; };
 
     const plan = [];
+    const namesByOwner = new Map();   // owner subject → robot names given in this plan
     for (const config of configs) {
         const owner = owners.get(config.user_id) || null;
         const cfg = {
@@ -126,7 +129,13 @@ function buildPlan(doc) {
             plan.push(cfg);
             continue;
         }
-        cfg.robot = { name: `${owner.username || ownerSubject}'s controls`, profile_id: RELAY_PROFILE, access_policy: 'private' };
+        // Named after the Live config (an owner may have several), else after the owner; unique per owner.
+        const base = (strOr(config.name).trim() || `${owner.username || ownerSubject}'s controls`).slice(0, 80);
+        const taken = namesByOwner.get(ownerSubject) || new Set();
+        let robotName = base;
+        for (let n = 2; taken.has(robotName); n++) robotName = `${base.slice(0, 75)} (${n})`;
+        taken.add(robotName); namesByOwner.set(ownerSubject, taken);
+        cfg.robot = { name: robotName, profile_id: RELAY_PROFILE, access_policy: 'private' };
 
         const mine = buttons.filter((b) => b.config_id === config.id);
         const enabled = mine.filter((b) => b.is_enabled === undefined || Number(b.is_enabled) !== 0);
@@ -164,6 +173,16 @@ function buildPlan(doc) {
         });
         for (const extra of copies.slice(enabled.length)) {
             cfg.dropped.push({ command: strOr(extra.command), label: strOr(extra.label), reason: 'on the stream but not in the config' });
+        }
+
+        // A config with nothing left to convert makes no robot (its name goes back to the owner's pool).
+        if (!cfg.buttons.length) {
+            namesByOwner.get(ownerSubject).delete(cfg.robot.name);
+            cfg.status = 'empty';
+            cfg.reason = 'no button to convert (none enabled in Live, or every one dropped)';
+            cfg.robot = null;
+            plan.push(cfg);
+            continue;
         }
 
         // The whitelist of the owner's channel, by Network subject.
@@ -341,4 +360,4 @@ if (require.main === module) {
     main().then((code) => { if (code) process.exit(code); }).catch((e) => { console.error(`convert-live-controls: ${e.message}`); process.exit(1); });
 }
 
-module.exports = { buildPlan, formatPlan, applyPlan, buttonsObject, convert, normaliseName, uniqueName, RELAY_PROFILE, RESERVED_KEYS };
+module.exports = { buildPlan, formatPlan, applyPlan, buttonsObject, convert, normaliseName, uniqueName, RELAY_PROFILE };

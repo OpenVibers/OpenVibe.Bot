@@ -207,3 +207,16 @@ function samples(profile, kind, names) {
 
     done();
 })();
+
+// Which keys a profile button may take (server/profiles reservedKeyReason): Space and Escape never; the drive keys
+// only where the profile drives (sim.rover does, relay.generic does not).
+{
+    const { reservedKeyReason } = require('../server/profiles');
+    const rover = require('../server/profiles/sim.rover.json');
+    const relay = require('../server/profiles/relay.generic.json');
+    const assert2 = require('assert');
+    assert2.ok(reservedKeyReason('Space', relay) && reservedKeyReason(' ', relay) && reservedKeyReason('Escape', rover), 'stop/release keys everywhere');
+    assert2.strictEqual(reservedKeyReason('w', relay), null, 'no drive, so W is free');
+    assert2.ok(reservedKeyReason('w', rover) && reservedKeyReason('KeyD', rover) && reservedKeyReason('ArrowUp', rover), 'drive keys on a driving profile');
+    assert2.strictEqual(reservedKeyReason('g', rover), null);
+}

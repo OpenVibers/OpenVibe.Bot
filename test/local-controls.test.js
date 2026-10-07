@@ -39,7 +39,7 @@ const { renderPanel } = require('../server/web/render');
             // The drive and stop keys stay with driving: a button never takes Space, WASD, Q/E or an arrow.
             for (const key of ['Space', ' ', 'w', 'KeyD', 'ArrowUp', 'e', 'Escape'])
                 await assert.rejects(domain.robots.saveLocalProfile(id, owner, { buttons: { go: { label: 'Go', key } } }),
-                    (e) => e.status === 422 && /drives or stops/.test(e.detail || e.message), `key ${JSON.stringify(key)}`);
+                    (e) => e.status === 422 && /stops the robot|drives the robot/.test(e.detail || e.message), `key ${JSON.stringify(key)}`);
             assert.strictEqual(await domain.robots.localProfile(id), null);
             assert.strictEqual((await domain.robots.get(id)).profile_id, 'sim.rover');
         });
