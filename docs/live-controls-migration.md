@@ -1,6 +1,6 @@
 # Moving OpenVibe.Live's stream controls into Bot (plan T15, row R9)
 
-Status: design, 2026-10-07. Live still serves its controls; nothing here has been built yet.
+Status: steps 1–3 built in Contracts 0.109.0 and Bot, 2026-10-07. Live still serves its controls; steps 4–6 remain.
 
 ## What Live has today
 
@@ -35,13 +35,13 @@ lines) let viewers drive a streamer's hardware from the channel page:
 
 ## What has to be built
 
-1. **Contracts** (minor release): `bot.command@1` gains the kinds `button` (`name`, optional `state: down|up`) and
+1. **Built — Contracts 0.109.0** (minor release): `bot.command@1` gains the kinds `button` (`name`, optional `state: down|up`) and
    `point` (`x`, `y` in `[0, 1]`); `bot.robot-profile@1` gains `commands.button.names` and `commands.point`, and the
    widget types `buttons` and `video_click`. Additive; existing profiles stay valid.
-2. **Bot — robot-local profiles**: a robot may carry its own profile (`robot_profiles` row owned by the robot,
+2. **Built — Bot robot-local profiles**: a robot may carry its own profile (`robot_profiles` row owned by the robot,
    `profile_id = 'local.<rob_…>'`) instead of a catalogue one; the owner edits its buttons on the robot page (a
    plain form: name, label, key, cooldown, hold). Validated by the same profile schema and registries.
-3. **Bot — the gate and the panel**: the gate accepts `button`/`point` only for names and shapes the profile
+3. **Built — Bot gate and panel**: the gate accepts `button`/`point` only for names and shapes the profile
    declares; the panel renders `buttons` (keyboard bindings, hold behaviour) and `video_click` (a click layer on the
    camera tile, normalised coordinates).
 4. **Node — the relay plugin**: forwards `button`/`point` commands to the owner's local script in the shape Live's

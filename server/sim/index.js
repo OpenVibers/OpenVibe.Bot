@@ -14,7 +14,7 @@
  * No device row is written: the simulator's id is `dev_sim_<robot id>`, and a real device online for the same
  * robot takes precedence over it.
  */
-const { listProfiles, getProfile } = require('../profiles');
+const { getProfile } = require('../profiles');
 
 const isSimProfile = (profile) => !!(profile && profile.mapping && profile.mapping.driver === 'sim');
 const BATTERY_FLOOR = 20;          // % the simulated pack never drains below
@@ -125,9 +125,8 @@ function createSimulator({ config, domain, hub, now = () => Date.now(), log = co
     }
 
     async function startAll() {
-        const ids = (await listProfiles(domain.db)).filter((r) => isSimProfile(r.profile)).map((r) => r.id);
-        if (!ids.length) return 0;
-        const robots = await domain.db.many('SELECT * FROM robots WHERE profile_id = ANY($1)', [ids]);
+        const robots = await domain.db.many(`SELECT r.* FROM robots r JOIN robot_profiles p
+            ON p.id = r.profile_id AND p.version = r.profile_version WHERE p.profile->'mapping'->>'driver' = 'sim'`);
         for (const robot of robots) await attach(robot);
         return robots.length;
     }

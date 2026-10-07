@@ -140,7 +140,7 @@ function camerasOf(profile = {}) {
  * `signaling_url` is the robot's live OpenRe WebRTC session, when one is; the tile carries it (escaped)
  * so public/panel.js can play it — the server itself emits no script.
  */
-function cameraTiles(w, profile, signaling_url = null) {
+function cameraTiles(w, profile, signaling_url = null, pointEnabled = false) {
     const all = camerasOf(profile).map((c, i) => ({ c, i }));
     const pick = w.camera != null ? all.filter(({ c, i }) => c.name === w.camera || i === w.camera) : all;
     return (pick.length ? pick : all).map(({ c, i }) => {
@@ -149,7 +149,7 @@ function cameraTiles(w, profile, signaling_url = null) {
         const caption = [title, res.replace('x', '×'), c.transport ? String(c.transport).toUpperCase() : ''].filter(Boolean).join(' · ');
         return `<figure class="camera" data-camera="${esc(i)}"${res ? ` data-resolution="${esc(res)}"` : ''}${c.transport ? ` data-transport="${esc(c.transport)}"` : ''}`
             + `${signaling_url ? ` data-signaling-url="${esc(signaling_url)}"` : ''}>`
-            + `<div class="camera-screen" data-camera-screen>${icon('camera', 'icon camera-icon')}`
+            + `<div class="camera-screen" data-camera-screen${pointEnabled ? ' data-video-click' : ''}>${icon('camera', 'icon camera-icon')}`
             + '<p class="camera-title">No live video right now.</p>'
             + '<p class="camera-sub">The camera shows here while the robot is online and sending video.</p></div>'
             + (caption ? `<figcaption>${esc(caption)}</figcaption>` : '')
@@ -209,7 +209,19 @@ function renderWidget(w, { profile = {}, allowed_commands = [], signaling_url = 
                 + '</div>';
             break;
         case 'camera':
-            inner = `<div class="cameras">${cameraTiles(w, profile, signaling_url)}</div>`;
+            inner = `<div class="cameras">${cameraTiles(w, profile, signaling_url,
+                (profile.widgets || []).some((widget) => widget.type === 'video_click') && allowed_commands.includes('point'))}</div>`;
+            break;
+        case 'buttons': {
+            const names = (commands.button && commands.button.names) || {};
+            inner = `<div class="button-grid">${Object.entries(names).map(([name, button]) =>
+                `<button type="button" class="hold pad-button" data-button-name="${esc(name)}" data-button-hold="${button.hold ? 'true' : 'false'}"${button.key ? ` data-button-key="${esc(button.key)}"` : ''}${disabledUnless(enabled)}>`
+                + `<span>${esc(button.label)}</span>${button.key ? `<kbd>${esc(button.key)}</kbd>` : ''}</button>`).join('')}</div>`;
+            break;
+        }
+        case 'video_click':
+            if ((profile.widgets || []).some((widget) => widget.type === 'camera')) return '';
+            inner = `<div class="cameras">${cameraTiles(w, profile, signaling_url, enabled)}</div>`;
             break;
         default:
             inner = '';
@@ -258,6 +270,43 @@ ${toggle('live', s.live && s.live.on, 'Show on my OpenVibe.Live channel', 'Lets 
 </form></section>`;
 }
 
+/** Robot-owned button profile editor. Add and remove submit the form and redraw it without saving. */
+function localProfileForm(robot, profile, settings = {}) {
+    const rows = settings.rows || Object.entries((profile.commands.button && profile.commands.button.names) || {})
+        .map(([name, b]) => ({ name, label: b.label, key: b.key || '', cooldown: b.cooldown_ms == null ? '' : String(b.cooldown_ms), hold: !!b.hold }));
+    const shown = rows.length ? rows : [{ name: '', label: '', key: '', cooldown: '', hold: false }];
+    const point = settings.point !== undefined ? settings.point : !!profile.commands.point;
+    const pointCooldown = settings.pointCooldown !== undefined ? settings.pointCooldown :
+        (profile.commands.point && profile.commands.point.cooldown_ms != null ? String(profile.commands.point.cooldown_ms) : '');
+    const fields = shown.map((row, i) => `<fieldset class="button-def">
+<legend>Button ${i + 1}</legend>
+<div class="button-def-grid">
+<label class="field"><span>Name</span><input name="name_${i}" value="${esc(row.name)}" maxlength="32" autocomplete="off" pattern="[a-z][a-z0-9_]{0,31}" placeholder="horn"></label>
+<label class="field"><span>Label</span><input name="label_${i}" value="${esc(row.label)}" maxlength="40" autocomplete="off" placeholder="Horn"></label>
+<label class="field"><span>Key</span><input name="key_${i}" value="${esc(row.key)}" maxlength="16" autocomplete="off" placeholder="h"></label>
+<label class="field"><span>Cooldown (ms)</span><input name="cooldown_${i}" type="number" min="0" step="1" value="${esc(row.cooldown)}" placeholder="0"></label>
+</div>
+<div class="button-def-foot">
+<label class="check"><input name="hold_${i}" type="checkbox" value="on"${row.hold ? ' checked' : ''}> Hold while pressed</label>
+<button type="submit" class="quiet" name="action" value="remove:${i}">Remove</button>
+</div>
+</fieldset>`).join('');
+    return `<section class="setting-card" aria-labelledby="buttons-h"><h2 id="buttons-h">Buttons</h2>
+<p class="setting-note">Each button sends its name to the robot. A key works while the panel has focus; the drive keys and Space stay with driving.</p>
+${settings.error ? `<p class="error" role="alert">${esc(settings.error)}</p>` : ''}
+<form method="post" action="/robots/${esc(robot.id)}/profile" data-profile-form>
+<input type="hidden" name="count" value="${shown.length}">
+${fields}
+<button type="submit" class="quiet" name="action" value="add">Add a button</button>
+<label class="toggle"><input type="checkbox" name="point" value="on"${point ? ' checked' : ''}><span><b>Video click</b><small>A click on the camera sends where it landed, for drivers.</small></span></label>
+<label class="field"><span>Video click cooldown (ms)</span><input type="number" name="point_cooldown" min="0" step="1" value="${esc(pointCooldown)}" placeholder="0"></label>
+<div class="form-actions">
+<button type="submit" class="primary" name="action" value="save">Save buttons</button>
+${settings.catalogueId && robot.profile_id.startsWith('local.') ? `<button type="submit" class="quiet" name="action" value="catalogue">Use ${esc(settings.catalogueId)} instead</button>` : ''}
+</div>
+</form></section>`;
+}
+
 /** A link out of a frame: always a new tab, never with a handle back to the framing page. */
 const outLink = (href, text, cls = 'button') => `<a class="${cls}" href="${esc(href)}" target="_blank" rel="noopener">${esc(text)}</a>`;
 
@@ -296,7 +345,7 @@ function turnStrip(robot, role) {
     return `<div class="turn" data-turn hidden><span class="turn-state" data-turn-state></span><span class="turn-meta" data-turn-meta></span><form method="post" action="/robots/${esc(robot.id)}/queue/leave" data-turn-leave><button type="submit" class="quiet">Leave the queue</button></form></div>`;
 }
 
-function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs = 150, mode = 'page', signedIn = true, streaming = null, people = null, signaling_url = null }) {
+function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs = 150, mode = 'page', signedIn = true, streaming = null, people = null, signaling_url = null, profileForm = {} }) {
     const embed = mode === 'embed';
     const latched = !!(robot.estop && robot.estop.latched);
     const widgets = (profile.widgets || []).map((w, i) => ({ w, i }))
@@ -308,7 +357,7 @@ function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs
 ${embed ? '' : topbar(`<span class="crumb">${esc(robot.name)}</span>`)}
 <div class="estop-bar"><p class="estop-state" role="status" aria-live="assertive"><span class="estop-dot"></span><span data-estop-state>${latched ? 'E-stop latched' : 'E-stop clear'}</span><span class="estop-note">${latched ? ' — the robot stays still until the owner clears it.' : ''}</span></p>${clear}${estop}</div>
 </header>
-<main id="panel" data-robot-id="${esc(robot.id)}" data-role="${esc(role)}" data-hold-ms="${esc(holdResendMs)}" data-allowed="${data(allowed_commands)}">
+<main id="panel" tabindex="0" data-robot-id="${esc(robot.id)}" data-role="${esc(role)}" data-hold-ms="${esc(holdResendMs)}" data-allowed="${data(allowed_commands)}">
 <div class="panel-head">
 <h1>${esc(robot.name)}</h1>
 <p class="meta"><span class="pill online" data-online-pill data-state="connecting"><span class="dot"></span><span data-online-label>Connecting…</span></span> <span class="pill">${esc(profile.name || robot.profile_id)}</span> <span class="pill role" data-role-label>${esc(ROLE_LABEL[role] || role)}</span></p>
@@ -319,7 +368,7 @@ ${embed && role === 'watcher' && !signedIn ? `<p class="embed-sign-in">${outLink
 <div class="widgets">
 ${widgets.join('\n')}
 </div>
-${role === 'owner' && !embed ? `<div class="owner-settings">${embedForm(robot)}${streamingForm(robot, streaming)}${people ? peopleCard(robot, people) : ''}</div>` : ''}
+${role === 'owner' && !embed ? `<div class="owner-settings">${localProfileForm(robot, profile, profileForm)}${embedForm(robot)}${streamingForm(robot, streaming)}${people ? peopleCard(robot, people) : ''}</div>` : ''}
 </main>`;
     return page(robot.name, body, { scripts: ['/panel/panel.js'], bodyClass: embed ? 'embed-page' : 'panel-page' });
 }

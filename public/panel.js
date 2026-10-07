@@ -198,11 +198,49 @@
         el.classList.remove('held');
         send('actuator', { name: el.dataset.tone, value: null });
     }
+    // A hold button may have both a pointer and a key down. Only the first starts it; the last release
+    // sends up. Re-sending down keeps the device's deadline alive while the operator holds it.
+    const buttonHolds = new Map();
+    function pressProfileButton(el, source) {
+        if (el.disabled || !joined || !allowed.includes('button')) return;
+        const name = el.dataset.buttonName;
+        if (el.dataset.buttonHold !== 'true') { send('button', { name }); return; }
+        let h = buttonHolds.get(el);
+        if (!h) {
+            h = { sources: new Set(), timer: null };
+            buttonHolds.set(el, h);
+            el.classList.add('held');
+            send('button', { name, state: 'down' });
+            h.timer = setInterval(() => send('button', { name, state: 'down' }), HOLD_MS);
+        }
+        h.sources.add(source);
+    }
+    function releaseProfileButton(el, source) {
+        const h = buttonHolds.get(el);
+        if (!h) return;
+        h.sources.delete(source);
+        if (h.sources.size) return;
+        clearInterval(h.timer);
+        buttonHolds.delete(el);
+        el.classList.remove('held');
+        send('button', { name: el.dataset.buttonName, state: 'up' });
+    }
+    for (const el of $$('[data-button-name]')) {
+        el.addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            try { el.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+            pressProfileButton(el, `pointer:${e.pointerId}`);
+        });
+        for (const event of ['pointerup', 'pointercancel', 'lostpointercapture'])
+            el.addEventListener(event, (e) => releaseProfileButton(el, `pointer:${e.pointerId}`));
+        el.addEventListener('contextmenu', (e) => e.preventDefault());
+    }
     function releaseAll() {
         for (const [kind, h] of [...holds]) for (const source of [...h.src.keys()]) {
             if (source instanceof Element) releaseButton(source); else holdRelease(kind, source);
         }
         for (const el of [...tones.keys()]) releaseTone(el);
+        for (const [el, h] of [...buttonHolds]) for (const source of [...h.sources]) releaseProfileButton(el, source);
         for (const s of sticks) s.release();
         pad.reset();
         for (const el of $$('.held')) el.classList.remove('held');
@@ -311,12 +349,24 @@
         holdRelease(DRIVE, source);
     }
     const typing = (e) => /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName);
+    const profileKey = (e) => main.contains(document.activeElement) &&
+        $$('[data-button-key]').find((el) => !el.disabled && (el.dataset.buttonKey === e.code || el.dataset.buttonKey.toLowerCase() === e.key.toLowerCase()));
     document.addEventListener('keydown', (e) => {
         if (typing(e)) return;
+        const focusedButton = e.target.closest && e.target.closest('[data-button-name]');
+        if (focusedButton && (e.code === 'Enter' || e.code === 'Space')) {
+            e.preventDefault(); if (!e.repeat) pressProfileButton(focusedButton, `key:${e.code}`); return;
+        }
+        // Stop and the drive keys first: a button's key never shadows them.
         if (e.code === 'Space') { e.preventDefault(); stopDrive(); return; }
-        if (keyValue(e.code)) { e.preventDefault(); if (!e.repeat) keyPress(e.code, `key:${e.code}`); }
+        if (keyValue(e.code)) { e.preventDefault(); if (!e.repeat) keyPress(e.code, `key:${e.code}`); return; }
+        const button = profileKey(e);
+        if (button) { e.preventDefault(); if (!e.repeat) pressProfileButton(button, `key:${e.code}`); }
     });
-    document.addEventListener('keyup', (e) => { if (KEYS[e.code]) keyRelease(e.code, `key:${e.code}`); });
+    document.addEventListener('keyup', (e) => {
+        for (const [el, h] of buttonHolds) if (h.sources.has(`key:${e.code}`)) releaseProfileButton(el, `key:${e.code}`);
+        if (KEYS[e.code]) keyRelease(e.code, `key:${e.code}`);
+    });
 
     function stopDrive() {
         const h = holds.get(DRIVE);
@@ -433,6 +483,20 @@
         const screen = $('[data-camera-screen]', cam);
         if (w > 0 && h > 0 && screen) screen.style.aspectRatio = `${w} / ${h}`;
     }
+    for (const screen of $$('[data-video-click]')) screen.addEventListener('click', (e) => {
+        if (!joined || !allowed.includes('point')) return;
+        const box = screen.getBoundingClientRect();
+        const video = $('video', screen);
+        let left = box.left; let top = box.top; let width = box.width; let height = box.height;
+        // object-fit: contain leaves letterboxing. The command coordinates name the displayed pixels.
+        if (video && !video.hidden && video.videoWidth && video.videoHeight) {
+            const scale = Math.min(width / video.videoWidth, height / video.videoHeight);
+            width = video.videoWidth * scale; height = video.videoHeight * scale;
+            left += (box.width - width) / 2; top += (box.height - height) / 2;
+        }
+        if (!width || !height || e.clientX < left || e.clientX > left + width || e.clientY < top || e.clientY > top + height) return;
+        send('point', { x: (e.clientX - left) / width, y: (e.clientY - top) / height });
+    });
 
     // ── Live camera: the robot's OpenRe.Stream WebRTC session ────────────────────────────────────────
     // A tile the server marked with a live session's viewer signaling URL plays it: the mediasoup-client

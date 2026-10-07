@@ -139,6 +139,14 @@ main { padding: 1rem max(1rem, env(safe-area-inset-right)) calc(1.5rem + env(saf
 .slider { flex-wrap: wrap; } .slider input { flex: 1; min-width: 8rem; }
 .colour label { display: flex; align-items: center; gap: 0.6rem; }
 .tone { width: 100%; min-height: 56px; user-select: none; -webkit-user-select: none; touch-action: none; }
+.button-grid { display: grid; gap: 0.5rem; grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr)); }
+.pad-button { min-height: 64px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.3rem;
+  font-weight: 600; user-select: none; -webkit-user-select: none; touch-action: none; }
+.pad-button kbd { font-weight: 400; color: var(--muted); }
+.pad-button.held kbd { color: inherit; border-color: currentColor; background: transparent; }
+.widget-video_click { order: -1; padding: 0; overflow: hidden; }
+.widget-video_click h2 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+[data-video-click] { cursor: crosshair; }
 .inline-form { display: flex; gap: 0.5rem; flex-wrap: wrap; } .inline-form > input, .inline-form > select { flex: 1; min-width: 8rem; }
 
 /* Readouts and the latency meter */
@@ -213,6 +221,15 @@ main { padding: 1rem max(1rem, env(safe-area-inset-right)) calc(1.5rem + env(saf
 .setting-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 0.9rem; min-width: 0; }
 .setting-card form { display: grid; gap: 0.6rem; }
 .setting-card button[type="submit"] { justify-self: start; }
+.button-def { margin: 0; padding: 0.7rem; display: grid; gap: 0.6rem; border: 1px solid var(--line); border-radius: 10px; background: var(--raised); min-width: 0; }
+.button-def legend { padding: 0 0.35rem; font-size: 0.85rem; font-weight: 600; color: var(--muted); }
+.button-def-grid { display: grid; gap: 0.5rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.field { display: grid; gap: 0.25rem; min-width: 0; color: var(--muted); font-size: 0.82rem; }
+.field input { width: 100%; padding: 0 0.65rem; border: 1px solid var(--line); background: var(--bg); color: var(--text); font-size: 0.95rem; }
+.field input::placeholder { color: var(--muted); opacity: 0.6; }
+.button-def-foot { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; }
+.check { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.92rem; cursor: pointer; }
+.form-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
 .setting-note { color: var(--muted); font-size: 0.88rem; margin: -0.35rem 0 0.7rem; }
 .setting-note a { color: var(--accent); }
 .toggle { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.75rem; align-items: start; min-height: var(--tap);
