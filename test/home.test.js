@@ -18,7 +18,7 @@ const { boot, check, done } = require('./helpers/app');
         assert.strictEqual(r.headers.get('cache-control'), 'private, no-cache');
         assert.strictEqual(r.headers.get('vary'), 'Cookie');
         const csp = r.headers.get('content-security-policy');
-        assert.match(csp, /connect-src 'self' https:\/\/openvibe\.network https:\/\/events\.openvibe\.network/);
+        assert.match(csp, /connect-src 'self' https:\/\/openvibe\.network https:\/\/openvibe\.events/);
         assert.match(csp, /frame-ancestors 'none'/);
         const html = await r.text();
         assert.match(html, /<h1>Drive your robot<span class="sc-accent"> from any browser\.<\/span><\/h1>/);
