@@ -227,8 +227,11 @@ function loadConfig(env = process.env) {
             timeoutMs: Math.max(100, int(env.BOT_OPENRE_TIMEOUT_MS, 8000)),
         },
         // OpenVibe.Billing (plan T14 L1): job usage readings go to billing.usage.record (POST <url>/api/v1/usage).
-        // token is a Network service token for audience openvibe.billing holding billing.usage.record; it is never
-        // logged or returned. Either unset: readings wait in run_usage_outbox (never dropped) until both are set.
+        // By default Bot mints its own Network service token (audience openvibe.billing, capability
+        // billing.usage.record) from its OAuth client, exactly as the OpenRe client does; BOT_BILLING_TOKEN, an
+        // operator-minted token of the same grant, overrides it. The token is never logged or returned. With
+        // BOT_BILLING_URL unset (or no token and no Network client to mint one): readings wait in
+        // run_usage_outbox (never dropped).
         billing: {
             url: trim(env.BOT_BILLING_URL || ''),
             token: String(env.BOT_BILLING_TOKEN || '').trim(),
