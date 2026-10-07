@@ -20,6 +20,10 @@
  *   POST /robots/:id/queue/leave          any signed-in person: leave the robot's turn queue → 303
  *   GET  /panel/panel.js, /panel/panel.css   the panel client and its sheet (public/, no build step)
  *
+ * The panel and embed pages carry their own CSP (PANEL_CSP / embedCsp): the live camera plays the robot's
+ * OpenRe WebRTC session with the pinned mediasoup-client ESM build from esm.sh, so those two pages alone
+ * allow that script origin and OpenRe's signaling; the rest of the site keeps `default-src 'self'`.
+ *
  * Not signed in → 302 to /auth/login?next=<the page>. No access → 403 (bot.not_an_operator / bot.forbidden).
  * Pages are never cached: a pairing page carries a live code. Adding a robot and minting a code count against
  * the signed-in person's `bot.robot.manage` limit, the same one /api/v1 applies.
@@ -35,6 +39,17 @@ const { renderHome, HOME_CSP } = require('./home');
 
 const PUBLIC = path.join(__dirname, '..', '..', 'public');
 const HOLD_RESEND_MS = 150;
+// The panel plays the robot's live video with mediasoup-client, whose npm package ships no browser
+// bundle: the page imports the pinned ESM build OpenVibe.Live uses from esm.sh, and its viewer
+// signaling endpoint is OpenRe's wss host (OpenRe README "playback descriptor"). Exactly these two
+// sources, on the panel and embed pages only — the site-wide CSP (server/app.js) stays as it is.
+const PANEL_SCRIPT_SRC = 'https://esm.sh';
+const PANEL_CONNECT_SRC = 'wss://ingest.openre.stream';
+const PANEL_CSP = ["default-src 'self'", `script-src 'self' ${PANEL_SCRIPT_SRC}`, `connect-src 'self' ${PANEL_CONNECT_SRC}`,
+    "frame-ancestors 'self'", "object-src 'none'", "base-uri 'self'"].join('; ');
+/** The embed's own CSP: the panel's sources plus the frame-ancestors allow-list. */
+const embedCsp = (config) => ["default-src 'self'", `script-src 'self' ${PANEL_SCRIPT_SRC}`, `connect-src 'self' ${PANEL_CONNECT_SRC}`,
+    `frame-ancestors ${frameAncestors(config)}`, "object-src 'none'", "base-uri 'self'"].join('; ');
 
 function createWebRoutes(config, { domain = null, sim = null, onvif = null, limits = null, identity = null, hub = null, log = console } = {}) {
     const r = express.Router();
@@ -238,16 +253,23 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     async function sendPanel(res, robot, profile, role, mode = 'page', signedIn = true) {
         await attachInProcess(robot, profile);
         const { maxCommandMs } = domain.control.effectiveLimits(robot, profile);
-        // Only the owner's own page shows the streaming switches; an OpenRe that does not answer leaves them
-        // greyed out with a reason instead of failing the panel.
-        const streaming = role === 'owner' && mode === 'page'
-            ? await domain.streaming.get(robot.id).catch(() => ({ available: false, reason: 'unavailable', media: { on: false }, live: { on: false } }))
-            : null;
+        // Two OpenRe reads, run together. Only the owner's own page shows the streaming switches, greyed out
+        // with a reason when OpenRe does not answer; the live session is for the camera tile of every page,
+        // where it is left a placeholder instead. A watcher is the anonymous embed and only exists when the
+        // owner set embed_public — a private robot's video reaches no one else.
+        const [streaming, signaling_url] = await Promise.all([
+            role === 'owner' && mode === 'page'
+                ? domain.streaming.get(robot.id).catch(() => ({ available: false, reason: 'unavailable', media: { on: false }, live: { on: false } }))
+                : null,
+            role === 'watcher' && !robot.embed_public
+                ? null
+                : domain.video.live(robot.id).catch((e) => { log.warn(`[Bot] live video for ${robot.id}: ${e.message}`); return null; }),
+        ]);
         // The owner's People card: every member but the owner, with Network's name for each. A Network that
         // does not answer leaves the subject id and a note (see renderPanel) instead of failing the panel.
         const people = role === 'owner' && mode === 'page' ? await peopleFor(robot) : null;
         res.type('html').send(renderPanel({
-            robot: presentForPage(robot), profile, role, mode, signedIn, streaming, people,
+            robot: presentForPage(robot), profile, role, mode, signedIn, streaming, people, signaling_url,
             allowed_commands: role === 'watcher' ? [] : domain.control.allowedFor(robot, role, profile),
             // A held control is re-sent well inside the device's deadline, so it never stops between two frames.
             holdResendMs: Math.max(50, Math.min(HOLD_RESEND_MS, Math.floor(maxCommandMs / 2))),
@@ -269,6 +291,9 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     }
 
     r.get('/panel/:id', page(async (req, res) => {
+        // The panel page's own CSP (the live video's script and signaling sources, nothing else) replaces
+        // the app's for this route only; every other page keeps `default-src 'self'`.
+        res.setHeader('Content-Security-Policy', PANEL_CSP);
         const me = requireUser(req);
         const robot = await domain.robots.get(req.params.id);
         if (!robot) throw new BotError(404, 'bot.robot_not_found', 'no such robot');
@@ -281,7 +306,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
 
     // The embed's own CSP replaces the app's for this route only; it sets no cookie and needs none to watch.
     r.get('/panel/:id/embed', page(async (req, res) => {
-        res.setHeader('Content-Security-Policy', ["default-src 'self'", `frame-ancestors ${frameAncestors(config)}`, "object-src 'none'", "base-uri 'self'"].join('; '));
+        res.setHeader('Content-Security-Policy', embedCsp(config));
         const robot = await domain.robots.get(req.params.id);
         if (!robot) throw new BotError(404, 'bot.robot_not_found', 'no such robot');
         let role = req.viewer ? await memberRole(robot, req.viewer) : null;

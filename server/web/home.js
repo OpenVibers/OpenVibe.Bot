@@ -48,7 +48,7 @@ function sections({ signedIn }) {
         actions: signedIn
             ? [{ label: 'Your robots', href: '/robots', primary: true }, { label: 'How it works', href: '#how' }]
             : [{ label: 'Sign in with OpenVibe', href: '/auth/login?next=%2Frobots', primary: true }, { label: 'How it works', href: '#how' }],
-        note: 'Alpha. Live video in the panel arrives when OpenRe.Stream can play a browser (WHIP) stream back; until then each camera keeps its place in the panel without a picture.',
+        note: 'Alpha. A paired robot sends its camera over WebRTC to OpenRe.Stream and the panel plays it live; the first supported kit is the Adeept 4WD Smart Car for Raspberry Pi.',
     }) + showcase.steps({
         id: 'how',
         title: 'Online in three steps',

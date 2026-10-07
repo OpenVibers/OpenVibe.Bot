@@ -11,14 +11,17 @@
  *                   and POST /internal/identity/resolve-batch, over the users newUser registers; failIdentity
  *                   makes them answer a failure (Network down).
  *   startEvents()   POST /api/v1/events recording what Bot's outbox relays; GET /api/health
- *   startOpenRe()   OpenRe.Stream's stream routes Bot calls (server/api/v1.js there): GET /api/v1/streams?external_ref=,
- *                   GET /api/v1/streams/:id, POST /api/v1/streams, PATCH /api/v1/streams/:id (recording_mode /
- *                   mirror_to_live), POST …/:id/keys/rotate, DELETE …/:id (409 while live), behind one bearer
- *                   token whose capabilities OpenRe's guards check (setCaps(list) to narrow them; 403
- *                   capability.denied). With `network` given, a service token Network minted for audience
- *                   openvibe.openre is accepted too, its own `cap` claims being the capabilities (the minted
- *                   path, 401 token.* otherwise). streams, calls (every request, its token and X-OV-Subject),
- *                   admits(key) (OpenRe's resolveIngestKey: an active key or one in grace),
+ *   startOpenRe()   OpenRe.Stream's stream and session routes Bot calls (server/api/v1.js there):
+ *                   GET /api/v1/streams?external_ref=, GET /api/v1/streams/:id, POST /api/v1/streams,
+ *                   PATCH /api/v1/streams/:id (recording_mode / mirror_to_live), POST …/:id/keys/rotate,
+ *                   DELETE …/:id (409 while live), GET /api/v1/sessions?stream_id=&state= and
+ *                   GET /api/v1/sessions/:id/playback (a WebRTC session's `webrtc.signaling_url`, never the
+ *                   key), behind one bearer token whose capabilities OpenRe's guards check (setCaps(list) to
+ *                   narrow them; 403 capability.denied). With `network` given, a service token Network minted
+ *                   for audience openvibe.openre is accepted too, its own `cap` claims being the capabilities
+ *                   (the minted path, 401 token.* otherwise). streams, sessions, calls (every request, its
+ *                   token and X-OV-Subject), admits(key) (OpenRe's resolveIngestKey: an active key or one in
+ *                   grace), goLive(streamId, { protocol }) / endLive(id) (a stream's open session),
  *                   failNext(status | 'hang', times = 1)
  */
 const http = require('http');
@@ -180,14 +183,16 @@ async function startEvents() {
 }
 
 // The capabilities BOT_OPENRE_TOKEN must hold: GET /streams is openre.stream.read, POST and DELETE
-// openre.stream.write, keys/rotate openre.key.rotate (OpenRe server/api/v1.js guards).
-const OPENRE_CAPS = ['openre.stream.read', 'openre.stream.write', 'openre.key.rotate'];
+// openre.stream.write, keys/rotate openre.key.rotate, sessions and playback openre.session.read
+// (OpenRe server/api/v1.js guards).
+const OPENRE_CAPS = ['openre.stream.read', 'openre.stream.write', 'openre.key.rotate', 'openre.session.read'];
 
 async function startOpenRe({ token = `ovt_${crypto.randomBytes(16).toString('hex')}`, caps = OPENRE_CAPS, network = null } = {}) {
     let granted = [...caps];
     // OpenRe's hasCap: the exact capability or a `.*` grant covering it.
     const hasCap = (caps_, id) => caps_.some((g) => g === id || (g.endsWith('.*') && id.startsWith(g.slice(0, -1))));
     const streams = new Map();
+    const sessions = new Map();
     const calls = [];
     let failure = null;
     let failuresLeft = 0;   // how many further requests failNext answers before it clears
@@ -196,8 +201,41 @@ async function startOpenRe({ token = `ovt_${crypto.randomBytes(16).toString('hex
         const key = `ork_${crypto.randomBytes(32).toString('base64url')}`;
         return { id: `key_${++n}`, key, hint: key.slice(-4), status: 'active', grace_until: null };
     };
+    /** The stream's open session, as GET /streams/:id reports it (OpenRe publicDefinition.session). */
+    const openFor = (streamId) => [...sessions.values()].find((s) => s.stream_id === streamId && s.state !== 'ended') || null;
+    const sessionView = (s) => ({ id: s.id, stream_id: s.stream_id, protocol: s.protocol, state: s.state, live_at: s.live_at });
+    /** A session's playback descriptor: for WebRTC, the viewer signaling URL keyed by the playback id. */
+    const playbackOf = (s) => ({
+        session_id: s.id, protocol: s.protocol, state: s.state, live: s.state === 'live',
+        worker: { id: 'wrk_test', kind: s.protocol, generation: 1, state: 'up' }, thumbnail_url: null,
+        flv: null, rtmp: null, jsmpeg: null, hls: null,
+        webrtc: s.protocol === 'webrtc' ? { signaling_url: `ws://127.0.0.1:9936/w/${s.id}`, announced_ip: '203.0.113.7' } : null,
+    });
+    /**
+     * A stream goes live (tests): the open session the session list and the playback descriptor point at,
+     * one per stream as OpenRe allows. `protocol` may be 'rtmp' to check a non-WebRTC session is passed
+     * over. endLive(id) ends it; both keep the stream's `live` flag in step.
+     */
+    function goLive(streamId, { protocol = 'webrtc' } = {}) {
+        const st = streams.get(streamId);
+        if (!st) return null;
+        for (const open of [...sessions.values()]) if (open.stream_id === streamId && open.state !== 'ended') endLive(open.id);
+        const session = { id: `ses_${crypto.randomBytes(13).toString('hex').toUpperCase()}`, stream_id: streamId, protocol, state: 'live', live_at: new Date().toISOString() };
+        sessions.set(session.id, session);
+        st.live = true;
+        return session;
+    }
+    function endLive(id) {
+        const session = sessions.get(id);
+        if (!session || session.state === 'ended') return session || null;
+        session.state = 'ended';
+        const st = streams.get(session.stream_id);
+        if (st && ![...sessions.values()].some((x) => x.stream_id === st.id && x.state !== 'ended')) st.live = false;
+        return session;
+    }
     const view = (st) => ({ id: st.id, owner: { type: 'user', id: st.owner }, protocols: st.protocols, state: st.state, external_refs: st.refs,
         recording_mode: st.recording_mode, recording_visibility: st.recording_visibility, playback_visibility: st.playback_visibility, mirror_to_live: st.mirror_to_live,
+        session: (() => { const open = openFor(st.id); return open ? { id: open.id, state: open.state, protocol: open.protocol, live_at: open.live_at } : null; })(),
         keys: st.keys.filter((k) => k.status !== 'revoked').map((k) => ({ id: k.id, hint: k.hint, status: k.status })) });
     const problem = (res, status, code, detail) => { res.writeHead(status, { 'Content-Type': 'application/problem+json' }); res.end(JSON.stringify({ type: 'about:blank', status, code, detail })); };
     function admits(key) {
@@ -231,10 +269,25 @@ async function startOpenRe({ token = `ovt_${crypto.randomBytes(16).toString('hex
         }
         if (!shownCaps) return problem(res, 401, 'token.invalid', 'a service token is required');
         const m = /^\/api\/v1\/streams(?:\/([^/]+)(\/keys\/rotate)?)?$/.exec(url.pathname);
-        const need = m && (m[2] ? 'openre.key.rotate' : req.method === 'GET' ? 'openre.stream.read' : 'openre.stream.write');
+        const sm = /^\/api\/v1\/sessions(?:\/([^/]+)\/playback)?$/.exec(url.pathname);
+        const need = sm ? 'openre.session.read'
+            : m && (m[2] ? 'openre.key.rotate' : req.method === 'GET' ? 'openre.stream.read' : 'openre.stream.write');
         if (need && !hasCap(shownCaps, need)) return problem(res, 403, 'capability.denied', `${need} not granted`);
         if (!subject || !/^usr_/.test(subject)) return problem(res, 400, 'subject.invalid', 'X-OV-Subject must be a usr_… subject id');
         const mine = (id) => { const st = streams.get(id); return st && st.state !== 'archived' && st.owner === subject ? st : null; };
+        if (sm && req.method === 'GET') {
+            if (!sm[1]) {
+                const streamId = String(url.searchParams.get('stream_id') || '');
+                if (streamId && !mine(streamId)) return problem(res, 404, 'openre.stream_not_found', 'no such stream definition');
+                const state = url.searchParams.get('state');
+                const list = [...sessions.values()].filter((s) => (!streamId || s.stream_id === streamId) && mine(s.stream_id)
+                    && (!state || (state === 'open' ? s.state !== 'ended' : s.state === state)));
+                return send(res, 200, { sessions: list.map(sessionView) });
+            }
+            const session = sessions.get(decodeURIComponent(sm[1]));
+            if (!session || !mine(session.stream_id)) return problem(res, 404, 'openre.session_not_found', 'no such session');
+            return send(res, 200, { playback: playbackOf(session) });
+        }
         if (url.pathname === '/api/v1/streams' && req.method === 'GET') {
             const [service, type, ...rest] = String(url.searchParams.get('external_ref') || '').split(':');
             const st = [...streams.values()].find((x) => x.state !== 'archived' && x.owner === subject && x.refs.some((r) => r.service === service && r.type === type && r.id === rest.join(':')));
@@ -280,7 +333,7 @@ async function startOpenRe({ token = `ovt_${crypto.randomBytes(16).toString('hex
     });
     const url = await listen(server);
     return {
-        url, token, streams, calls, admits,
+        url, token, streams, sessions, calls, admits, goLive, endLive,
         failNext: (what, times = 1) => { failure = what; failuresLeft = what == null ? 0 : times; },
         setCaps: (list) => { granted = [...(list || caps)]; },
         close: () => { server.closeAllConnections(); return new Promise((r) => server.close(r)); },

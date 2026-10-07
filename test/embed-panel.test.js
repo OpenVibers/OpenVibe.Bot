@@ -34,11 +34,17 @@ const { renderPanel } = require('../server/web/render');
         assert.ok(page.includes('class="panel-page"') && page.includes('class="topbar"') && page.includes('data-embed-form'));
     });
 
-    await check('the panel client: a watcher joins on /watch and never sends anything but join', () => {
+    await check('the panel client: a watcher joins on /watch and never sends anything but join; a camera tile plays only its URL', () => {
         const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'panel.js'), 'utf8');
         assert.match(js, /const WATCHER = main\.dataset\.role === 'watcher';/);
         assert.match(js, /new WebSocket\(wsUrl\(WATCHER \? '\/watch' : '\/control'\)\)/);
         assert.match(js, /if \(WATCHER && frame\.type !== 'join'\) return false;/);
+        // The live camera reads the server's attribute, the pinned mediasoup-client build Live loads, and
+        // the sfu-viewer-* flow; a page with no tile carrying it never imports anything.
+        assert.match(js, /for \(const tile of \$\$\('\[data-signaling-url\]'\)\) liveCamera\(tile\);/);
+        assert.match(js, /import\(MEDIASOUP_URL\)/);
+        assert.match(js, /const MEDIASOUP_URL = 'https:\/\/esm\.sh\/mediasoup-client@3\.18\.7';/);
+        assert.match(js, /type: 'sfu-viewer-consume'/);
     });
 
     const t = await boot({ env: { BOT_WATCH_MAX_PER_IP: '2', BOT_WATCH_MAX_PER_ROBOT: '3' } });
@@ -49,7 +55,7 @@ const { renderPanel } = require('../server/web/render');
     let ipN = 0;
     // Each watcher from its own address unless one is named (the test server trusts one proxy hop, as production).
     const watch = (ip = `10.0.0.${++ipN}`) => t.ws('/watch', { headers: { 'X-Forwarded-For': ip } });
-    const EMBED_CSP = "default-src 'self'; frame-ancestors 'self' https://openvibe.live https://www.openvibe.live; object-src 'none'; base-uri 'self'";
+    const EMBED_CSP = "default-src 'self'; script-src 'self' https://esm.sh; connect-src 'self' wss://ingest.openre.stream; frame-ancestors 'self' https://openvibe.live https://www.openvibe.live; object-src 'none'; base-uri 'self'";
     const auditCount = async (id) => (await t.domain.audit.list(id, { limit: 100 })).length;
 
     const { robot: open } = await t.robot(alex, { name: 'Public rover' });
@@ -87,6 +93,23 @@ const { renderPanel } = require('../server/web/render');
         assert.ok(oh.includes('data-role="owner"') && oh.includes('data-estop>') && !oh.includes('data-embed-form') && !oh.includes('Sign in to control'));
         const stranger = await (await get(`/panel/${open.id}/embed`, bob)).text();
         assert.ok(stranger.includes('data-role="watcher"') && !stranger.includes('Sign in to control'));
+    });
+
+    await check('a live session\'s signaling URL reaches the anonymous public embed; a private robot is refused before it', async () => {
+        const code = (await t.call('POST', `/api/v1/robots/${open.id}/pairing-code`, { user: alex })).json;
+        const paired = await t.call('POST', '/api/v1/pair', { token: null, body: { robot: open.id, code: code.code } });
+        assert.strictEqual(paired.status, 201, paired.text);
+        const streamId = (await t.db.maybe('SELECT openre_stream_id FROM robots WHERE id = $1', [open.id])).openre_stream_id;
+        const session = t.openre.goLive(streamId);
+        const html = await (await get(`/panel/${open.id}/embed`)).text();
+        assert.ok(html.includes(`data-signaling-url="ws://127.0.0.1:9936/w/${session.id}"`), 'the public embed plays the robot\'s live session');
+        assert.ok(!html.includes(paired.json.publish_key) && !html.includes('ork_'), 'the ingest key is never on the page');
+        t.openre.endLive(session.id);
+        assert.ok(!(await (await get(`/panel/${open.id}/embed`)).text()).includes('data-signaling-url'), 'no session: the placeholder');
+        // The private robot's anonymous embed is refused outright, so its video can reach no one.
+        const refused = await get(`/panel/${closed.id}/embed`);
+        assert.strictEqual(refused.status, 403);
+        assert.ok(!(await refused.text()).includes('data-signaling-url'));
     });
 
     await check('/watch: join answers the public state only, and a robot that is not public (or unknown) is refused', async () => {

@@ -10,8 +10,8 @@
  *
  * By default Bot mints its own Network service token (audience openvibe.openre) from its OAuth client
  * credentials, with openre.stream.read (find), openre.stream.write (create, archive, streaming toggles),
- * openre.key.rotate (rotate) and openre.session.read/openre.output.read/openre.output.write (session status
- * and outputs, for panel video and restreaming later). An operator-minted BOT_OPENRE_TOKEN overrides it. The
+ * openre.key.rotate (rotate) and openre.session.read/openre.output.read/openre.output.write (the panel's
+ * live video, session status and outputs). An operator-minted BOT_OPENRE_TOKEN overrides it. The
  * token is cached until 60 s before expiry; a 401 from OpenRe (rotated key, clock) drops the cached token and
  * the call is tried once more.
  *
@@ -22,6 +22,8 @@
  *   rotate(id, owner, { grace_seconds, end_sessions })
  *                                         POST /api/v1/streams/:id/keys/rotate → { key: { id, key, hint }, … }
  *   archive(id, owner)                    DELETE /api/v1/streams/:id (OpenRe refuses a live stream: 409)
+ *   sessions(streamId, owner, { state })  GET /api/v1/sessions?stream_id=…&state=… → the stream's sessions
+ *   playback(id, owner)                   GET /api/v1/sessions/:id/playback → the descriptor, or null on 404
  *
  * A refusal (4xx) throws 502 bot.openre_refused with OpenRe's problem code and detail; no answer, a timeout
  * or a 5xx throws 503 bot.openre_unavailable. A 404 for a named stream (get, update, rotate, archive) answers null. The token is
@@ -120,6 +122,16 @@ function createOpenRe(config, { fetchImpl = globalThis.fetch } = {}) {
         rotate: (id, owner, { grace_seconds = 0, end_sessions = false } = {}) =>
             call('POST', `${stream(id)}/keys/rotate`, { owner, body: { grace_seconds, end_sessions }, named: true }),
         archive: (id, owner) => call('DELETE', stream(id), { owner, named: true }),
+        /** The stream's sessions, `state` 'open' (the default: starting, live or ending) or a named one. */
+        async sessions(streamId, owner, { state = 'open' } = {}) {
+            const query = `stream_id=${encodeURIComponent(streamId)}${state ? `&state=${encodeURIComponent(state)}` : ''}`;
+            const out = await call('GET', `/api/v1/sessions?${query}`, { owner });
+            return (out && Array.isArray(out.sessions) && out.sessions) || [];
+        },
+        async playback(id, owner) {
+            const out = await call('GET', `/api/v1/sessions/${encodeURIComponent(id)}/playback`, { owner, named: true });
+            return (out && out.playback) || null;
+        },
     };
 }
 
