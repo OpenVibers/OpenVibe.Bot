@@ -31,14 +31,13 @@ const { frameAncestors } = require('../config');
 const { BotError } = require('../util');
 const kits = require('../kits');
 const { renderPanel, renderEmbedRefused, renderRobotsPage, renderPairingPage } = require('./render');
-const VERSION = require('../../package.json').version;
+const { renderHome, HOME_CSP } = require('./home');
 
 const PUBLIC = path.join(__dirname, '..', '..', 'public');
 const HOLD_RESEND_MS = 150;
 
 function createWebRoutes(config, { domain = null, sim = null, onvif = null, limits = null, identity = null, hub = null, log = console } = {}) {
     const r = express.Router();
-    r.get('/', (req, res) => res.type('text/plain').send(`OpenVibe.Bot ${VERSION} — ok (devices, pairing and control; API under /api/v1)\n`));
     r.get('/robots.txt', (req, res) => res.type('text/plain').send('User-agent: *\nDisallow: /\n'));
     // `curl -fsSL` follows the redirect. The target is config only (checked at boot): no query parameter steers it.
     r.get('/install', (req, res) => res.redirect(302, config.installer.sourceUrl));
@@ -97,6 +96,15 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         const values = extra.values || (asked ? { profile_id: asked } : {});
         res.type('html').send(renderRobotsPage({ robots, profiles, kits: kits.list(), ...extra, values }));
     }
+
+    // The front page of openvibe.bot (server/web/home.js): public, indexable, with the OpenVibe Frame. Its two
+    // actions differ by sign-in, so it is never stored by a shared cache.
+    r.get('/', (req, res) => {
+        res.setHeader('Content-Security-Policy', HOME_CSP);
+        res.setHeader('Cache-Control', 'private, no-cache');
+        res.setHeader('Vary', 'Cookie');
+        res.type('html').send(renderHome({ config, signedIn: !!req.viewer }));
+    });
 
     r.get('/robots', page(async (req, res) => robotsPage(req, res, requireUser(req))));
 

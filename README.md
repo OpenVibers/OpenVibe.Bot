@@ -13,6 +13,7 @@ OpenVibe.Bot pairs a robot's machines, keeps their state and gates every operato
 - Devices (the machines that serve a robot) and the credentials that identify them: hashed at rest, rotated and revoked, never readable back.
 - Pairing: one-time codes with a short expiry, minted by Bot or, with `BOT_PAIRING_AUTHORITY=network`, by OpenVibe.Network.
 - The `/device` and `/control` WebSockets, the command gate and the latched e-stop.
+- The front page, `GET /` (`server/web/home.js`): the OpenVibe Frame (`openvibe-shared/shell`) around `openvibe-shared/showcase` sections that say only what works today (pairing, the panel's controls, the gate and the e-stop, people and the queue, the read-only embed, the simulator and the kits with drivers), with its own CSP for the Frame's calls to the Network; the rest of the site keeps `default-src 'self'`. `/shared/` is openvibe-shared's serve handler.
 - The signed-in pages (`server/web/routes.js`): `/robots` to list and add robots, `/pair/:id` for a pairing code and the installer command, and `/panel/:id`, the panel rendered from the profile. A `sim.rover` robot is driven by an in-process simulator (`server/sim`), so the panel works before any hardware exists. It gets no jobs, and it is not counted as a device or reported online in the outbox. The panel (`public/panel.js`, no build step) drives with a touch joystick, the keyboard or a gamepad, shows a latency meter and one camera tile per camera the profile lists; the camera stays a placeholder until OpenRe.Stream can play a WHIP-published stream back to a browser.
 - Server-side ONVIF cameras (`camera.onvif`, `mapping.driver: onvif`): an in-process connector beside the simulator (`server/onvif`) attaches a camera configured with `BOT_ONVIF_CAMERAS`, writes a real `kind: server` device row, translates a `ptz` command into ONVIF `ContinuousMove`/`Stop` (with the profile's deadline as a deadman) and carries the camera's `GetStatus` readout in telemetry. Its credentials are secret references only (`username_ref`/`password_ref`).
 - The command audit (`command_audit`, kept 30 days) and the `bot.*` outbox events.
@@ -40,7 +41,7 @@ OpenVibe.Bot pairs a robot's machines, keeps their state and gates every operato
 - OpenVibe.Network: user and service tokens, node tokens, pairing when the authority is `network`, and identity resolution (a `@username` to a subject, and subjects to names, for the panel's People card).
 - OpenRe.Stream: the WHIP ingest base (`BOT_WHIP_BASE`) devices publish to.
 - OpenVibe.Billing: job usage readings go to `billing.usage.record` (`BOT_BILLING_URL`, `BOT_BILLING_TOKEN`); unset, they wait in `run_usage_outbox`.
-- `openvibe-contracts` v0.96.0, `openvibe-sdk` v0.26.0 and `openvibe-shared` v2.5.0 (package.json).
+- `openvibe-contracts` v0.96.0, `openvibe-sdk` v0.26.0 and `openvibe-shared` v2.10.1 (package.json).
 
 ## Capabilities
 
@@ -90,6 +91,6 @@ Set `BOT_ONVIF_CAMERAS` (JSON, unset by default) to the server-side cameras Bot 
 ## Deploy files
 
 - `deploy/systemd/openvibe-bot.service` — systemd unit (`EnvironmentFile=/etc/openvibe/bot.env`, `PORT=4630`, hardening and `Restart=always`).
-- `deploy/nginx/openvibe.bot.conf` — nginx reference site for openvibe.bot: TLS, www→apex, rate limits, and WebSocket upgrade headers for the device (`/device`) and operator (`/control`) sockets, passing the `Authorization` header through. It serves the existing Sites page from `/opt/openvibe.sites/dist/openvibe.bot` and shared assets from `/opt/openvibe.sites/dist/_shared`.
+- `deploy/nginx/openvibe.bot.conf` — nginx reference site for openvibe.bot: TLS, www→apex, rate limits, and WebSocket upgrade headers for the device (`/device`) and operator (`/control`) sockets, passing the `Authorization` header through. It proxies the front page (`location = /`) and `/shared/` to the app, and serves the frozen OpenVibe.Sites legal pages, `robots.txt`, `sitemap.xml` and 404 page from `/opt/openvibe.sites/dist/openvibe.bot`.
 
-OpenVibe.Sites keeps building the front page, legal pages and `/shared/` assets under `/opt/openvibe.sites/dist/`, but no longer generates `deploy/nginx/openvibe.bot.conf` (sites.json marks the vhost as owned by OpenVibe.Bot). A Sites deploy leaves an installed vhost it no longer generates in place, so the current Sites vhost keeps serving openvibe.bot until Bot's first deploy installs this file over it; nothing has to be removed by hand, and later Sites deploys never overwrite Bot's `/device` and `/control` routes.
+OpenVibe.Sites keeps the frozen legal pages, `robots.txt` and `sitemap.xml` under `/opt/openvibe.sites/dist/openvibe.bot` (its front page there is no longer served), but no longer generates `deploy/nginx/openvibe.bot.conf` (sites.json marks the vhost as owned by OpenVibe.Bot). A Sites deploy leaves an installed vhost it no longer generates in place, so the current Sites vhost keeps serving openvibe.bot until Bot's first deploy installs this file over it; nothing has to be removed by hand, and later Sites deploys never overwrite Bot's `/device` and `/control` routes.

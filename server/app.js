@@ -86,6 +86,8 @@ function createApp(opts = {}) {
         next();
     });
     app.use(cookieParser());
+    // The OpenVibe Frame's scripts and the showcase stylesheet the front page links (content-hashed URLs).
+    app.use('/shared', require('openvibe-shared/serve').handler());
 
     app.get('/api/health', (req, res, next) => outbox.status().then((events) => res.json({
         ok: true, service: 'bot', version: VERSION, devices_online: hub.onlineCount(), events,

@@ -127,8 +127,8 @@ const allowedFor = (profile, role) => [...(DEFAULT_ALLOW[role] || []).filter((k)
     const control = (user) => t.ws('/control', { headers: cookie(user) });
     const poll = async (fn, ms = 3000) => { const end = Date.now() + ms; while (Date.now() < end) { const v = await fn(); if (v) return v; await t.wait(20); } return null; };
 
-    await check('/, /robots.txt and /install are unchanged; the pages need a session', async () => {
-        assert.match(await (await get('/')).text(), /^OpenVibe\.Bot .* — ok/);
+    await check('/ is the front page (test/home.test.js); /robots.txt and /install are unchanged; the pages need a session', async () => {
+        assert.match(await (await get('/')).text(), /<h1>Drive your robot/);
         assert.strictEqual(await (await get('/robots.txt')).text(), 'User-agent: *\nDisallow: /\n');
         assert.strictEqual((await get('/install')).status, 302);
         for (const p of ['/robots', '/panel/rob_x', '/pair/rob_x']) {
