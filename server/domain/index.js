@@ -17,15 +17,15 @@
 const {
     BotError, fail, prefixedId, iso, token, hashSecret, secretEquals, json, text, storable, isRobotId,
 } = require('../util');
-const { getProfile } = require('../profiles');
+const { getProfile, validateProfile } = require('../profiles');
 const { ENVELOPE } = require('../events/outbox');
 
 const DEFAULT_ALLOW = {
-    owner: ['drive', 'actuator', 'ptz', 'say', 'display', 'halt'],
-    operator: ['drive', 'actuator', 'ptz', 'say', 'display', 'halt'],
-    queue: ['drive', 'halt'],
+    owner: ['drive', 'actuator', 'ptz', 'say', 'display', 'button', 'point', 'halt'],
+    operator: ['drive', 'actuator', 'ptz', 'say', 'display', 'button', 'point', 'halt'],
+    queue: ['drive', 'button', 'point', 'halt'],
 };
-const KINDS = new Set(['drive', 'actuator', 'ptz', 'say', 'display', 'halt']);
+const KINDS = new Set(['drive', 'actuator', 'ptz', 'say', 'display', 'button', 'point', 'halt']);
 const MOTION = new Set(['drive', 'actuator', 'ptz']);
 const CONTROL_ROLES = new Set(['owner', 'operator', 'queue']);
 // Drive axes the owner's max_turn caps; every other drive axis is capped by max_speed.
@@ -64,6 +64,10 @@ function noteToHz(note) {
     return 440 * 2 ** ((12 * (Number(m[3]) + 1) + semis - 69) / 12);
 }
 
+
+/** The panel's drive and stop keys (public/panel.js KEYS, Space and Escape): a profile button never takes one. */
+const RESERVED_BUTTON_KEYS = new Set(['space', ' ', 'escape', 'w', 'a', 's', 'd', 'q', 'e', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright',
+    'keyw', 'keya', 'keys', 'keyd', 'keyq', 'keye']);
 function createDomain({ db, config, outbox, link = null, nodes = null, openre = null, now = () => Date.now(), log = console }) {
     // ── Presenters ────────────────────────────────────────────────────────────────────────────────
     const presentRobot = (r) => (r ? {
@@ -131,6 +135,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         return db.many('SELECT * FROM robots WHERE owner_subject = $1 ORDER BY created_at DESC', [owner]);
     }
     async function createRobot({ owner, name, profile_id, access_policy = 'private', limits = {}, installerUrl }) {
+        if (String(profile_id).startsWith('local.')) fail(422, 'bot.unknown_profile', 'choose a catalogue profile');
         const profile = await getProfile(db, profile_id);
         if (!profile) fail(422, 'bot.unknown_profile', `no profile ${profile_id}`);
         const cleanName = text(name, 'name', 80);
@@ -175,6 +180,67 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         await db.query(`UPDATE robots SET ${sets.join(', ')} WHERE id = $1`, args);
         return getRobot(id);
     }
+    async function localProfile(robotId) {
+        return db.maybe('SELECT source_profile_id, profile FROM robot_profiles WHERE robot_id = $1', [robotId]);
+    }
+    async function saveLocalProfile(robotId, actor, { buttons, point }) {
+        const robot = await getRobot(robotId);
+        if (!robot) fail(404, 'bot.robot_not_found', 'no such robot');
+        if (!actor || actor.subject !== robot.owner_subject) fail(403, 'bot.forbidden', 'only the owner may edit buttons');
+        for (const [name, b] of Object.entries(buttons || {})) {
+            if (b.key && RESERVED_BUTTON_KEYS.has(String(b.key).toLowerCase()))
+                fail(422, 'bot.invalid_input', `${b.key} drives or stops the robot; give ${name} another key`);
+        }
+        const local = await localProfile(robotId);
+        const sourceId = local ? local.source_profile_id : robot.profile_id;
+        const source = await getProfile(db, sourceId);
+        if (!source) fail(422, 'bot.unknown_profile', 'catalogue profile is missing');
+        // Profile IDs are lowercase by contract; robot ULIDs are uppercase.
+        const id = `local.${robotId.toLowerCase()}`;
+        const base = source.profile;
+        const commands = { ...base.commands };
+        delete commands.button; delete commands.point;
+        const widgets = base.widgets.filter((w) => w.type !== 'buttons' && w.type !== 'video_click');
+        if (buttons && Object.keys(buttons).length) {
+            commands.button = { names: buttons };
+            widgets.push({ type: 'buttons', command: { kind: 'button' } });
+        }
+        if (point) {
+            commands.point = point.cooldown_ms == null ? {} : { cooldown_ms: point.cooldown_ms };
+            if (!widgets.some((w) => w.type === 'camera')) widgets.push({ type: 'camera' });
+            widgets.push({ type: 'video_click', command: { kind: 'point' } });
+        }
+        let profile;
+        try { profile = validateProfile({ ...base, id, version: 1, name: `${robot.name} controls`, commands, widgets }); }
+        catch (e) { if (e.code === 'bot.profile_invalid') fail(422, 'bot.profile_invalid', e.detail || e.message); throw e; }
+        await db.tx(async (t) => {
+            await t.query(`INSERT INTO robot_profiles (id, version, profile, created_at, robot_id, source_profile_id)
+                VALUES ($1, 1, $2::jsonb, $3, $4, $5)
+                ON CONFLICT (id, version) DO UPDATE SET profile = EXCLUDED.profile`,
+            [id, JSON.stringify(profile), iso(now()), robotId, sourceId]);
+            await t.query('UPDATE robots SET profile_id = $2, profile_version = 1, updated_at = $3 WHERE id = $1', [robotId, id, iso(now())]);
+        });
+        await auditCommand({ robotId, subject: actor.subject, operatorKind: actor.kind, role: 'owner', kind: 'profile.local',
+            value: { buttons: Object.keys(buttons || {}), point: !!point }, result: 'ack' });
+        if (link && link.refreshConfig) await link.refreshConfig(robotId);
+        if (link && link.broadcast) link.broadcast(robotId);
+        return profile;
+    }
+    async function useCatalogueProfile(robotId, actor) {
+        const robot = await getRobot(robotId);
+        if (!robot) fail(404, 'bot.robot_not_found', 'no such robot');
+        if (!actor || actor.subject !== robot.owner_subject) fail(403, 'bot.forbidden', 'only the owner may change the profile');
+        const local = await localProfile(robotId);
+        if (!local || robot.profile_id !== `local.${robotId.toLowerCase()}`) fail(422, 'bot.invalid_profile', 'this robot is using its catalogue profile');
+        const source = await getProfile(db, local.source_profile_id);
+        if (!source) fail(422, 'bot.unknown_profile', 'catalogue profile is missing');
+        await db.query('UPDATE robots SET profile_id = $2, profile_version = $3, updated_at = $4 WHERE id = $1', [robotId, source.id, source.version, iso(now())]);
+        await auditCommand({ robotId, subject: actor.subject, operatorKind: actor.kind, role: 'owner', kind: 'profile.catalogue',
+            value: { profile_id: source.id }, result: 'ack' });
+        if (link && link.refreshConfig) await link.refreshConfig(robotId);
+        if (link && link.broadcast) link.broadcast(robotId);
+        return source.profile;
+    }
     /** Opt a robot in or out of anonymous read-only embedding (the owner check is the caller's; no event). */
     async function setEmbedPublic(id, value) {
         await db.query('UPDATE robots SET embed_public = $2, updated_at = $3 WHERE id = $1', [id, !!value, iso(now())]);
@@ -202,7 +268,8 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     const networkPairing = () => config.pairing.authority === 'network';
     async function createPairingCode(robotId, createdBy, installerUrl, robotRow = null) {
         const robot = robotRow || await getRobot(robotId);
-        const driver = driverForProfile(robot && robot.profile_id);
+        const local = robot && robot.profile_id.startsWith('local.') ? await localProfile(robotId) : null;
+        const driver = driverForProfile(local ? local.source_profile_id : robot && robot.profile_id);
         if (networkPairing()) return mintOnNetwork(robotId, robot.owner_subject, installerUrl, driver);
         const code = newCode();
         const at = iso(now());
@@ -739,6 +806,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     // Cooldown is measured from the last command sent (not from an acknowledgement), per operator and
     // kind; the owner is never cooldowned. Bounded so a flood of subjects cannot grow it without end.
     const lastCommandAt = new Map();
+    const activeButtons = new Map();
     const markCooldown = (robotId, subject, kind) => {
         lastCommandAt.set(`${robotId}|${subject}|${kind}`, now());
         if (lastCommandAt.size > 4096) lastCommandAt.delete(lastCommandAt.keys().next().value);
@@ -801,6 +869,23 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         if (kind === 'halt') return {};
         const spec = profile.commands[kind];
         const v = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+        if (kind === 'button') {
+            const name = typeof v.name === 'string' ? v.name : '';
+            if (!Object.hasOwn(spec.names, name)) fail(422, 'bot.command_not_allowed', 'this robot has no such button');
+            if (Object.keys(v).some((k) => k !== 'name' && k !== 'state')) fail(422, 'bot.invalid_input', 'button takes only name and state');
+            const hold = !!spec.names[name].hold;
+            if (hold && !['down', 'up'].includes(v.state)) fail(422, 'bot.invalid_input', 'a hold button needs down or up');
+            if (!hold && Object.hasOwn(v, 'state')) fail(422, 'bot.invalid_input', 'a plain button takes no state');
+            return hold ? { name, state: v.state } : { name };
+        }
+        if (kind === 'point') {
+            if (Object.keys(v).some((k) => k !== 'x' && k !== 'y') ||
+                typeof v.x !== 'number' || !Number.isFinite(v.x) || v.x < 0 || v.x > 1 ||
+                typeof v.y !== 'number' || !Number.isFinite(v.y) || v.y < 0 || v.y > 1) {
+                fail(422, 'bot.invalid_input', 'point needs x and y between 0 and 1');
+            }
+            return { x: v.x, y: v.y };
+        }
         if (kind === 'drive') {
             // Every declared axis is sent; an absent one is 0, so a drive frame always says the whole motion.
             const out = {};
@@ -873,7 +958,10 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         if (!online) return { ok: false, code: 'bot.device_offline', reason: 'the device is offline; commands are never queued', robot, role };
 
         const eff = effectiveLimits(robot, profile);
-        const cooled = eff.cooldownMs > 0 && role !== 'owner' && !halt;
+        const release = kind === 'button' && value && value.state === 'up';
+        const activeKey = kind === 'button' && value && typeof value.name === 'string' ? `${robotId}|${subject}|${value.name}` : null;
+        const repeatedHold = !!(activeKey && value.state === 'down' && activeButtons.get(activeKey) > now());
+        const cooled = eff.cooldownMs > 0 && role !== 'owner' && !halt && !release && !repeatedHold;
         if (cooled) {
             const last = lastCommandAt.get(`${robotId}|${subject}|${kind}`);
             if (last && now() - last < eff.cooldownMs) {
@@ -882,7 +970,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         }
         if (role === 'queue') {
             // A halt needs the turn (a waiting person may not stop the driver) but spends none of its budget.
-            if (halt) {
+            if (halt || release || repeatedHold) {
                 const turn = await currentTurn(robotId);
                 if (!turn || turn.subject !== subject) return { ok: false, code: 'bot.not_your_turn', reason: 'it is not your turn', robot, role };
             } else {
@@ -892,17 +980,29 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         }
         let built;
         try { built = buildValue(kind, value, eff, profile); } catch (e) { return { ok: false, code: e.code || 'bot.invalid_input', reason: e.detail || e.message, robot, role }; }
+        const specificMs = kind === 'button' ? profile.commands.button.names[built.name].cooldown_ms || 0
+            : kind === 'point' ? profile.commands.point.cooldown_ms || 0 : 0;
+        const specificKey = kind === 'button' ? `button:${built.name}` : 'point';
+        if (specificMs > 0 && !release && !repeatedHold) {
+            const last = lastCommandAt.get(`${robotId}|${subject}|${specificKey}`);
+            if (last && now() - last < specificMs) return { ok: false, code: 'bot.cooldown', reason: `wait ${specificMs} ms between ${specificKey} commands`, robot, role };
+        }
         if (cooled) markCooldown(robotId, subject, kind);
-        const deadlineMs = MOTION.has(kind)
+        if (specificMs > 0 && !release && !repeatedHold) markCooldown(robotId, subject, specificKey);
+        const deadlineMs = (MOTION.has(kind) || (kind === 'button' && built.state === 'down'))
             ? now() + clampNum(requestedMs != null ? requestedMs : eff.maxCommandMs, 1, eff.maxCommandMs, eff.maxCommandMs)
             : null;
+        if (activeKey && built.state === 'down') activeButtons.set(activeKey, deadlineMs);
+        if (activeKey && built.state === 'up') activeButtons.delete(activeKey);
+        if (activeButtons.size > 4096) activeButtons.delete(activeButtons.keys().next().value);
         return { ok: true, robot, profile, role, kind, value: built, deadlineMs, limits: eff };
     }
 
     return {
         db, now, config, log, outbox, link,
         present: { robot: presentRobot, device: presentDevice, video: presentVideo },
-        robots: { create: createRobot, list: listRobots, get: getRobot, update: updateRobot, setEmbedPublic, remove: removeRobot },
+        robots: { create: createRobot, list: listRobots, get: getRobot, update: updateRobot, setEmbedPublic, remove: removeRobot,
+            localProfile, saveLocalProfile, useCatalogueProfile },
         members: { roleOf, add: addOperator, remove: removeOperator, list: listOperators },
         pairing: { create: createPairingCode, redeem, prune: prunePairingCodes, installerCommand, driverForProfile, whipUrl },
         devices: { byCredential, bindNode, issuePublishKey, revokeVideo, updateDeclared, revokeNode, ensureServerDevice, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, touchSeen, setOnline },

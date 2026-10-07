@@ -33,6 +33,8 @@ OpenVibe.Bot pairs a robot's machines, keeps their state and gates every operato
 - A device (the machine that serves a robot) pairs with one pasted command, shown on the robot's pairing page: `curl -fsSL <BOT_INSTALLER_URL> | sh -s -- --robot rob_… --code XXXX-XXXX [--driver …]` (the Network form in `docs/protocol.md` §1). The `--driver` follows the robot's profile: `adeept` for `adeept.adr036`, `adeept-mecanum` for `adeept.adr036.mecanum`, `cozmo` for `cozmo`; any other profile gets none (`server/domain/index.js` `driverForProfile`), the installer's dry-run `none`.
 - A server-side ONVIF camera (`camera.onvif`) is not installed on a machine: it gets no `--driver` and Bot attaches it itself from `BOT_ONVIF_CAMERAS` (see Deploy), so its panel works as soon as the camera answers.
 - The robot's panel is `openvibe.bot/panel/<rob_…>` (`GET /panel/:id`, rendered from the profile; `docs/protocol.md` §3). The device-side bring-up steps for the Adeept ADR036 kit live with the driver, in OpenVibe.Node's `docs/hardware-adeept.md` (T15 step 1).
+- A robot can use its own `local.rob_…` profile, stored with that robot and validated against `bot.robot-profile@1` and Bot's capability, driver and widget registries. On the owner's robot page, the Buttons form adds or removes rows and saves each button's name, label, optional keyboard key, cooldown in milliseconds and hold setting. The Video click checkbox enables a separate point cooldown. Only the owner can save or return to the robot's catalogue profile; each change is audited.
+- Profiles declare `button` commands by name and `point` commands for normalised video coordinates in `[0, 1]`. A hold button sends `down` while pressed and `up` on release; each `down` has the device deadline used for held controls. The command gate checks declarations, roles, robot limits and control specific cooldowns. The panel and read-only embed render the profile's labels, with buttons disabled for anyone who cannot drive.
 
 ## Depends on
 
@@ -41,7 +43,7 @@ OpenVibe.Bot pairs a robot's machines, keeps their state and gates every operato
 - OpenVibe.Network: user and service tokens, node tokens, pairing when the authority is `network`, and identity resolution (a `@username` to a subject, and subjects to names, for the panel's People card).
 - OpenRe.Stream: the WHIP ingest base (`BOT_WHIP_BASE`) devices publish to.
 - OpenVibe.Billing: job usage readings go to `billing.usage.record` (`BOT_BILLING_URL`; Bot mints its own Network service token for audience `openvibe.billing` with `billing.usage.record`, and `BOT_BILLING_TOKEN` overrides it); unset, they wait in `run_usage_outbox`.
-- `openvibe-contracts` v0.106.0, `openvibe-sdk` v0.26.0 and `openvibe-shared` v2.11.0 (package.json).
+- `openvibe-contracts` v0.110.0, `openvibe-sdk` v0.26.0 and `openvibe-shared` v2.12.0 (package.json).
 
 ## Capabilities
 

@@ -24,7 +24,7 @@
  * URL, on that one host, with a timeout and `redirect: 'error'` — a camera cannot steer Bot elsewhere.
  */
 const crypto = require('crypto');
-const { getProfile, listProfiles } = require('../profiles');
+const { getProfile } = require('../profiles');
 
 const isOnvifProfile = (profile) => !!(profile && profile.mapping && profile.mapping.driver === 'onvif');
 
@@ -130,9 +130,8 @@ function createOnvif({ config, domain, hub, now = () => Date.now(), log = consol
     }
 
     async function startAll() {
-        const ids = (await listProfiles(domain.db)).filter((r) => isOnvifProfile(r.profile)).map((r) => r.id);
-        if (!ids.length) return 0;
-        const robots = await domain.db.many('SELECT * FROM robots WHERE profile_id = ANY($1)', [ids]);
+        const robots = await domain.db.many(`SELECT r.* FROM robots r JOIN robot_profiles p
+            ON p.id = r.profile_id AND p.version = r.profile_version WHERE p.profile->'mapping'->>'driver' = 'onvif'`);
         let n = 0;
         for (const robot of robots) if (await attach(robot)) n++;
         return n;

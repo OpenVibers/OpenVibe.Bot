@@ -250,7 +250,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         const role = await domain.members.roleOf(robot.id, me.subject);
         return role || (robot.access_policy === 'queue' ? 'queue' : null);
     }
-    async function sendPanel(res, robot, profile, role, mode = 'page', signedIn = true) {
+    async function sendPanel(res, robot, profile, role, mode = 'page', signedIn = true, profileForm = {}) {
         await attachInProcess(robot, profile);
         const { maxCommandMs } = domain.control.effectiveLimits(robot, profile);
         // Two OpenRe reads, run together. Only the owner's own page shows the streaming switches, greyed out
@@ -270,11 +270,68 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         const people = role === 'owner' && mode === 'page' ? await peopleFor(robot) : null;
         res.type('html').send(renderPanel({
             robot: presentForPage(robot), profile, role, mode, signedIn, streaming, people, signaling_url,
+            profileForm,
             allowed_commands: role === 'watcher' ? [] : domain.control.allowedFor(robot, role, profile),
             // A held control is re-sent well inside the device's deadline, so it never stops between two frames.
             holdResendMs: Math.max(50, Math.min(HOLD_RESEND_MS, Math.floor(maxCommandMs / 2))),
         }));
     }
+
+    // The owner can redraw button rows without JavaScript, save a validated robot-local profile, or return
+    // to the catalogue source. The domain checks ownership too, so the write cannot bypass this route.
+    r.post('/robots/:id/profile', ...manage, express.urlencoded({ extended: false, limit: '16kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        const robot = await domain.robots.get(req.params.id);
+        if (!robot) throw new BotError(404, 'bot.robot_not_found', 'no such robot');
+        if (robot.owner_subject !== me.subject) throw new BotError(403, 'bot.forbidden', 'only the owner may edit buttons');
+        const action = String(req.body.action || '');
+        if (action === 'catalogue') {
+            await domain.robots.useCatalogueProfile(robot.id, me);
+            return res.redirect(303, `/panel/${robot.id}`);
+        }
+        const count = Number(req.body.count);
+        if (!Number.isInteger(count) || count < 1 || count > 32) throw new BotError(422, 'bot.invalid_input', 'invalid button rows');
+        const one = (key) => typeof req.body[key] === 'string' ? req.body[key].trim() : '';
+        const rows = Array.from({ length: count }, (_, i) => ({
+            name: one(`name_${i}`), label: one(`label_${i}`), key: one(`key_${i}`),
+            cooldown: one(`cooldown_${i}`), hold: req.body[`hold_${i}`] === 'on',
+        }));
+        const state = { rows, point: req.body.point === 'on', pointCooldown: one('point_cooldown') };
+        if (action === 'add') rows.push({ name: '', label: '', key: '', cooldown: '', hold: false });
+        else if (/^remove:\d+$/.test(action)) {
+            const i = Number(action.slice(7));
+            if (i >= rows.length) throw new BotError(422, 'bot.invalid_input', 'invalid button row');
+            rows.splice(i, 1);
+        } else if (action !== 'save') throw new BotError(422, 'bot.invalid_input', 'invalid profile action');
+        if (action !== 'save') {
+            const local = await domain.robots.localProfile(robot.id);
+            state.catalogueId = local ? local.source_profile_id : robot.profile_id;
+            return sendPanel(res, robot, await profileOf(robot), 'owner', 'page', true, state);
+        }
+        try {
+            const buttons = {};
+            for (const row of rows) {
+                if (!row.name && !row.label && !row.key && !row.cooldown && !row.hold) continue;
+                if (!/^[a-z][a-z0-9_]{0,31}$/.test(row.name) || !row.label || Object.hasOwn(buttons, row.name))
+                    throw new BotError(422, 'bot.invalid_input', 'each button needs a unique valid name and a label');
+                if (row.cooldown && !/^(0|[1-9]\d*)$/.test(row.cooldown)) throw new BotError(422, 'bot.invalid_input', 'button cooldown must be whole milliseconds');
+                buttons[row.name] = { label: row.label, ...(row.key ? { key: row.key } : {}),
+                    ...(row.cooldown ? { cooldown_ms: Number(row.cooldown) } : {}), ...(row.hold ? { hold: true } : {}) };
+            }
+            if (state.pointCooldown && !/^(0|[1-9]\d*)$/.test(state.pointCooldown)) throw new BotError(422, 'bot.invalid_input', 'video click cooldown must be whole milliseconds');
+            await domain.robots.saveLocalProfile(robot.id, me, { buttons,
+                point: state.point ? { ...(state.pointCooldown ? { cooldown_ms: Number(state.pointCooldown) } : {}) } : null });
+        } catch (e) {
+            if (e.status !== 422) throw e;
+            res.status(422);
+            const local = await domain.robots.localProfile(robot.id);
+            state.catalogueId = local ? local.source_profile_id : robot.profile_id;
+            state.error = e.detail || e.message;
+            return sendPanel(res, robot, await profileOf(robot), 'owner', 'page', true, state);
+        }
+        return res.redirect(303, `/panel/${robot.id}`);
+    }));
 
     /** The non-owner members with their Network names, or null names when Network cannot be asked. */
     async function peopleFor(robot) {
@@ -301,7 +358,8 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         if (!role) throw new BotError(403, 'bot.not_an_operator', 'you have no access to this robot');
         const profile = await profileOf(robot);
         if (!profile) throw new BotError(404, 'bot.profile_not_found', 'this robot has no profile');
-        await sendPanel(res, robot, profile, role);
+        const local = role === 'owner' ? await domain.robots.localProfile(robot.id) : null;
+        await sendPanel(res, robot, profile, role, 'page', true, { catalogueId: local ? local.source_profile_id : robot.profile_id });
     }));
 
     // The embed's own CSP replaces the app's for this route only; it sets no cookie and needs none to watch.

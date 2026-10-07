@@ -26,6 +26,7 @@
 const fs = require('fs');
 const path = require('path');
 const { BotError } = require('../util');
+const { validate } = require('openvibe-contracts');
 
 const DIR = path.join(__dirname);
 
@@ -41,7 +42,7 @@ const CAPABILITIES = new Set([
 ]);
 
 /** Panel widget types (open in the profile, closed in code: a new widget is a new entry here). */
-const WIDGETS = new Set(['drive', 'pan-tilt', 'servo', 'lights', 'horn', 'speaker', 'display', 'telemetry', 'battery', 'latency', 'ptz', 'camera', 'head', 'lift']);
+const WIDGETS = new Set(['drive', 'pan-tilt', 'servo', 'lights', 'horn', 'speaker', 'display', 'telemetry', 'battery', 'latency', 'ptz', 'camera', 'head', 'lift', 'buttons', 'video_click']);
 
 /** Device drivers a mapping may name. */
 const DRIVERS = new Set(['pca9685', 'ads7830', 'cozmo', 'onvif', 'sim']);
@@ -68,8 +69,9 @@ function bad(why) { throw new BotError(500, 'bot.profile_invalid', why); }
 const AXES = { drive: new Set(['throttle', 'steer', 'x', 'y', 'rotation']), ptz: new Set(['pan', 'tilt', 'zoom']) };
 const ACTUATOR_TYPES = new Set(['number', 'rgb', 'tone', 'bool']);
 const DISPLAY_MODES = new Set(['text', 'face', 'image_png_b64']);
-const COMMAND_KINDS = new Set(['drive', 'actuator', 'ptz', 'say', 'display', 'halt']);
+const COMMAND_KINDS = new Set(['drive', 'actuator', 'ptz', 'say', 'display', 'halt', 'button', 'point']);
 const NAME_RE = /^[a-z][a-z0-9_]{0,23}$/;
+const BUTTON_RE = /^[a-z][a-z0-9_]{0,31}$/;
 
 function validateAxes(where, axes, allowed) {
     if (!isObject(axes) || !Object.keys(axes).length) bad(`${where}.axes must name at least one axis`);
@@ -129,6 +131,22 @@ function validateCommands(id, commands) {
                 d.faces = spec.faces.slice();
             }
             out.display = d;
+        } else if (kind === 'button') {
+            if (!isObject(spec.names) || !Object.keys(spec.names).length) bad(`${where}.names must name at least one button`);
+            const names = {};
+            for (const [name, button] of Object.entries(spec.names)) {
+                if (!BUTTON_RE.test(name)) bad(`${where}: button name ${name} is not valid`);
+                if (!isObject(button) || typeof button.label !== 'string' || !button.label.trim() || button.label.length > 40) bad(`${where}.names.${name}.label is invalid`);
+                if (button.key != null && (typeof button.key !== 'string' || button.key.length > 16)) bad(`${where}.names.${name}.key is invalid`);
+                if (button.cooldown_ms != null && !(int(button.cooldown_ms) >= 0)) bad(`${where}.names.${name}.cooldown_ms is invalid`);
+                if (button.hold != null && typeof button.hold !== 'boolean') bad(`${where}.names.${name}.hold is invalid`);
+                names[name] = { label: button.label, ...(button.key ? { key: button.key } : {}),
+                    ...(button.cooldown_ms != null ? { cooldown_ms: button.cooldown_ms } : {}), ...(button.hold ? { hold: true } : {}) };
+            }
+            out.button = { names };
+        } else if (kind === 'point') {
+            if (spec.cooldown_ms != null && !(int(spec.cooldown_ms) >= 0)) bad(`${where}.cooldown_ms is invalid`);
+            out.point = spec.cooldown_ms != null ? { cooldown_ms: spec.cooldown_ms } : {};
         } else if (Object.keys(spec).length) bad(`${where} takes no options`);
     }
     out.halt = {};
@@ -176,6 +194,8 @@ function validateProfile(p) {
     };
     if (!(limits.max_speed > 0) || !(limits.max_turn > 0)) bad(`${p.id}: max_speed and max_turn must be positive`);
     if (!(limits.max_command_ms > 0) || !(limits.heartbeat_ms > 0)) bad(`${p.id}: max_command_ms and heartbeat_ms must be positive`);
+    const contract = validate('bot.robot-profile@1', p);
+    if (!contract.valid) bad(`bot.robot-profile@1: ${JSON.stringify(contract.errors)}`);
     return {
         id: p.id, version: p.version, name: p.name.trim(), vendor: p.vendor || null, kind: p.kind || null,
         description: p.description || null, capabilities: [...p.capabilities], variants: p.variants || null,
@@ -220,7 +240,7 @@ async function getProfile(db, id, version = null) {
 }
 
 async function listProfiles(db) {
-    return db.many('SELECT DISTINCT ON (id) id, version, profile FROM robot_profiles ORDER BY id, version DESC');
+    return db.many('SELECT DISTINCT ON (id) id, version, profile FROM robot_profiles WHERE robot_id IS NULL ORDER BY id, version DESC');
 }
 
 module.exports = { validateProfile, loadProfiles, seedProfiles, getProfile, listProfiles, CAPABILITIES, WIDGETS, DRIVERS, COMMAND_KINDS };
