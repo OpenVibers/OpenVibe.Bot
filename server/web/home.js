@@ -31,7 +31,7 @@ const HOME_CSP = [
     "font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com",
     "img-src 'self' data: https:",
     // The navbar asks the Network for the session, menus and notifications (events: realtime and release notices).
-    "connect-src 'self' https://openvibe.network https://events.openvibe.network",
+    "connect-src 'self' https://openvibe.network https://openvibe.events",
     "frame-src 'self' https://openvibe.network",
     "frame-ancestors 'none'",
     "object-src 'none'",
