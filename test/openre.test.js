@@ -58,6 +58,32 @@ const WHIP_BASE = 'https://ingest.test/whip';
         assert.deepStrictEqual(cols.map((c) => `${c.table_name}.${c.column_name}`).sort(), ['devices.publish_key_hint', 'robots.openre_stream_id']);
     });
 
+    await check('the panel video look-up reads the stream\'s open session and its playback descriptor, always as the owner', async () => {
+        const { robot } = await pairedRobot();
+        const streamId = (await robotRow(robot.id)).openre_stream_id;
+        // The session's viewer URL, keyed by its playback id; the calls act for the robot's owner.
+        const session = t.openre.goLive(streamId);
+        assert.strictEqual(await t.domain.video.live(robot.id), `ws://127.0.0.1:9936/w/${session.id}`);
+        const list = t.openre.calls.filter((c) => c.path === '/api/v1/sessions').at(-1);
+        assert.strictEqual(list.query, `?stream_id=${encodeURIComponent(streamId)}&state=open`);
+        assert.strictEqual(list.subject, alex.subject);
+        assert.strictEqual(list.authorization, `Bearer ${t.openre.token}`);
+        const playback = t.openre.calls.filter((c) => c.path === `/api/v1/sessions/${session.id}/playback`).at(-1);
+        assert.strictEqual(playback.subject, alex.subject);
+        assert.ok(!JSON.stringify(playback).includes('ork_'), 'never the ingest key');
+        // A live session that is not WebRTC has no viewer URL, and a robot with no stream asks nothing.
+        t.openre.endLive(session.id);
+        const rtmp = t.openre.goLive(streamId, { protocol: 'rtmp' });
+        assert.strictEqual(await t.domain.video.live(robot.id), null, 'a non-WebRTC session is passed over');
+        t.openre.endLive(rtmp.id);
+        const quiet = t.openre.calls.length;
+        assert.strictEqual(await t.domain.video.live(robot.id), null);
+        assert.strictEqual(t.openre.calls.length, quiet + 1, 'nothing open: only the session list is read');
+        const { robot: bare } = await t.robot(alex, { name: 'No stream yet' });
+        assert.strictEqual(await t.domain.video.live(bare.id), null);
+        assert.strictEqual(t.openre.calls.length, quiet + 1, 'no stream: OpenRe is not asked');
+    });
+
     await check('pairing creates the robot\'s OpenRe stream and hands the device the ingest key OpenRe issued', async () => {
         const before = t.openre.calls.length;
         const { robot, paired } = await pairedRobot();

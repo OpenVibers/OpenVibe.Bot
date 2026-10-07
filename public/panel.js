@@ -17,6 +17,9 @@
  *             (and d-pad) drive, right stick rotates when the drive has a rotation axis, A = the first tone,
  *             B = stop, Start = e-stop; gamepaddisconnected releases it all
  *   latency   round trip from a command's id to its result on /control (rolling median) + telemetry age
+ *   camera    each tile the server marked with a live OpenRe session's signaling URL plays it: the
+ *             mediasoup-client viewer flow OpenVibe.Live runs, reconnecting with backoff; a tile with no
+ *             URL is left as the server drew it
  *
  * A watcher (data-role="watcher": the embed's anonymous, read-only view) joins on /watch instead and only paints
  * the state it is sent: no command, e-stop or clear frame is ever sent from it.
@@ -430,6 +433,137 @@
         const screen = $('[data-camera-screen]', cam);
         if (w > 0 && h > 0 && screen) screen.style.aspectRatio = `${w} / ${h}`;
     }
+
+    // ── Live camera: the robot's OpenRe.Stream WebRTC session ────────────────────────────────────────
+    // A tile the server marked with a live session's viewer signaling URL plays it: the mediasoup-client
+    // `sfu-viewer-*` flow OpenVibe.Live's watch page runs against OpenRe's /w/<session id> signaling
+    // (watch → ready → recv transport → consume). mediasoup-client's package ships no browser bundle, so
+    // the pinned ESM build Live loads comes from esm.sh — the panel's own CSP allows exactly that origin.
+    // A tile with no URL is left alone; one whose session ends keeps its placeholder and reconnects with
+    // the same backoff as /control.
+    const MEDIASOUP_URL = 'https://esm.sh/mediasoup-client@3.18.7';
+    let mediasoup = null;
+    const loadMediasoup = () => (mediasoup ||= import(MEDIASOUP_URL).then(
+        (m) => m.Device || (m.default && m.default.Device),
+        (e) => { mediasoup = null; throw e; }));
+
+    /** The first `type` frame on an OpenRe viewer socket; a viewer error, a close or silence rejects. */
+    function viewerWait(ws, type, timeoutMs = 15000) {
+        return new Promise((resolve, reject) => {
+            if (ws.readyState !== WebSocket.OPEN) return reject(new Error('the camera signaling socket closed'));
+            let timer;
+            const done = (finish) => {
+                clearTimeout(timer);
+                ws.removeEventListener('message', onMessage);
+                ws.removeEventListener('close', onClose);
+                finish();
+            };
+            const onMessage = (e) => {
+                let m; try { m = JSON.parse(e.data); } catch { return; }
+                if (m.type === type) done(() => resolve(m));
+                else if (m.type === 'watch-queued') done(() => reject(new Error('nothing is publishing yet')));
+                else if (m.type === 'sfu-error' || m.type === 'sfu-viewer-error') done(() => reject(new Error(m.error || m.type)));
+            };
+            const onClose = () => done(() => reject(new Error('the camera signaling socket closed')));
+            timer = setTimeout(() => done(() => reject(new Error(`no ${type} from the camera`))), timeoutMs);
+            ws.addEventListener('message', onMessage);
+            ws.addEventListener('close', onClose);
+        });
+    }
+
+    function liveCamera(tile) {
+        const url = tile.dataset.signalingUrl;
+        const screen = $('[data-camera-screen]', tile);
+        if (!url || !screen) return;
+        const placeholder = [...screen.children];
+        const video = document.createElement('video');
+        video.muted = true;
+        video.autoplay = true;
+        video.playsInline = true;
+        video.hidden = true;
+        screen.appendChild(video);
+        let current = null;    // the session being connected: { ws, transport, consumers }
+        let timer = null;      // the pending reconnect
+        let attempt = 0;
+
+        /** The tile shows the video or its placeholder, never both. */
+        function showLive(on) {
+            video.hidden = !on;
+            for (const el of placeholder) el.hidden = on;
+        }
+        function teardown() {
+            const session = current;
+            current = null;
+            video.srcObject = null;
+            if (!session) return;
+            for (const c of session.consumers) { try { c.close(); } catch { /* gone */ } }
+            if (session.transport) { try { session.transport.close(); } catch { /* gone */ } }
+            if (session.ws) { try { session.ws.close(); } catch { /* gone */ } }
+        }
+        /** The placeholder returns, the session closes, and the next attempt is a backoff away. */
+        function retry() {
+            if (timer) return;
+            showLive(false);
+            teardown();
+            timer = setTimeout(() => { timer = null; connect(); }, Math.min(10000, 500 * 2 ** attempt++));
+        }
+
+        async function connect() {
+            const session = { ws: null, transport: null, consumers: [] };
+            const stale = () => current !== session;
+            current = session;
+            try {
+                const ws = new WebSocket(url);
+                session.ws = ws;
+                await new Promise((open, fail) => {
+                    ws.addEventListener('open', open, { once: true });
+                    ws.addEventListener('close', () => fail(new Error('the camera signaling socket closed')), { once: true });
+                });
+                if (stale()) return;
+                ws.send(JSON.stringify({ type: 'watch' }));
+                const ready = await viewerWait(ws, 'sfu-viewer-ready');
+                if (stale()) return;
+                if (!ready.producers || !ready.producers.length) throw new Error('the camera has no live track yet');
+                const Device = await loadMediasoup();
+                if (stale()) return;
+                const device = new Device();
+                await device.load({ routerRtpCapabilities: ready.rtpCapabilities });
+                if (stale()) return;
+                ws.send(JSON.stringify({ type: 'sfu-viewer-create-transport' }));
+                const created = await viewerWait(ws, 'sfu-viewer-transport-created');
+                if (stale()) return;
+                const transport = device.createRecvTransport({
+                    id: created.id, iceParameters: created.iceParameters, iceCandidates: created.iceCandidates,
+                    dtlsParameters: created.dtlsParameters, iceServers: created.iceServers || [],
+                });
+                session.transport = transport;
+                transport.on('connect', ({ dtlsParameters }, cb, errb) => {
+                    if (stale()) return errb(new Error('the camera session is gone'));
+                    ws.send(JSON.stringify({ type: 'sfu-viewer-connect-transport', transportId: transport.id, dtlsParameters }));
+                    viewerWait(ws, 'sfu-viewer-transport-connected').then(() => cb(), () => errb(new Error('the camera transport did not connect')));
+                });
+                const media = new MediaStream();
+                for (const producer of ready.producers) {
+                    ws.send(JSON.stringify({ type: 'sfu-viewer-consume', transportId: transport.id, producerId: producer.id, rtpCapabilities: device.rtpCapabilities }));
+                    const consumed = await viewerWait(ws, 'sfu-viewer-consumed');
+                    if (stale()) return;
+                    const consumer = await transport.consume({ id: consumed.id, producerId: consumed.producerId, kind: consumed.kind, rtpParameters: consumed.rtpParameters });
+                    session.consumers.push(consumer);
+                    media.addTrack(consumer.track);
+                }
+                if (stale()) return;
+                video.srcObject = media;
+                showLive(true);
+                attempt = 0;
+                await video.play().catch(() => { /* autoplay holds the track anyway */ });
+                ws.addEventListener('close', () => { if (!stale()) retry(); });
+            } catch (e) {
+                if (!stale()) retry();
+            }
+        }
+        connect();
+    }
+    for (const tile of $$('[data-signaling-url]')) liveCamera(tile);
 
     // ── State ─────────────────────────────────────────────────────────────────────────────────────────
     function enableControls() {

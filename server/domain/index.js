@@ -399,6 +399,26 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         });
         return streamingState(robot, updated);
     }
+    // ── Panel video: the robot's live OpenRe WebRTC session (T15) ──────────────────────────────────
+    /**
+     * The viewer signaling URL of the robot's open WebRTC session, or null. The session list names the
+     * stream's open session — only ever through the robot owner's OpenRe view — and a WebRTC session's
+     * playback descriptor carries `webrtc.signaling_url`, keyed by the session's playback id, never the
+     * ingest key (OpenRe README "playback descriptor"). Null without OpenRe, without a stream, with
+     * nothing publishing, or when the live session is not WebRTC: the panel's tile keeps its
+     * placeholder. OpenRe refusing or not answering throws like any client call; the caller decides.
+     */
+    async function liveVideo(robotId) {
+        if (!openre) return null;
+        const robot = await getRobot(robotId);
+        if (!robot || !robot.openre_stream_id) return null;
+        const open = await openre.sessions(robot.openre_stream_id, robot.owner_subject, { state: 'open' });
+        const session = open.find((s) => s && s.protocol === 'webrtc') || null;
+        if (!session) return null;
+        const descriptor = await openre.playback(session.id, robot.owner_subject);
+        const url = descriptor && descriptor.webrtc && descriptor.webrtc.signaling_url;
+        return typeof url === 'string' && /^wss?:\/\//.test(url) ? url : null;
+    }
     async function prunePairingCodes() {
         await db.query('DELETE FROM pairing_codes WHERE expires_at < $1', [iso(now() - 24 * 3600 * 1000)]);
     }
@@ -887,6 +907,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         pairing: { create: createPairingCode, redeem, prune: prunePairingCodes, installerCommand, driverForProfile, whipUrl },
         devices: { byCredential, bindNode, issuePublishKey, revokeVideo, updateDeclared, revokeNode, ensureServerDevice, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, touchSeen, setOnline },
         streaming: { get: streaming, set: setStreaming },
+        video: { live: liveVideo },
         estop: { set: setEstop, clear: clearEstop },
         queue: { join: joinQueue, leave: leaveQueue, state: queueState, currentTurn, consume: consumeTurn, sweep: sweepQueues },
         audit: { record: auditCommand, list: listAudit, listPage: listAuditPage, prune: pruneAudit },

@@ -7,9 +7,10 @@
  * code here. Every value is HTML-escaped; nothing is inline (the CSP is `default-src 'self'`), so the client
  * (public/panel.js) reads what it needs from data-* attributes, and the icons are inline SVG markup.
  *
- *   renderPanel({ robot, profile, role, allowed_commands, holdResendMs, mode, signedIn, streaming, people })
+ *   renderPanel({ robot, profile, role, allowed_commands, holdResendMs, mode, signedIn, streaming, people, signaling_url })
  *                                   mode 'embed': the framed panel (no topbar, no owner form, links open a new tab);
- *                                   `people` (owner page only) the non-owner members for the People card
+ *                                   `people` (owner page only) the non-owner members for the People card;
+ *                                   `signaling_url` the robot's live OpenRe WebRTC session, on the camera tiles
  *   renderEmbedRefused({ robotId })  the framed answer when the visitor may not see the robot
  *   renderWidget(widget, { profile, allowed_commands })
  *   renderRobotsPage({ robots, profiles, error, values })
@@ -134,24 +135,29 @@ function camerasOf(profile = {}) {
     return list.length ? list : [{}];
 }
 
-/** One tile per camera. A camera widget naming one (`camera`: its name or index) shows only that one. */
-function cameraTiles(w, profile) {
+/**
+ * One tile per camera. A camera widget naming one (`camera`: its name or index) shows only that one.
+ * `signaling_url` is the robot's live OpenRe WebRTC session, when one is; the tile carries it (escaped)
+ * so public/panel.js can play it — the server itself emits no script.
+ */
+function cameraTiles(w, profile, signaling_url = null) {
     const all = camerasOf(profile).map((c, i) => ({ c, i }));
     const pick = w.camera != null ? all.filter(({ c, i }) => c.name === w.camera || i === w.camera) : all;
     return (pick.length ? pick : all).map(({ c, i }) => {
         const res = typeof c.resolution === 'string' && /^\d+x\d+$/.test(c.resolution) ? c.resolution : '';
         const title = c.name || (all.length > 1 ? `Camera ${i + 1}` : '');
         const caption = [title, res.replace('x', '×'), c.transport ? String(c.transport).toUpperCase() : ''].filter(Boolean).join(' · ');
-        return `<figure class="camera" data-camera="${esc(i)}"${res ? ` data-resolution="${esc(res)}"` : ''}${c.transport ? ` data-transport="${esc(c.transport)}"` : ''}>`
+        return `<figure class="camera" data-camera="${esc(i)}"${res ? ` data-resolution="${esc(res)}"` : ''}${c.transport ? ` data-transport="${esc(c.transport)}"` : ''}`
+            + `${signaling_url ? ` data-signaling-url="${esc(signaling_url)}"` : ''}>`
             + `<div class="camera-screen" data-camera-screen>${icon('camera', 'icon camera-icon')}`
-            + '<p class="camera-title">Video is not connected yet.</p>'
-            + '<p class="camera-sub">The robot can already send its camera; watching it on this page comes in a later release.</p></div>'
+            + '<p class="camera-title">No live video right now.</p>'
+            + '<p class="camera-sub">The camera shows here while the robot is online and sending video.</p></div>'
             + (caption ? `<figcaption>${esc(caption)}</figcaption>` : '')
             + '</figure>';
     }).join('');
 }
 
-function renderWidget(w, { profile = {}, allowed_commands = [] } = {}) {
+function renderWidget(w, { profile = {}, allowed_commands = [], signaling_url = null } = {}) {
     const commands = profile.commands || {};
     const kind = w.command ? w.command.kind : null;
     const enabled = !!kind && allowed_commands.includes(kind);
@@ -203,7 +209,7 @@ function renderWidget(w, { profile = {}, allowed_commands = [] } = {}) {
                 + '</div>';
             break;
         case 'camera':
-            inner = `<div class="cameras">${cameraTiles(w, profile)}</div>`;
+            inner = `<div class="cameras">${cameraTiles(w, profile, signaling_url)}</div>`;
             break;
         default:
             inner = '';
@@ -290,12 +296,12 @@ function turnStrip(robot, role) {
     return `<div class="turn" data-turn hidden><span class="turn-state" data-turn-state></span><span class="turn-meta" data-turn-meta></span><form method="post" action="/robots/${esc(robot.id)}/queue/leave" data-turn-leave><button type="submit" class="quiet">Leave the queue</button></form></div>`;
 }
 
-function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs = 150, mode = 'page', signedIn = true, streaming = null, people = null }) {
+function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs = 150, mode = 'page', signedIn = true, streaming = null, people = null, signaling_url = null }) {
     const embed = mode === 'embed';
     const latched = !!(robot.estop && robot.estop.latched);
     const widgets = (profile.widgets || []).map((w, i) => ({ w, i }))
         .sort((a, b) => (a.w.order != null ? a.w.order : 1e9 + a.i) - (b.w.order != null ? b.w.order : 1e9 + b.i))
-        .map(({ w }) => renderWidget(w, { profile, allowed_commands }));
+        .map(({ w }) => renderWidget(w, { profile, allowed_commands, signaling_url }));
     const estop = ESTOP_ROLES.has(role) ? `<button type="button" class="estop" data-estop>${icon('stop')}<span>E-stop</span></button>` : '';
     const clear = role === 'owner' ? `<button type="button" class="estop-clear" data-estop-clear${latched ? '' : ' hidden'}>Clear e-stop</button>` : '';
     const body = `<header class="estop-banner" data-estop-banner data-latched="${latched}">
