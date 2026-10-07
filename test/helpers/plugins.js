@@ -8,6 +8,8 @@
  *   COZMO  = plugins/cozmo/openvibe_cozmo/__init__.py
  *   SDK    = plugins/sdk/openvibe_plugin/__init__.py
  *
+ * RELAY  = the relay plugin (plan T15 R9 step 4), a bridge with no hardware of its own.
+ *
  * camera.onvif and sim.rover are `kind: "server"` profiles with no Node plugin; their contract is the
  * value table in docs/protocol.md.
  */
@@ -127,6 +129,26 @@ function cozmo({ maxSay = 200 } = {}) {
     };
 }
 
+/**
+ * RELAY (relay.generic): the Node plugin that forwards a robot's button and video-click commands to the
+ * owner's local script (plan T15 R9 step 4). It takes every declared button name and the point layer as the
+ * gate builds them (server/domain buildValue); it holds no hardware of its own.
+ */
+const relay = {
+    name: 'relay (Node plugin)',
+    accepts(kind, v) {
+        if (kind === 'halt') return halt(v);
+        if (!isObj(v)) return `${kind} value must be an object`;
+        if (kind === 'button') {
+            if (typeof v.name !== 'string' || !v.name) return 'button is {name[, state]}';
+            if (!only(v, ['name', 'state'])) return 'button takes only name and state';
+            return v.state == null || v.state === 'down' || v.state === 'up' ? null : 'state is down or up';
+        }
+        if (kind === 'point') return num(v.x, 0, 1) && num(v.y, 0, 1) && only(v, ['x', 'y']) ? null : 'point is {x, y} 0..1';
+        return `kind ${kind} not supported`;
+    },
+};
+
 /** The server-side drivers (docs/protocol.md, command values). */
 const server = {
     'sim.rover': {
@@ -153,7 +175,8 @@ function contractFor(profile) {
     const m = profile.mapping || {};
     if (m.plugin === 'adeept_adr036') return adeept(m.wheels);
     if (m.plugin === 'cozmo') return cozmo();
+    if (m.plugin === 'relay') return relay;
     return server[profile.id] || null;
 }
 
-module.exports = { adeept, cozmo, server, contractFor, COZMO_FACES };
+module.exports = { adeept, cozmo, relay, server, contractFor, COZMO_FACES };

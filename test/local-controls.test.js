@@ -26,7 +26,7 @@ const { renderPanel } = require('../server/web/render');
 
     try {
         await check('every existing catalogue profile still loads under the contract', () => {
-            assert.deepStrictEqual([...loadProfiles().keys()].sort(), ['adeept.adr036', 'adeept.adr036.mecanum', 'camera.onvif', 'cozmo', 'sim.rover']);
+            assert.deepStrictEqual([...loadProfiles().keys()].sort(), ['adeept.adr036', 'adeept.adr036.mecanum', 'camera.onvif', 'cozmo', 'relay.generic', 'sim.rover']);
         });
 
         await check('an operator cannot edit or switch the robot-owned profile', async () => {

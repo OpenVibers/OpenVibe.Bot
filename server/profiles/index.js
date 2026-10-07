@@ -39,13 +39,16 @@ const CAPABILITIES = new Set([
     'display.text',
     'sensor.ultrasonic', 'sensor.line', 'sensor.cliff', 'sensor.pickup',
     'battery', 'ptz', 'camera',
+    // A robot that carries no hardware of its own: the owner's Node forwards the panel's commands to a
+    // local script with the relay plugin (relay.generic, plan T15 R9).
+    'relay',
 ]);
 
 /** Panel widget types (open in the profile, closed in code: a new widget is a new entry here). */
 const WIDGETS = new Set(['drive', 'pan-tilt', 'servo', 'lights', 'horn', 'speaker', 'display', 'telemetry', 'battery', 'latency', 'ptz', 'camera', 'head', 'lift', 'buttons', 'video_click']);
 
-/** Device drivers a mapping may name. */
-const DRIVERS = new Set(['pca9685', 'ads7830', 'cozmo', 'onvif', 'sim']);
+/** Device drivers a mapping may name. `relay` is a Node plugin with no hardware map of its own. */
+const DRIVERS = new Set(['pca9685', 'ads7830', 'cozmo', 'onvif', 'sim', 'relay']);
 
 const ID_RE = /^[a-z][a-z0-9._-]{1,63}$/;
 const KINDS = new Set(['onboard', 'bridge', 'server']);

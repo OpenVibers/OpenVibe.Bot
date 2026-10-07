@@ -1,6 +1,7 @@
 # Moving OpenVibe.Live's stream controls into Bot (plan T15, row R9)
 
-Status: steps 1–3 built in Contracts 0.109.0 and Bot, 2026-10-07. Live still serves its controls; steps 4–6 remain.
+Status: steps 1–3 built in Contracts 0.109.0 and Bot, and step 5 (the conversion) built in Bot, 2026-10-07.
+Live still serves its controls; step 4 (the Node relay plugin) and step 6 (Live's deletion) remain.
 
 ## What Live has today
 
@@ -49,17 +50,65 @@ lines) let viewers drive a streamer's hardware from the channel page:
    loopback WebSocket that speaks Live's `{type:'command'|'key_held'|'key_released'|'video_click'}` messages — so an
    existing Pi script keeps working with a one-line change of where it connects. Local policy and the kill switch
    apply as for every plugin.
-5. **The conversion** (a script in Bot, run once by the operator with a JSON export from Live's database): for each
-   `control_configs` row, create the robot for the owner's Network subject (Live `users.subject_id`), a robot-local
-   profile from its buttons, operators from the whitelist, and the `stream_controls` overrides of that owner's most
-   recent stream where they differ. Idempotent on the Live config id. The owner then pairs a Node (the five-minute
-   path) and moves the script onto the relay plugin.
+5. **Built — the conversion**, `scripts/live-controls-export.sh` and `scripts/convert-live-controls.js` in Bot:
+   an operator runs the export on the Live host (read-only) and the converter here — dry-run first, then
+   `--apply`. For each `control_configs` row it creates the robot for the owner's Network subject (Live's
+   `linked_accounts`/`subject_projection`, the person's `usr_…`), a robot-local profile from its buttons
+   (profile `relay.generic`, the catalogue's bare relay robot: buttons and video clicks, no drive), operators
+   from the channel's whitelist, and the `stream_controls` overrides of that owner's most recent stream where
+   they differ. A Bot button name is Live's command normalised to `^[a-z][a-z0-9_]{0,31}$` and deduplicated,
+   and the Live command → Bot name map is kept in `live_conversions.detail` and the robot's audit so the relay
+   plugin can map back. A key the panel reserves (drive/stop) is dropped, a label is cut to 40 characters, an
+   ONVIF control and a disabled button are reported and left out; an owner with no Network subject is reported
+   and skipped (they must sign in to Network once). Idempotent on the Live config id (`live_conversions`,
+   migration 0007): a second `--apply` changes nothing and says "already converted". The owner then pairs a
+   Node (the five-minute path) and moves the script onto the relay plugin.
 6. **Live**: `LIVE_BOT_EMBED=1`; the channel page shows the robot's embedded panel for a stream whose owner has a
    robot; then delete `server/controls/*`, the hardware WebSocket path and its stream-key auth, the controls tables
    and `public/js/controls.js` / `onvif-dashboard.js` (the embed stays).
 
+## Running the conversion
+
+On the Live host, where `DB_PATH` points at Live's SQLite file (read-only — no journal is written, nothing in
+Live changes):
+
+```sh
+scripts/live-controls-export.sh /path/to/live.sqlite > export.json
+```
+
+That one document carries only what the conversion needs: `configs`, `buttons`, `whitelist`,
+`latest_stream_controls` (each config owner's most recent stream only) and `owners` — only the config owners
+and whitelisted users, by `id`, `username` and Network `subject_id`. No other personal data.
+
+Then in Bot (dry run first; it prints the plan and writes nothing):
+
+```sh
+node scripts/convert-live-controls.js --input export.json
+node scripts/convert-live-controls.js --input export.json --apply
+```
+
+`--apply` opens Bot's database and domain from the environment exactly as `server/index.js` does and writes
+every robot, robot-local profile and operator through the domain layer — never raw SQL that would bypass the
+profile and role validation. Re-running `--apply` is safe: each Live config id already converted is reported
+`already converted` and nothing changes. A config whose owner has no Network subject is skipped with that
+reason; so is a whitelisted user with no subject. The plan also reports every button it cannot convert (an
+ONVIF control, a disabled button, a reserved key, a truncated label) so the operator can tell the owner what,
+if anything, needs redoing by hand.
+
+### What each owner does next
+
+1. Bot robot page → **Pair a Node** (the five-minute path): run the installer command Bot prints for the new
+   robot on the machine that drives the hardware.
+2. Move the local script onto the **relay plugin**: it forwards `button` (`{name, state}` for a hold) and
+   `point` (`{x, y}`) commands to the script in the shape Live's hardware clients already speak. The Live
+   command behind each Bot button name is in the robot's audit (`live_conversions.detail` too), so the mapping
+   is one line.
+3. Point the Pi script at the paired Node instead of Live's stream-key socket. The stream key is no longer a
+   robot credential.
+
 ## Order and cutover
 
 Contracts → robot-local profiles → gate/panel → relay plugin → conversion run (owners notified) → Live embed on →
-owners re-pair → Live deletion. The deletion waits for the three converted owners' robots to be paired, because the
-hardware clients are physical devices only their owners can move; it does not wait on a date.
+owners re-pair → Live deletion. The conversion (step 5) is built and runs once; the deletion waits for the three
+converted owners' robots to be paired, because the hardware clients are physical devices only their owners can
+move; it does not wait on a date.
