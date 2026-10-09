@@ -1,18 +1,18 @@
 'use strict';
 
 /**
- * OpenRe.Stream client: the robot's video stream and its WHIP ingest key (T15 R5).
+ * OpenRestream client: the robot's video stream and its WHIP ingest key (T15 R5).
  *
- * OpenRe's WHIP worker admits only keys in its own store (resolveIngestKey), so a device's publish key is
- * always an OpenRe ingest key: Bot creates one stream per robot (external ref bot:robot:<id>) and hands the
- * device the key OpenRe returns, shown once and never stored here. Calls act for the robot's owner
- * (X-OV-Subject), so OpenRe limits them to that owner's streams.
+ * OpenRestream's WHIP worker admits only keys in its own store (resolveIngestKey), so a device's publish key is
+ * always an OpenRestream ingest key: Bot creates one stream per robot (external ref bot:robot:<id>) and hands the
+ * device the key OpenRestream returns, shown once and never stored here. Calls act for the robot's owner
+ * (X-OV-Subject), so OpenRestream limits them to that owner's streams.
  *
  * By default Bot mints its own Network service token (audience openvibe.openre) from its OAuth client
  * credentials, with openre.stream.read (find), openre.stream.write (create, archive, streaming toggles),
  * openre.key.rotate (rotate) and openre.session.read/openre.output.read/openre.output.write (the panel's
  * live video, session status and outputs). An operator-minted BOT_OPENRE_TOKEN overrides it. The
- * token is cached until 60 s before expiry; a 401 from OpenRe (rotated key, clock) drops the cached token and
+ * token is cached until 60 s before expiry; a 401 from OpenRestream (rotated key, clock) drops the cached token and
  * the call is tried once more.
  *
  *   find(ref, owner)                      GET /api/v1/streams?external_ref=… → the stream, or null
@@ -21,11 +21,11 @@
  *   update(id, fields, owner)             PATCH /api/v1/streams/:id → the updated stream, or null on 404
  *   rotate(id, owner, { grace_seconds, end_sessions })
  *                                         POST /api/v1/streams/:id/keys/rotate → { key: { id, key, hint }, … }
- *   archive(id, owner)                    DELETE /api/v1/streams/:id (OpenRe refuses a live stream: 409)
+ *   archive(id, owner)                    DELETE /api/v1/streams/:id (OpenRestream refuses a live stream: 409)
  *   sessions(streamId, owner, { state })  GET /api/v1/sessions?stream_id=…&state=… → the stream's sessions
  *   playback(id, owner)                   GET /api/v1/sessions/:id/playback → the descriptor, or null on 404
  *
- * A refusal (4xx) throws 502 bot.openre_refused with OpenRe's problem code and detail; no answer, a timeout
+ * A refusal (4xx) throws 502 bot.openre_refused with OpenRestream's problem code and detail; no answer, a timeout
  * or a 5xx throws 503 bot.openre_unavailable. A 404 for a named stream (get, update, rotate, archive) answers null. The token is
  * never logged, returned or put in an error. Unset BOT_OPENRE_URL, or neither an operator BOT_OPENRE_TOKEN
  * nor the Network client credentials: createOpenRe → null.
@@ -57,7 +57,7 @@ function createOpenRe(config, { fetchImpl = globalThis.fetch } = {}) {
         try {
             return (await tokens.authHeaders()).Authorization;
         } catch (e) {
-            throw new BotError(503, 'bot.openre_unavailable', 'Bot could not mint its OpenRe token from Network');
+            throw new BotError(503, 'bot.openre_unavailable', 'Bot could not mint its OpenRestream token from Network');
         }
     }
 
@@ -76,14 +76,14 @@ function createOpenRe(config, { fetchImpl = globalThis.fetch } = {}) {
             });
         } catch (e) {
             const why = e && (e.name === 'TimeoutError' || e.name === 'AbortError') ? `no answer within ${timeoutMs} ms` : 'unreachable';
-            throw new BotError(503, 'bot.openre_unavailable', `OpenRe did not answer for the robot's video: ${why}`);
+            throw new BotError(503, 'bot.openre_unavailable', `OpenRestream did not answer for the robot's video: ${why}`);
         }
     }
 
     async function call(method, path, opts = {}) {
         const { named = false } = opts;
         let res = await send(method, path, opts);
-        // A minted token OpenRe no longer accepts (rotated signing key, clock): drop it and try once more.
+        // A minted token OpenRestream no longer accepts (rotated signing key, clock): drop it and try once more.
         if (res.status === 401 && tokens) {
             tokens.invalidate();
             res = await send(method, path, opts);
@@ -95,9 +95,9 @@ function createOpenRe(config, { fetchImpl = globalThis.fetch } = {}) {
         const code = out && typeof out.code === 'string' ? out.code : null;
         const detail = out && typeof out.detail === 'string' ? `: ${out.detail.slice(0, 200)}` : '';
         if (res.status >= 400 && res.status < 500) {
-            throw new BotError(502, 'bot.openre_refused', `OpenRe refused the robot's video (${res.status}${code ? ` ${code}` : ''})${detail}`, { openre: { status: res.status, code } });
+            throw new BotError(502, 'bot.openre_refused', `OpenRestream refused the robot's video (${res.status}${code ? ` ${code}` : ''})${detail}`, { openre: { status: res.status, code } });
         }
-        throw new BotError(503, 'bot.openre_unavailable', `OpenRe answered ${res.status} for the robot's video`);
+        throw new BotError(503, 'bot.openre_unavailable', `OpenRestream answered ${res.status} for the robot's video`);
     }
     const stream = (id) => `/api/v1/streams/${encodeURIComponent(id)}`;
     return {
@@ -111,7 +111,7 @@ function createOpenRe(config, { fetchImpl = globalThis.fetch } = {}) {
         },
         create: (body, owner) => call('POST', '/api/v1/streams', { owner, body }),
         // Only the two streaming toggles this client owns are ever sent: a PATCH naming one leaves the other
-        // as it is on OpenRe.
+        // as it is on OpenRestream.
         async update(id, fields, owner) {
             const body = {};
             if (fields && fields.recording_mode !== undefined) body.recording_mode = fields.recording_mode;

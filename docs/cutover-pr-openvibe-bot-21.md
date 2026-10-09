@@ -10,7 +10,7 @@ PR #21 (plan T15 step R8b) gives the panel its controls and readouts:
 
 - `public/panel.js`, `public/panel.css`, `server/web/render.js` — a touch joystick, keyboard and gamepad input
   (each held control re-sent while held, zeroed at once on release), a latency meter, one camera tile per camera
-  the profile lists (a placeholder until OpenRe.Stream can play a WHIP stream back to a browser), and a live
+  the profile lists (a placeholder until OpenRestream can play a WHIP stream back to a browser), and a live
   online indicator on `/pair/:id`. These are static assets and server-rendered HTML; the panel still drives over
   `/control` and the command gate is unchanged.
 - `test/panel.test.js`, `README.md`, `STATUS.json`.

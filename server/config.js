@@ -5,7 +5,7 @@
  * /etc/openvibe/bot.env in production). loadConfig(env) is pure so tests build their own.
  *
  * Bot is its own service on PostgreSQL (ADR-043 decision 10). It owns robots, devices, pairing and
- * control; it never moves money and never owns media (a device's camera publishes to OpenRe with a
+ * control; it never moves money and never owns media (a device's camera publishes to OpenRestream with a
  * per-device publish key over WHIP).
  */
 require('dotenv').config();
@@ -202,7 +202,7 @@ function loadConfig(env = process.env) {
             intervalMs: int(env.BOT_JOBS_INTERVAL_MS, 5000),
         },
         // Video: a device publishes its camera to the WHIP ingest at <whipBase>/<its publish key>, returned
-        // as `whip_url` by the pairing and rotation answers only. The O30 value is OpenRe.Stream's WHIP
+        // as `whip_url` by the pairing and rotation answers only. The O30 value is OpenRestream's WHIP
         // ingest, https://ingest.openre.stream/whip. Unset or empty (the default) means no whip_url at all,
         // so devices pair without video until the operator names an ingest base.
         media: {
@@ -216,8 +216,8 @@ function loadConfig(env = process.env) {
             cameras: parseOnvifCameras(env.BOT_ONVIF_CAMERAS),
             timeoutMs: Math.max(100, int(env.BOT_ONVIF_TIMEOUT_MS, 5000)),
         },
-        // OpenRe.Stream (T15 R5): the publish key is the ingest key of the robot's OpenRe stream, the only kind
-        // OpenRe's WHIP worker admits. By default Bot mints its own Network service token (audience
+        // OpenRestream (T15 R5): the publish key is the ingest key of the robot's OpenRestream stream, the only kind
+        // OpenRestream's WHIP worker admits. By default Bot mints its own Network service token (audience
         // openvibe.openre, client `bot`) holding openre.stream.read (the lookup by external ref),
         // openre.stream.write, openre.key.rotate and openre.session.read/openre.output.read/openre.output.write
         // (session status and outputs, for later panel video and restreaming); BOT_OPENRE_TOKEN, an
@@ -232,7 +232,7 @@ function loadConfig(env = process.env) {
         },
         // OpenVibe.Billing (plan T14 L1): job usage readings go to billing.usage.record (POST <url>/api/v1/usage).
         // By default Bot mints its own Network service token (audience openvibe.billing, capability
-        // billing.usage.record) from its OAuth client, exactly as the OpenRe client does; BOT_BILLING_TOKEN, an
+        // billing.usage.record) from its OAuth client, exactly as the OpenRestream client does; BOT_BILLING_TOKEN, an
         // operator-minted token of the same grant, overrides it. The token is never logged or returned. With
         // BOT_BILLING_URL unset (or no token and no Network client to mint one): readings wait in
         // run_usage_outbox (never dropped).

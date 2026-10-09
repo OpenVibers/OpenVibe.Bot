@@ -3,7 +3,7 @@
 /**
  * Account export and deletion → Bot (ADR-033; openvibe-sdk/account-data). What Bot holds about a person:
  *
- *   their robots        each removed the way its owner would remove it (domain.robots.remove: the robot's OpenRe
+ *   their robots        each removed the way its owner would remove it (domain.robots.remove: the robot's OpenRestream
  *                       stream key is revoked and its stream archived, then the row goes, and with it, by
  *                       ON DELETE CASCADE, its pairing codes, operators, queue, local profile and Live conversion).
  *                       Its command history goes too, and a device that served only their robots is revoked
@@ -50,7 +50,7 @@ function create({ domain, log = console } = {}) {
             await t.exec(`UPDATE devices SET name = NULL WHERE NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(robot_ids) r WHERE NOT (r = ANY($1::text[])))
                 AND jsonb_array_length(robot_ids) > 0`, [ids]);
             counts.add(counts.erased, 'command_audit', await t.exec('DELETE FROM command_audit WHERE robot_id = ANY($1::text[])', [ids]));
-            // Each robot the way its owner would remove it (OpenRe key revoked first; a refusal there rolls this back and
+            // Each robot the way its owner would remove it (OpenRestream key revoked first; a refusal there rolls this back and
             // Events retries).
             for (const id of ids) await domain.robots.remove(id);
             counts.add(counts.erased, 'robots', ids.length);

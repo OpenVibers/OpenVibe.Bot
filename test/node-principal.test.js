@@ -42,9 +42,9 @@ const WHIP_BASE = 'https://whip.test/ingest';
         assert.strictEqual(d.agent_version, null);
         assert.strictEqual(d.credential_hash, null);
         assert.strictEqual(d.node_principal, principal);
-        assert.strictEqual(d.publish_key_hint, r.json.publish_key.slice(-4), 'only the hint of the OpenRe key is kept');
+        assert.strictEqual(d.publish_key_hint, r.json.publish_key.slice(-4), 'only the hint of the OpenRestream key is kept');
         assert.strictEqual(d.publish_key_hash, null, 'Bot mints and hashes no key of its own');
-        assert.ok(t.openre.admits(r.json.publish_key), 'the publish key is one OpenRe admits');
+        assert.ok(t.openre.admits(r.json.publish_key), 'the publish key is one OpenRestream admits');
     });
 
     await check('bind twice answers the same device and a new publish key; the old key stops working', async () => {

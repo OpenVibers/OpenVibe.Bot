@@ -10,7 +10,7 @@
  *   renderPanel({ robot, profile, role, allowed_commands, holdResendMs, mode, signedIn, streaming, people, signaling_url })
  *                                   mode 'embed': the framed panel (no topbar, no owner form, links open a new tab);
  *                                   `people` (owner page only) the non-owner members for the People card;
- *                                   `signaling_url` the robot's live OpenRe WebRTC session, on the camera tiles
+ *                                   `signaling_url` the robot's live OpenRestream WebRTC session, on the camera tiles
  *   renderEmbedRefused({ robotId })  the framed answer when the visitor may not see the robot
  *   renderWidget(widget, { profile, allowed_commands })
  *   renderRobotsPage({ robots, profiles, error, values })
@@ -137,7 +137,7 @@ function camerasOf(profile = {}) {
 
 /**
  * One tile per camera. A camera widget naming one (`camera`: its name or index) shows only that one.
- * `signaling_url` is the robot's live OpenRe WebRTC session, when one is; the tile carries it (escaped)
+ * `signaling_url` is the robot's live OpenRestream WebRTC session, when one is; the tile carries it (escaped)
  * so public/panel.js can play it — the server itself emits no script.
  */
 function cameraTiles(w, profile, signaling_url = null, pointEnabled = false) {
@@ -244,18 +244,18 @@ ${toggle('embed_public', robot.embed_public, 'Let anyone watch where it is embed
 }
 
 // Why the streaming switches cannot be used right now, in the owner's words (domain.streaming reasons, plus
-// 'unavailable' when OpenRe did not answer while the page was drawn).
+// 'unavailable' when OpenRestream did not answer while the page was drawn).
 const STREAMING_WHY = {
-    not_configured: 'Streaming needs OpenRe.Stream, which this server is not connected to.',
+    not_configured: 'Streaming needs OpenRestream, which this server is not connected to.',
     not_paired: "Pair a device first: the robot's video stream is made when a device pairs.",
-    stream_missing: "OpenRe no longer has this robot's stream. Pair the device again to make a new one.",
-    unavailable: 'OpenRe did not answer just now, so these switches cannot be read. Reload in a moment.',
+    stream_missing: "OpenRestream no longer has this robot's stream. Pair the device again to make a new one.",
+    unavailable: 'OpenRestream did not answer just now, so these switches cannot be read. Reload in a moment.',
 };
 
 /**
  * The owner's streaming and recording switches (plan T15 row S), both off until the owner turns them on. They
- * are the robot's OpenRe stream's own settings (domain.streaming): Bot keeps no copy, so the page shows what
- * OpenRe says. The panel's own video never depends on either.
+ * are the robot's OpenRestream stream's own settings (domain.streaming): Bot keeps no copy, so the page shows what
+ * OpenRestream says. The panel's own video never depends on either.
  */
 function streamingForm(robot, streaming) {
     const s = streaming || { available: false, reason: 'unavailable', media: { on: false }, live: { on: false } };
@@ -264,8 +264,8 @@ function streamingForm(robot, streaming) {
     return `<section class="setting-card" aria-labelledby="streaming-h"><h2 id="streaming-h">Streaming and recording</h2>
 <p class="setting-note">Off until you turn them on. Operators and viewers cannot change these.</p>
 ${why}<form class="streaming-form" method="post" action="/robots/${esc(robot.id)}/streaming" data-streaming-form>
-${toggle('media', s.media && s.media.on, 'Record to OpenVibe.Media', 'Each time the robot goes live, OpenRe records the session to OpenVibe.Media as an unlisted video.', off, true)}
-${toggle('live', s.live && s.live.on, 'Show on my OpenVibe.Live channel', 'Lets OpenRe mirror the camera to your Live channel. It appears there once your channel plays OpenRe streams.', off, true)}
+${toggle('media', s.media && s.media.on, 'Record to OpenVibe.Media', 'Each time the robot goes live, OpenRestream records the session to OpenVibe.Media as an unlisted video.', off, true)}
+${toggle('live', s.live && s.live.on, 'Show on my OpenVibe.Live channel', 'Lets OpenRestream mirror the camera to your Live channel. It appears there once your channel plays OpenRestream streams.', off, true)}
 <button type="submit"${off ? ' disabled' : ''}>Save</button>
 </form></section>`;
 }

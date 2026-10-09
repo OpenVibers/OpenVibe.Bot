@@ -21,8 +21,8 @@
  *   GET  /panel/panel.js, /panel/panel.css   the panel client and its sheet (public/, no build step)
  *
  * The panel and embed pages carry their own CSP (PANEL_CSP / embedCsp): the live camera plays the robot's
- * OpenRe WebRTC session with the pinned mediasoup-client ESM build from esm.sh, so those two pages alone
- * allow that script origin and OpenRe's signaling; the rest of the site keeps `default-src 'self'`.
+ * OpenRestream WebRTC session with the pinned mediasoup-client ESM build from esm.sh, so those two pages alone
+ * allow that script origin and OpenRestream's signaling; the rest of the site keeps `default-src 'self'`.
  *
  * Not signed in → 302 to /auth/login?next=<the page>. No access → 403 (bot.not_an_operator / bot.forbidden).
  * Pages are never cached: a pairing page carries a live code. Adding a robot and minting a code count against
@@ -41,7 +41,7 @@ const PUBLIC = path.join(__dirname, '..', '..', 'public');
 const HOLD_RESEND_MS = 150;
 // The panel plays the robot's live video with mediasoup-client, whose npm package ships no browser
 // bundle: the page imports the pinned ESM build OpenVibe.Live uses from esm.sh, and its viewer
-// signaling endpoint is OpenRe's wss host (OpenRe README "playback descriptor"). Exactly these two
+// signaling endpoint is OpenRestream's wss host (OpenRestream README "playback descriptor"). Exactly these two
 // sources, on the panel and embed pages only — the site-wide CSP (server/app.js) stays as it is.
 const PANEL_SCRIPT_SRC = 'https://esm.sh';
 const PANEL_CONNECT_SRC = 'wss://ingest.openre.stream';
@@ -88,7 +88,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         res.setHeader('Cache-Control', 'no-store');
         try { await fn(req, res); } catch (e) {
             if (e.status === 401) return res.redirect(302, `/auth/login?next=${encodeURIComponent(req.originalUrl)}`);
-            // A refusal the person can act on (a bad form value, a robot with no stream, OpenRe not answering) says so
+            // A refusal the person can act on (a bad form value, a robot with no stream, OpenRestream not answering) says so
             // with its own status instead of the generic error page.
             if ([403, 404, 409, 422, 502, 503].includes(e.status) && e.code) return res.status(e.status).type('text/plain').send(`${e.detail || e.code}\n`);
             return next(e);
@@ -192,7 +192,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
             const was = last(req.body && req.body[`${to}_was`]);
             if (was !== value) changes.push({ to, on: value === 'on' });
         }
-        // One switch can be saved before OpenRe refuses or stops answering for the next: say which one was.
+        // One switch can be saved before OpenRestream refuses or stops answering for the next: say which one was.
         const saved = [];
         for (const change of changes) {
             try { await domain.streaming.set(robot.id, me, change); saved.push(change.to); } catch (e) {
@@ -253,8 +253,8 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     async function sendPanel(res, robot, profile, role, mode = 'page', signedIn = true, profileForm = {}) {
         await attachInProcess(robot, profile);
         const { maxCommandMs } = domain.control.effectiveLimits(robot, profile);
-        // Two OpenRe reads, run together. Only the owner's own page shows the streaming switches, greyed out
-        // with a reason when OpenRe does not answer; the live session is for the camera tile of every page,
+        // Two OpenRestream reads, run together. Only the owner's own page shows the streaming switches, greyed out
+        // with a reason when OpenRestream does not answer; the live session is for the camera tile of every page,
         // where it is left a placeholder instead. A watcher is the anonymous embed and only exists when the
         // owner set embed_public — a private robot's video reaches no one else.
         const [streaming, signaling_url] = await Promise.all([

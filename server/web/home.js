@@ -6,7 +6,7 @@
  *
  * The copy says only what works today (README "Owns" and "Devices"): pairing with one pasted command, the
  * panel's controls, the command gate and the latched e-stop, people and the queue, the read-only embed, the
- * simulator, and the kits Bot has drivers for. Live video in the panel waits for OpenRe.Stream to play a
+ * simulator, and the kits Bot has drivers for. Live video in the panel waits for OpenRestream to play a
  * WHIP-published stream back, and the page says so rather than showing it.
  *
  *   renderHome({ config, signedIn })   the whole document
@@ -48,7 +48,7 @@ function sections({ signedIn }) {
         actions: signedIn
             ? [{ label: 'Your robots', href: '/robots', primary: true }, { label: 'How it works', href: '#how' }]
             : [{ label: 'Sign in with OpenVibe', href: '/auth/login?next=%2Frobots', primary: true }, { label: 'How it works', href: '#how' }],
-        note: 'Alpha. A paired robot sends its camera over WebRTC to OpenRe.Stream and the panel plays it live; the first supported kit is the Adeept 4WD Smart Car for Raspberry Pi.',
+        note: 'Alpha. A paired robot sends its camera over WebRTC to OpenRestream and the panel plays it live; the first supported kit is the Adeept 4WD Smart Car for Raspberry Pi.',
     }) + showcase.steps({
         id: 'how',
         title: 'Online in three steps',

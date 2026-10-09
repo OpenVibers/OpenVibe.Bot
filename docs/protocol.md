@@ -4,7 +4,7 @@ Everything here is exactly what `server/realtime.js` implements today; the devic
 against this document. Three WebSockets share one hub:
 
 - `wss://openvibe.bot/device` — one **outbound** connection per device (ADR-043 decision 4). It works
-  behind any home router and on an ESP32; video goes separately over WHIP to OpenRe.
+  behind any home router and on an ESP32; video goes separately over WHIP to OpenRestream.
 - `wss://openvibe.bot/control` — operators (a signed-in person, or a service acting for one).
 - `wss://openvibe.bot/watch` — anyone, read-only: the public state of a robot whose owner allows embedding
   (§2.1, the embeddable panel).
@@ -66,7 +66,7 @@ At most 64 frames wait; any more are answered `error` `bot.not_ready`.
 
 | type | fields (besides v, seq, ts) | when |
 |---|---|---|
-| `paired` | `device_id, credential, publish_key, whip_url, robot_ids, profile_id, profile` | the answer to `pair`; `credential`/`publish_key`/`whip_url` are shown **once**; without OpenRe configured `video: "not_configured"` instead of `publish_key`/`whip_url` |
+| `paired` | `device_id, credential, publish_key, whip_url, robot_ids, profile_id, profile` | the answer to `pair`; `credential`/`publish_key`/`whip_url` are shown **once**; without OpenRestream configured `video: "not_configured"` instead of `publish_key`/`whip_url` |
 | `hello` | `session_id, device_id, robot_ids, server_time` | on every authenticated connection |
 | `config` | `heartbeat_ms, limits, allowed_commands, estop_latched` | right after `hello`, and again whenever the owner changes the robot's limits (or `allow` lists) and whenever Bot's latch is set or cleared (after the `estop` frame) |
 | `command` | `id, kind, value, deadline_ms, operator{subject,role}, robot_id` | an operator's command passed the gate |
@@ -107,15 +107,15 @@ profile's — as `{ max_speed, max_turn, max_command_ms, heartbeat_ms }`, the sa
 with; `allowed_commands` is what the owner may send: the profile's kinds, cut by the owner's allowlist,
 always with `halt`. Both are re-sent to the connected device the moment the owner changes the limits.
 
-`whip_url` is where the device publishes its camera: OpenRe's WHIP ingest (`POST`, RFC 9725, body
+`whip_url` is where the device publishes its camera: OpenRestream's WHIP ingest (`POST`, RFC 9725, body
 `application/sdp`) at `<BOT_WHIP_BASE>/<publish_key>`, any trailing slash on the base trimmed. It is built
 from the device's own publish key (never the owner's stream key), so it is a secret like the key: returned
 only by `pair` / `POST /pair` and by a rotation (which issues a new key, so a new URL), never by a read.
 With `BOT_WHIP_BASE` unset or empty the field is left out of the answer entirely and the device runs
 without video.
 
-`publish_key` is an ingest key OpenRe.Stream issued, the only kind its WHIP ingest admits: each robot has one
-OpenRe stream (external ref `bot:robot:<robot id>`, protocol `webrtc`, no recording), created at its first
+`publish_key` is an ingest key OpenRestream issued, the only kind its WHIP ingest admits: each robot has one
+OpenRestream stream (external ref `bot:robot:<robot id>`, protocol `webrtc`, no recording), created at its first
 pairing with `BOT_OPENRE_URL` set and found again by that ref. Bot authenticates with its own Network service
 token (audience `openvibe.openre`), minted from its OAuth client, holding `openre.stream.read`,
 `openre.stream.write`, `openre.key.rotate` and `openre.session.read`/`openre.output.read`/`openre.output.write`
@@ -126,8 +126,8 @@ credential rotation with the credential's grace, a revocation with no grace and 
 removing the robot does the same and archives the stream when nothing is live. Bot stores the stream id and
 the key's hint, never the key. The same token carries the streaming toggles: `GET /robots/:id/streaming`
 reads the stream (`openre.stream.read`) and `POST` PATCHes `recording_mode`/`mirror_to_live`
-(`openre.stream.write`); Bot keeps neither, the OpenRe stream is the only copy.
-OpenRe refusing is `502 bot.openre_refused` (its problem code in `detail`),
+(`openre.stream.write`); Bot keeps neither, the OpenRestream stream is the only copy.
+OpenRestream refusing is `502 bot.openre_refused` (its problem code in `detail`),
 not answering `503 bot.openre_unavailable`; a pairing that fails so leaves the code unused and no device.
 With `BOT_OPENRE_URL` unset, or neither `BOT_OPENRE_TOKEN` nor the Network client credentials available, the
 answers carry `"video": "not_configured"` and neither `publish_key` nor `whip_url`.
@@ -461,14 +461,14 @@ node token, and a service token is judged on `bot.job.dispatch` alone.
 | `POST /robots/:id/operators` | owner, or `bot.robot.manage` | `201 { operators[] }` |
 | `DELETE /robots/:id/operators/:subject` | owner, or `bot.robot.manage` | `{ operators[] }` |
 | `GET /robots/:id/devices` | member, or `bot.robot.read` | `{ devices[] }` (no hashes, `online`) |
-| `POST /devices/:id/rotate` | the robot's owner, `bot.device.connect` | `{ device, credential, publish_key, whip_url }` (once; `video: "not_configured"` instead of the key without OpenRe); for a Network-paired machine `{ device, sent }` — the machine is sent `rotate`, no credential is answered |
-| `POST /devices/:id/revoke` | the robot's owner, `bot.device.connect` | `{ device }`; the socket closes at once. A Network-paired machine's principal is revoked on Network too (`503 bot.network_unavailable` if Network did not answer: revoked here, retry) and never binds again. The OpenRe key the device holds is revoked and its live session ended (`502`/`503 bot.openre_*` if OpenRe did not: revoked here, retry) |
-| `POST /devices/bind` | a Network node token (audience `openvibe.bot`), no body | `201 { device_id, publish_key, whip_url, robot_id, profile }` — `POST /pair`'s answer without `credential`; again → the same device and a new publish key (the old one stops working); without OpenRe `video: "not_configured"` instead of the key. Refused: `401 bot.node_token_required`, `403 bot.node_not_bound` |
+| `POST /devices/:id/rotate` | the robot's owner, `bot.device.connect` | `{ device, credential, publish_key, whip_url }` (once; `video: "not_configured"` instead of the key without OpenRestream); for a Network-paired machine `{ device, sent }` — the machine is sent `rotate`, no credential is answered |
+| `POST /devices/:id/revoke` | the robot's owner, `bot.device.connect` | `{ device }`; the socket closes at once. A Network-paired machine's principal is revoked on Network too (`503 bot.network_unavailable` if Network did not answer: revoked here, retry) and never binds again. The OpenRestream key the device holds is revoked and its live session ended (`502`/`503 bot.openre_*` if OpenRestream did not: revoked here, retry) |
+| `POST /devices/bind` | a Network node token (audience `openvibe.bot`), no body | `201 { device_id, publish_key, whip_url, robot_id, profile }` — `POST /pair`'s answer without `credential`; again → the same device and a new publish key (the old one stops working); without OpenRestream `video: "not_configured"` instead of the key. Refused: `401 bot.node_token_required`, `403 bot.node_not_bound` |
 | `POST /robots/:id/estop` | owner/operator, `bot.robot.control` | `{ robot }` |
 | `POST /robots/:id/estop/clear` | **owner only**, `bot.robot.control` | `{ robot }` |
 | `POST /robots/:id/commands` | owner/operator, `bot.robot.control` | `{ robot_id, id, result, code?, reason?, latency_ms?, cached? }` — one command through the same gate, audit and per-subject `id` idempotency key as `/control` (a bound channel's chat forwards here instead of a hardware socket). `result` is `ack`, `nack` or `expired` (a repeated `id` answers `cached: true`); a gate refusal is its code as an RFC 9457 problem: `403 bot.not_an_operator` / `bot.read_only` / `bot.not_your_turn`, `404 bot.robot_not_found`, `409 bot.device_offline` / `bot.estop_latched` / `bot.command_pending` (the same `id` is still in flight), `422` the command-shape codes, `429 bot.cooldown` / `bot.turn_budget`. A service acting for a subject is rate-limited as that person (`user:<subject>`) and also, as a service, at 1200 a minute and 12000 an hour on its own token (`bot.control.service`), so naming a fresh well-formed subject on every request never lifts every ceiling |
 | `GET /robots/:id/audit?limit=&before=` | owner, or `bot.robot.read` | `{ audit[], next_before }` (newest first) |
-| `GET /robots/:id/streaming` | a member, or `bot.robot.read` | `{ available, media{on}, live{on,effective}, stream_id }` (plus `reason` when unavailable), read from the robot's OpenRe stream; `available:false` is `not_configured` (OpenRe unset), `not_paired` (no stream yet) or `stream_missing` (OpenRe answered 404) |
+| `GET /robots/:id/streaming` | a member, or `bot.robot.read` | `{ available, media{on}, live{on,effective}, stream_id }` (plus `reason` when unavailable), read from the robot's OpenRestream stream; `available:false` is `not_configured` (OpenRestream unset), `not_paired` (no stream yet) or `stream_missing` (OpenRestream answered 404) |
 | `POST /robots/:id/streaming` | **the owner only**, or `bot.robot.manage` | body `{ to: "media"\|"live", on: bool }` → the new state (as `GET`). `media` sets the stream's `recording_mode` `vod`/`none` (record to OpenVibe.Media); `live` sets `mirror_to_live` (show on the owner's OpenVibe.Live channel). One audit row per real change (`streaming.media`/`streaming.live`); an idempotent repeat answers the state and writes none. `422 bot.invalid_streaming`; `409 bot.not_paired` / `bot.openre_not_configured` |
 | `POST /jobs`, `POST /jobs/:id/cancel`, `GET /jobs/:id` | **a service only**, with `bot.job.dispatch` (Run → Bot; a person or a node token is `403 bot.forbidden`) | `201 { job, sent }` / `{ job, sent }` / `{ job, stdout }`; `422 bot.invalid_input` without `project_id`, `409 bot.class_unadvertised` when the device does not advertise the job's class, `404 bot.job_not_found` |
 | `POST /pair` | the one-time code is the credential | `201 { device_id, credential, publish_key, whip_url, robot_id, profile }`; with `BOT_PAIRING_AUTHORITY=network` always `410 bot.pairing_moved` (the `detail` names the Network URL) |
