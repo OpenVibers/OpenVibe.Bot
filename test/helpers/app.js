@@ -9,7 +9,7 @@
  *                                                                    otherwise a service token with `cap`
  *   t.ws(path, { headers })                                          a WebSocket client: .send, .waitFor
  *   t.clock.offset                                                   advance the injected clock (ms)
- *   t.openre                                                         the OpenRe stub (null with opts.openre false)
+ *   t.openre                                                         the OpenRestream stub (null with opts.openre false)
  */
 const fs = require('fs');
 const os = require('os');
@@ -23,9 +23,9 @@ const { testDb } = require('./db');
 async function boot(opts = {}) {
     const network = await startNetwork();
     const events = await startEvents();
-    // OpenRe issues every publish key; `openre: false` boots with BOT_OPENRE_* unset (pairing without video).
+    // OpenRestream issues every publish key; `openre: false` boots with BOT_OPENRE_* unset (pairing without video).
     // It is given the Network stub too, so a token Bot minted for openvibe.openre (no static BOT_OPENRE_TOKEN)
-    // authenticates just as a minted one would at the real OpenRe.
+    // authenticates just as a minted one would at the real OpenRestream.
     const openre = opts.openre === false ? null : await startOpenRe({ network });
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-test-'));
     const env = {

@@ -11,16 +11,16 @@
  *                   and POST /internal/identity/resolve-batch, over the users newUser registers; failIdentity
  *                   makes them answer a failure (Network down).
  *   startEvents()   POST /api/v1/events recording what Bot's outbox relays; GET /api/health
- *   startOpenRe()   OpenRe.Stream's stream and session routes Bot calls (server/api/v1.js there):
+ *   startOpenRe()   OpenRestream's stream and session routes Bot calls (server/api/v1.js there):
  *                   GET /api/v1/streams?external_ref=, GET /api/v1/streams/:id, POST /api/v1/streams,
  *                   PATCH /api/v1/streams/:id (recording_mode / mirror_to_live), POST …/:id/keys/rotate,
  *                   DELETE …/:id (409 while live), GET /api/v1/sessions?stream_id=&state= and
  *                   GET /api/v1/sessions/:id/playback (a WebRTC session's `webrtc.signaling_url`, never the
- *                   key), behind one bearer token whose capabilities OpenRe's guards check (setCaps(list) to
+ *                   key), behind one bearer token whose capabilities OpenRestream's guards check (setCaps(list) to
  *                   narrow them; 403 capability.denied). With `network` given, a service token Network minted
  *                   for audience openvibe.openre is accepted too, its own `cap` claims being the capabilities
  *                   (the minted path, 401 token.* otherwise). streams, sessions, calls (every request, its
- *                   token and X-OV-Subject), admits(key) (OpenRe's resolveIngestKey: an active key or one in
+ *                   token and X-OV-Subject), admits(key) (OpenRestream's resolveIngestKey: an active key or one in
  *                   grace), goLive(streamId, { protocol }) / endLive(id) (a stream's open session),
  *                   failNext(status | 'hang', times = 1)
  */
@@ -184,12 +184,12 @@ async function startEvents() {
 
 // The capabilities BOT_OPENRE_TOKEN must hold: GET /streams is openre.stream.read, POST and DELETE
 // openre.stream.write, keys/rotate openre.key.rotate, sessions and playback openre.session.read
-// (OpenRe server/api/v1.js guards).
+// (OpenRestream server/api/v1.js guards).
 const OPENRE_CAPS = ['openre.stream.read', 'openre.stream.write', 'openre.key.rotate', 'openre.session.read'];
 
 async function startOpenRe({ token = `ovt_${crypto.randomBytes(16).toString('hex')}`, caps = OPENRE_CAPS, network = null } = {}) {
     let granted = [...caps];
-    // OpenRe's hasCap: the exact capability or a `.*` grant covering it.
+    // OpenRestream's hasCap: the exact capability or a `.*` grant covering it.
     const hasCap = (caps_, id) => caps_.some((g) => g === id || (g.endsWith('.*') && id.startsWith(g.slice(0, -1))));
     const streams = new Map();
     const sessions = new Map();
@@ -201,7 +201,7 @@ async function startOpenRe({ token = `ovt_${crypto.randomBytes(16).toString('hex
         const key = `ork_${crypto.randomBytes(32).toString('base64url')}`;
         return { id: `key_${++n}`, key, hint: key.slice(-4), status: 'active', grace_until: null };
     };
-    /** The stream's open session, as GET /streams/:id reports it (OpenRe publicDefinition.session). */
+    /** The stream's open session, as GET /streams/:id reports it (OpenRestream publicDefinition.session). */
     const openFor = (streamId) => [...sessions.values()].find((s) => s.stream_id === streamId && s.state !== 'ended') || null;
     const sessionView = (s) => ({ id: s.id, stream_id: s.stream_id, protocol: s.protocol, state: s.state, live_at: s.live_at });
     /** A session's playback descriptor: for WebRTC, the viewer signaling URL keyed by the playback id. */
@@ -213,7 +213,7 @@ async function startOpenRe({ token = `ovt_${crypto.randomBytes(16).toString('hex
     });
     /**
      * A stream goes live (tests): the open session the session list and the playback descriptor point at,
-     * one per stream as OpenRe allows. `protocol` may be 'rtmp' to check a non-WebRTC session is passed
+     * one per stream as OpenRestream allows. `protocol` may be 'rtmp' to check a non-WebRTC session is passed
      * over. endLive(id) ends it; both keep the stream's `live` flag in step.
      */
     function goLive(streamId, { protocol = 'webrtc' } = {}) {
@@ -258,7 +258,7 @@ async function startOpenRe({ token = `ovt_${crypto.randomBytes(16).toString('hex
             return problem(res, status, status >= 500 ? 'openre.internal' : 'openre.forbidden', `stubbed ${status}`);
         }
         // The operator's static token, or (with `network`) a token Bot minted for audience openvibe.openre
-        // whose `cap` claims are the capabilities, exactly as OpenRe's own guard checks them.
+        // whose `cap` claims are the capabilities, exactly as OpenRestream's own guard checks them.
         const presented = String(req.headers.authorization || '').startsWith('Bearer ') ? req.headers.authorization.slice(7) : null;
         let shownCaps = null;
         if (presented && presented === token) shownCaps = granted;
@@ -309,7 +309,7 @@ async function startOpenRe({ token = `ovt_${crypto.randomBytes(16).toString('hex
         if (m && m[1] && !st) return problem(res, 404, 'openre.stream_not_found', 'no such stream definition');
         if (st && !m[2] && req.method === 'GET') return send(res, 200, { stream: view(st) });
         if (st && !m[2] && req.method === 'PATCH') {
-            // Only the streaming toggles are writable here, as OpenRe's PATCH accepts: the rest stays put.
+            // Only the streaming toggles are writable here, as OpenRestream's PATCH accepts: the rest stays put.
             if (body && body.recording_mode !== undefined) st.recording_mode = body.recording_mode;
             if (body && body.mirror_to_live !== undefined) st.mirror_to_live = !!body.mirror_to_live;
             return send(res, 200, { stream: view(st) });

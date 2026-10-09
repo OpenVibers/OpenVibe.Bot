@@ -14,7 +14,7 @@
  *
  * The relay (openvibe-sdk createPgOutbox) runs while BOT_BILLING_URL is set — with BOT_BILLING_TOKEN when the
  * operator minted one, otherwise with a Network service token Bot mints for audience openvibe.billing
- * (capability billing.usage.record) from its OAuth client, the same helper and cache the OpenRe client uses. If
+ * (capability billing.usage.record) from its OAuth client, the same helper and cache the OpenRestream client uses. If
  * the URL is unset (or Bot has no token and no Network client to mint one), or Billing is down, has no grant for
  * Bot yet or answers 401/403/404/429/5xx, readings wait and are retried with backoff, across restarts: never
  * dropped. Only Billing refusing the reading itself (400, 409, 413, 422) marks a row rejected; it is kept with
@@ -96,7 +96,7 @@ function billingSink({ url, authorization, onUnauthorized, fetchImpl, timeoutMs 
 
 /**
  * The relay from run_usage_outbox to Billing. enabled with config.billing.url and either an operator
- * BOT_BILLING_TOKEN or the Network client credentials to mint one (exactly as the OpenRe client does); with
+ * BOT_BILLING_TOKEN or the Network client credentials to mint one (exactly as the OpenRestream client does); with
  * neither, or with the URL unset, start(), kick() and flush() do nothing and readings accumulate until a
  * process with the URL and a token sweeps them.
  */

@@ -1,5 +1,5 @@
 'use strict';
-// The usage relay authenticates to OpenVibe.Billing (plan T14 L1) the same way Bot talks to OpenRe: with an
+// The usage relay authenticates to OpenVibe.Billing (plan T14 L1) the same way Bot talks to OpenRestream: with an
 // operator BOT_BILLING_TOKEN when one is set, otherwise a Network service token it mints for audience
 // openvibe.billing (capability billing.usage.record) from its OAuth client, cached by the shared token client
 // until 60 s before expiry. Here the relay runs against a fake Network token endpoint and a fake Billing: with

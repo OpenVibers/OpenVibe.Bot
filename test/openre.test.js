@@ -1,9 +1,9 @@
 'use strict';
-// The publish key is an OpenRe ingest key (T15 R5): OpenRe's WHIP worker admits only keys in its own store, so
-// pairing creates the robot's OpenRe stream (external ref bot:robot:<id>) and hands the device the key OpenRe
+// The publish key is an OpenRestream ingest key (T15 R5): OpenRestream's WHIP worker admits only keys in its own store, so
+// pairing creates the robot's OpenRestream stream (external ref bot:robot:<id>) and hands the device the key OpenRestream
 // returns; a re-pair and a credential rotation rotate that stream's key, a revocation rotates it with no grace
-// and ends the session, a robot's removal also archives the stream when nothing is live. OpenRe refusing or
-// not answering is a clean error with nothing half-written; Bot's token for OpenRe is never logged or
+// and ends the session, a robot's removal also archives the stream when nothing is live. OpenRestream refusing or
+// not answering is a clean error with nothing half-written; Bot's token for OpenRestream is never logged or
 // answered. Without a static BOT_OPENRE_TOKEN Bot mints its own from its Network client (audience
 // openvibe.openre), and a 401 makes it mint once more and retry; with neither credential devices pair without
 // video and Bot mints no key of its own.
@@ -81,22 +81,22 @@ const WHIP_BASE = 'https://ingest.test/whip';
         assert.strictEqual(t.openre.calls.length, quiet + 1, 'nothing open: only the session list is read');
         const { robot: bare } = await t.robot(alex, { name: 'No stream yet' });
         assert.strictEqual(await t.domain.video.live(bare.id), null);
-        assert.strictEqual(t.openre.calls.length, quiet + 1, 'no stream: OpenRe is not asked');
+        assert.strictEqual(t.openre.calls.length, quiet + 1, 'no stream: OpenRestream is not asked');
     });
 
-    await check('pairing creates the robot\'s OpenRe stream and hands the device the ingest key OpenRe issued', async () => {
+    await check('pairing creates the robot\'s OpenRestream stream and hands the device the ingest key OpenRestream issued', async () => {
         const before = t.openre.calls.length;
         const { robot, paired } = await pairedRobot();
         const calls = callsSince(before);
         assert.deepStrictEqual(calls.map((c) => `${c.method} ${c.path}`), ['GET /api/v1/streams', 'POST /api/v1/streams']);
         assert.strictEqual(calls[0].query, `?external_ref=${encodeURIComponent(`bot:robot:${robot.id}`)}`);
         const create = calls[1];
-        assert.strictEqual(create.subject, alex.subject, 'OpenRe is asked for the robot\'s owner');
+        assert.strictEqual(create.subject, alex.subject, 'OpenRestream is asked for the robot\'s owner');
         assert.strictEqual(create.authorization, `Bearer ${t.openre.token}`);
         assert.deepStrictEqual(create.body.protocols, ['webrtc']);
         assert.deepStrictEqual(create.body.external_refs, [{ service: 'bot', type: 'robot', id: robot.id, label: robot.name }]);
         assert.match(paired.publish_key, /^ork_[A-Za-z0-9_-]{43}$/);
-        assert.ok(t.openre.admits(paired.publish_key), 'OpenRe admits the publish key');
+        assert.ok(t.openre.admits(paired.publish_key), 'OpenRestream admits the publish key');
         assert.strictEqual(paired.whip_url, `${WHIP_BASE}/${paired.publish_key}`);
         assert.ok(!('video' in paired));
         const stream = [...t.openre.streams.values()].find((s) => s.refs.some((r) => r.id === robot.id));
@@ -166,7 +166,7 @@ const WHIP_BASE = 'https://ingest.test/whip';
         assert.strictEqual((await deviceRow(paired.device_id)).publish_key_hint, null);
     });
 
-    await check('a revocation OpenRe does not answer still revokes the device; the owner\'s retry revokes the key', async () => {
+    await check('a revocation OpenRestream does not answer still revokes the device; the owner\'s retry revokes the key', async () => {
         const { robot, paired } = await pairedRobot();
         t.openre.failNext(503);
         const r = await call('POST', `/api/v1/devices/${paired.device_id}/revoke`, { user: alex });
@@ -196,7 +196,7 @@ const WHIP_BASE = 'https://ingest.test/whip';
         assert.strictEqual(await robotRow(robot.id), null);
     });
 
-    await check('removing a robot whose stream is live ends the session and leaves the archive to OpenRe\'s refusal', async () => {
+    await check('removing a robot whose stream is live ends the session and leaves the archive to OpenRestream\'s refusal', async () => {
         const { robot, paired } = await pairedRobot();
         const streamId = (await robotRow(robot.id)).openre_stream_id;
         t.openre.streams.get(streamId).live = true;
@@ -214,7 +214,7 @@ const WHIP_BASE = 'https://ingest.test/whip';
         ['a 4xx', 403, 502, 'bot.openre_refused'],
         ['a timeout', 'hang', 503, 'bot.openre_unavailable'],
     ]) {
-        await check(`OpenRe answering ${what} at pairing fails cleanly: the code stays usable and no device is made`, async () => {
+        await check(`OpenRestream answering ${what} at pairing fails cleanly: the code stays usable and no device is made`, async () => {
             const { robot, pairing } = await t.robot(alex);
             const devicesBefore = Number((await t.db.maybe('SELECT count(*) AS n FROM devices')).n);
             t.openre.failNext(fault);
@@ -222,7 +222,7 @@ const WHIP_BASE = 'https://ingest.test/whip';
             t.openre.failNext(null);
             assert.strictEqual(r.status, status, r.text);
             assert.strictEqual(r.json.code, code);
-            if (fault === 403) assert.match(r.json.detail, /403 openre\.forbidden/, 'OpenRe\'s problem code is surfaced');
+            if (fault === 403) assert.match(r.json.detail, /403 openre\.forbidden/, 'OpenRestream\'s problem code is surfaced');
             assert.ok(!r.text.includes(t.openre.token));
             assert.strictEqual(Number((await t.db.maybe('SELECT count(*) AS n FROM devices')).n), devicesBefore, 'no device row');
             assert.strictEqual((await robotRow(robot.id)).openre_stream_id, null, 'no stream id stored');
@@ -248,7 +248,7 @@ const WHIP_BASE = 'https://ingest.test/whip';
         assert.ok(t.openre.admits(retry.json.publish_key));
     });
 
-    await check('a credential rotation OpenRe refuses changes nothing: the old credential stays the current one', async () => {
+    await check('a credential rotation OpenRestream refuses changes nothing: the old credential stays the current one', async () => {
         const { paired } = await pairedRobot();
         const before = await deviceRow(paired.device_id);
         t.openre.failNext(500);
@@ -262,7 +262,7 @@ const WHIP_BASE = 'https://ingest.test/whip';
         assert.ok(t.openre.admits(paired.publish_key));
     });
 
-    await check('Bot\'s OpenRe token is never logged and never in an answer; a static token means Network is not asked', async () => {
+    await check('Bot\'s OpenRestream token is never logged and never in an answer; a static token means Network is not asked', async () => {
         assert.ok(t.openre.calls.every((c) => c.authorization === `Bearer ${t.openre.token}` || c.authorization === null));
         assert.ok(!t.logs.join('\n').includes(t.openre.token), 'the token was logged');
         assert.ok(!responses.some((text) => text.includes(t.openre.token)), 'an answer carried the token');
@@ -274,7 +274,7 @@ const WHIP_BASE = 'https://ingest.test/whip';
     // ── BOT_OPENRE_URL / BOT_OPENRE_TOKEN unset ───────────────────────────────────────────────────
     const u = await boot({ openre: false, env: { BOT_WHIP_BASE: WHIP_BASE } });
     const sam = u.network.newUser('sam');
-    await check('without OpenRe configured a device pairs, rotates and is removed with video reported not configured', async () => {
+    await check('without OpenRestream configured a device pairs, rotates and is removed with video reported not configured', async () => {
         const { robot, pairing } = await u.robot(sam);
         const paired = await u.call('POST', '/api/v1/pair', { token: null, body: { robot: robot.id, code: pairing.code } });
         assert.strictEqual(paired.status, 201, paired.text);
@@ -305,7 +305,7 @@ const WHIP_BASE = 'https://ingest.test/whip';
         const { robot, pairing } = await m.robot(mia);
         const paired = await redeemM({ robot: robot.id, code: pairing.code });
         assert.strictEqual(paired.status, 201, paired.text);
-        assert.ok(paired.json.publish_key && m.openre.admits(paired.json.publish_key), 'the device got an OpenRe-issued key');
+        assert.ok(paired.json.publish_key && m.openre.admits(paired.json.publish_key), 'the device got an OpenRestream-issued key');
         // One mint serves the whole pairing: the find and the create reuse the cached token.
         assert.deepStrictEqual(m.network.tokenCalls.slice(before),
             [{ client_id: 'bot', audience: MINTED_AUDIENCE, scope: MINTED_SCOPE }]);
@@ -320,7 +320,7 @@ const WHIP_BASE = 'https://ingest.test/whip';
         assert.deepStrictEqual([...v.claims.cap].sort(), MINTED_SCOPE.split(' ').sort());
     });
 
-    await check('a 401 from OpenRe drops the minted token and retries the call once', async () => {
+    await check('a 401 from OpenRestream drops the minted token and retries the call once', async () => {
         const tokensBefore = m.network.tokenCalls.length;
         const callsBefore = m.openre.calls.length;
         const { robot, pairing } = await m.robot(mia);

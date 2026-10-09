@@ -226,16 +226,16 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config }) {
         await owner(req, json(d.robot_ids, [])[0]);
         const revoked = await domain.devices.revoke(req.params.id);
         // A Network-paired machine is revoked on Network too (Bot never binds that principal again either way),
-        // and the publish key it holds on OpenRe is revoked with its live session ended.
+        // and the publish key it holds on OpenRestream is revoked with its live session ended.
         let networkError = null;
         if (d.node_principal) await domain.devices.revokeNode(d.node_principal).catch((e) => { networkError = e; });
         await domain.devices.revokeVideo(req.params.id).catch((e) => { networkError = networkError || e; });
         hub.closeDevice(req.params.id, 'revoked');   // revocation disconnects the device at once
-        if (networkError) throw networkError;          // revoked here; the owner retries for Network or OpenRe
+        if (networkError) throw networkError;          // revoked here; the owner retries for Network or OpenRestream
         res.json({ device: domain.present.device(revoked) });
     }));
 
-    // ── Streaming (the owner's OpenRe toggles, read from OpenRe; Bot stores no copy) ───────────────
+    // ── Streaming (the owner's OpenRestream toggles, read from OpenRestream; Bot stores no copy) ───────────────
     // Reading is a member read, like GET /robots/:id. Changing is the owner's alone (`manage`, not
     // `control`): whether a robot's camera is recorded or shown on the owner's channel is their call.
     r.get('/robots/:id/streaming', wrap(async (req, res) => {

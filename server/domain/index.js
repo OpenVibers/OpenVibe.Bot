@@ -244,18 +244,18 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         return getRobot(id);
     }
     /**
-     * Remove a robot. Its OpenRe stream's key is revoked first (rotated with no grace, its sessions ended), so
-     * nothing publishes as the robot afterwards; an OpenRe that refuses or does not answer leaves the robot in
-     * place for the owner to retry. The stream is archived when nothing was live (OpenRe refuses a live one).
+     * Remove a robot. Its OpenRestream stream's key is revoked first (rotated with no grace, its sessions ended), so
+     * nothing publishes as the robot afterwards; an OpenRestream that refuses or does not answer leaves the robot in
+     * place for the owner to retry. The stream is archived when nothing was live (OpenRestream refuses a live one).
      */
     async function removeRobot(id) {
         const robot = await getRobot(id);
-        if (robot && robot.openre_stream_id && !openre) log.warn(`[Bot] robot ${id} removed with OpenRe stream ${robot.openre_stream_id} left as it is: OpenRe is not configured`);
+        if (robot && robot.openre_stream_id && !openre) log.warn(`[Bot] robot ${id} removed with OpenRestream stream ${robot.openre_stream_id} left as it is: OpenRestream is not configured`);
         if (robot && robot.openre_stream_id && openre) {
             const ended = await openre.rotate(robot.openre_stream_id, robot.owner_subject, { grace_seconds: 0, end_sessions: true });
             if (ended && !ended.sessions_ending) {
                 await openre.archive(robot.openre_stream_id, robot.owner_subject)
-                    .catch((e) => log.warn(`[Bot] OpenRe stream ${robot.openre_stream_id} of removed robot ${id} not archived: ${e.message}`));
+                    .catch((e) => log.warn(`[Bot] OpenRestream stream ${robot.openre_stream_id} of removed robot ${id} not archived: ${e.message}`));
             }
         }
         await db.query('DELETE FROM robots WHERE id = $1', [id]);
@@ -304,9 +304,9 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
      * Redeem a pairing code. `robot` (from the installer command/QR) attributes a wrong code to that
      * robot's live code and counts the try (5 end it); without it the code is matched by hash across
      * every live code. On success the credential and the publish key are returned once, never stored in
-     * the clear. The publish key is a new ingest key of the robot's OpenRe stream (newStreamKey), asked for
-     * only once the code is good: an OpenRe that refuses or does not answer fails the pairing and leaves the
-     * code unused, with no device. Without OpenRe configured the device pairs without video.
+     * the clear. The publish key is a new ingest key of the robot's OpenRestream stream (newStreamKey), asked for
+     * only once the code is good: an OpenRestream that refuses or does not answer fails the pairing and leaves the
+     * code unused, with no device. Without OpenRestream configured the device pairs without video.
      */
     async function redeem({ robot = null, code, agent_version = null, device_kind = 'onboard', drivers = [], capabilities = {}, name = null }) {
         if (networkPairing()) fail(410, 'bot.pairing_moved', `pairing moved to OpenVibe.Network: pair this machine on ${config.network.url}`);
@@ -350,15 +350,15 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         const profile = await getProfile(db, (await getRobot(result.robot_id)).profile_id);
         return { device: result.device, credential: result.credential, ...videoKey(result.issued), profile: profile ? profile.profile : null };
     }
-    // ── Video: the robot's OpenRe stream (T15 R5) ─────────────────────────────────────────────────
-    // OpenRe's WHIP worker admits only its own ingest keys, so the publish key is always one OpenRe issued for
+    // ── Video: the robot's OpenRestream stream (T15 R5) ─────────────────────────────────────────────────
+    // OpenRestream's WHIP worker admits only its own ingest keys, so the publish key is always one OpenRestream issued for
     // the robot's stream (external ref bot:robot:<id>); Bot keeps the stream id and the key's hint, never the
     // key. One stream per robot, so the device given the newest key is the robot's publisher.
     /**
-     * A new ingest key for the robot's OpenRe stream → { streamId, key, hint }, or null when OpenRe is not
+     * A new ingest key for the robot's OpenRestream stream → { streamId, key, hint }, or null when OpenRestream is not
      * configured. The stored stream is rotated (graceSeconds: how long the previous key keeps publishing);
-     * with none stored, or one OpenRe no longer has, the stream is found by its external ref and rotated, or
-     * else created with its first key. Throws OpenRe's refusal or silence (502/503) and writes nothing here.
+     * with none stored, or one OpenRestream no longer has, the stream is found by its external ref and rotated, or
+     * else created with its first key. Throws OpenRestream's refusal or silence (502/503) and writes nothing here.
      */
     async function newStreamKey(robot, graceSeconds = 0) {
         if (!openre || !robot) return null;
@@ -380,7 +380,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
             out = created && created.stream && { streamId: created.stream.id, key: created.key };
         }
         if (!out || typeof out.streamId !== 'string' || !out.key || typeof out.key.key !== 'string' || !out.key.key) {
-            fail(503, 'bot.openre_unavailable', 'OpenRe answered no ingest key for the robot');
+            fail(503, 'bot.openre_unavailable', 'OpenRestream answered no ingest key for the robot');
         }
         return { streamId: out.streamId, key: out.key.key, hint: typeof out.key.hint === 'string' ? out.key.hint.slice(0, 16) : null };
     }
@@ -390,16 +390,16 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         await t.query('UPDATE devices SET publish_key_hint = NULL WHERE robot_ids @> $1::jsonb AND id <> $2 AND publish_key_hint IS NOT NULL',
             [JSON.stringify([robotId]), deviceId]);
     }
-    /** The answer fields for an issued key: publish_key and whip_url, or video: 'not_configured' without OpenRe. */
+    /** The answer fields for an issued key: publish_key and whip_url, or video: 'not_configured' without OpenRestream. */
     function videoKey(issued) {
         if (!issued) return { video: 'not_configured' };
         const whUrl = whipUrl(issued.key);
         return { publish_key: issued.key, ...(whUrl ? { whip_url: whUrl } : {}) };
     }
     /**
-     * Where the device publishes its camera: OpenRe's WHIP ingest (`POST <base>/<key>`, RFC 9725) with
-     * this device's publish key as the stream key. The key must be one OpenRe admits, an ingest key OpenRe
-     * issued for the robot's stream (newStreamKey): OpenRe refuses any other. It carries the key, so it is
+     * Where the device publishes its camera: OpenRestream's WHIP ingest (`POST <base>/<key>`, RFC 9725) with
+     * this device's publish key as the stream key. The key must be one OpenRestream admits, an ingest key OpenRestream
+     * issued for the robot's stream (newStreamKey): OpenRestream refuses any other. It carries the key, so it is
      * shown once, with the key.
      * The base's trailing slashes are trimmed; with no base (BOT_WHIP_BASE unset or empty) it is null, and
      * the caller omits the field entirely rather than sending null or an empty string.
@@ -409,26 +409,26 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         const clean = base ? String(base).replace(/\/+$/, '') : '';
         return clean && publishKey ? `${clean}/${encodeURIComponent(publishKey)}` : null;
     }
-    // ── Streaming toggles (the owner's OpenRe stream is the single source of truth) ────────────────
+    // ── Streaming toggles (the owner's OpenRestream stream is the single source of truth) ────────────────
     // Bot stores no copy: `media` is the stream's recording_mode ('vod' on, 'none' off) and `live` its
-    // mirror_to_live. `live` is the owner's consent, but OpenRe mirrors a session into their Live channel
-    // only once Live plays OpenRe streams for that channel, so the answer always carries `effective`.
-    const LIVE_EFFECTIVE = 'when your Live channel plays OpenRe streams';
+    // mirror_to_live. `live` is the owner's consent, but OpenRestream mirrors a session into their Live channel
+    // only once Live plays OpenRestream streams for that channel, so the answer always carries `effective`.
+    const LIVE_EFFECTIVE = 'when your Live channel plays OpenRestream streams';
     const streamingState = (robot, stream) => ({
         available: true,
         media: { on: stream.recording_mode === 'vod' },
         live: { on: !!stream.mirror_to_live, effective: LIVE_EFFECTIVE },
         stream_id: robot.openre_stream_id,
     });
-    /** The offline shape: nothing to read, with why — OpenRe unset, no stream yet, or OpenRe lost it. */
+    /** The offline shape: nothing to read, with why — OpenRestream unset, no stream yet, or OpenRestream lost it. */
     const streamingUnavailable = (robot, reason) => ({
         available: false, reason, stream_id: robot.openre_stream_id || null,
         media: { on: false }, live: { on: false, effective: LIVE_EFFECTIVE },
     });
     /**
-     * The robot's streaming toggles, read from its OpenRe stream. `available: false` with reason
-     * 'not_configured' (OpenRe unset), 'not_paired' (the robot has no stream yet) or 'stream_missing'
-     * (OpenRe answers 404).
+     * The robot's streaming toggles, read from its OpenRestream stream. `available: false` with reason
+     * 'not_configured' (OpenRestream unset), 'not_paired' (the robot has no stream yet) or 'stream_missing'
+     * (OpenRestream answers 404).
      */
     async function streaming(robotId) {
         const robot = await getRobot(robotId);
@@ -440,7 +440,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         return streamingState(robot, stream);
     }
     /**
-     * Turn `media` (recording_mode 'vod'/'none') or `live` (mirror_to_live) on or off on the robot's OpenRe
+     * Turn `media` (recording_mode 'vod'/'none') or `live` (mirror_to_live) on or off on the robot's OpenRestream
      * stream, and audit the change once (kind streaming.media/streaming.live, value { on }). Idempotent:
      * setting the value it already has answers the state and writes no audit row.
      */
@@ -448,29 +448,29 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         const robot = await getRobot(robotId);
         if (!robot) fail(404, 'bot.robot_not_found', 'no such robot');
         if (!['media', 'live'].includes(to) || typeof on !== 'boolean') fail(422, 'bot.invalid_streaming', "to must be 'media' or 'live' and on must be true or false");
-        if (!openre) fail(409, 'bot.openre_not_configured', 'OpenRe is not configured here');
-        if (!robot.openre_stream_id) fail(409, 'bot.not_paired', 'the robot has no OpenRe stream yet; pair a device first');
+        if (!openre) fail(409, 'bot.openre_not_configured', 'OpenRestream is not configured here');
+        if (!robot.openre_stream_id) fail(409, 'bot.not_paired', 'the robot has no OpenRestream stream yet; pair a device first');
         const current = await openre.get(robot.openre_stream_id, robot.owner_subject);
-        if (!current) fail(409, 'bot.not_paired', 'OpenRe no longer has the robot\'s stream; pair a device again');
+        if (!current) fail(409, 'bot.not_paired', 'OpenRestream no longer has the robot\'s stream; pair a device again');
         const already = to === 'media' ? current.recording_mode === 'vod' : !!current.mirror_to_live;
         if (already === on) return streamingState(robot, current);
         const fields = to === 'media' ? { recording_mode: on ? 'vod' : 'none' } : { mirror_to_live: on };
         const updated = await openre.update(robot.openre_stream_id, fields, robot.owner_subject);
-        if (!updated) fail(409, 'bot.not_paired', 'OpenRe no longer has the robot\'s stream; pair a device again');
+        if (!updated) fail(409, 'bot.not_paired', 'OpenRestream no longer has the robot\'s stream; pair a device again');
         await auditCommand({
             robotId, subject: actor && actor.subject, operatorKind: actor && actor.kind, role: 'owner',
             kind: `streaming.${to}`, value: { on }, result: 'ack',
         });
         return streamingState(robot, updated);
     }
-    // ── Panel video: the robot's live OpenRe WebRTC session (T15) ──────────────────────────────────
+    // ── Panel video: the robot's live OpenRestream WebRTC session (T15) ──────────────────────────────────
     /**
      * The viewer signaling URL of the robot's open WebRTC session, or null. The session list names the
-     * stream's open session — only ever through the robot owner's OpenRe view — and a WebRTC session's
+     * stream's open session — only ever through the robot owner's OpenRestream view — and a WebRTC session's
      * playback descriptor carries `webrtc.signaling_url`, keyed by the session's playback id, never the
-     * ingest key (OpenRe README "playback descriptor"). Null without OpenRe, without a stream, with
+     * ingest key (OpenRestream README "playback descriptor"). Null without OpenRestream, without a stream, with
      * nothing publishing, or when the live session is not WebRTC: the panel's tile keeps its
-     * placeholder. OpenRe refusing or not answering throws like any client call; the caller decides.
+     * placeholder. OpenRestream refusing or not answering throws like any client call; the caller decides.
      */
     async function liveVideo(robotId) {
         if (!openre) return null;
@@ -516,8 +516,8 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         return db.many('SELECT * FROM devices WHERE robot_ids @> $1::jsonb ORDER BY created_at DESC', [JSON.stringify([robotId])]);
     }
     /**
-     * A new credential and a new publish key (the robot's OpenRe stream rotated; the old key keeps publishing
-     * for the credential's grace). OpenRe is asked first: if it refuses or does not answer, nothing changes.
+     * A new credential and a new publish key (the robot's OpenRestream stream rotated; the old key keeps publishing
+     * for the credential's grace). OpenRestream is asked first: if it refuses or does not answer, nothing changes.
      */
     async function rotateDevice(id) {
         const d = await getDevice(id);
@@ -537,8 +537,8 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         return { device: updated, credential, ...videoKey(issued) };
     }
     /**
-     * Revoke the OpenRe key a device holds, after the device itself is revoked: the robot's stream is rotated
-     * with no grace and its sessions ended (OpenRe refuses to archive a live stream). The new key is shown to
+     * Revoke the OpenRestream key a device holds, after the device itself is revoked: the robot's stream is rotated
+     * with no grace and its sessions ended (OpenRestream refuses to archive a live stream). The new key is shown to
      * no one; the robot's next pairing or rotation issues another. A failure throws and keeps the device's
      * key hint, so the owner's retry asks again. → true when a key was revoked.
      */
@@ -548,7 +548,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         const robot = await getRobot(json(d.robot_ids, [])[0]);
         if (robot && robot.openre_stream_id) {
             if (!openre) {
-                log.warn(`[Bot] device ${id} revoked but its key on OpenRe stream ${robot.openre_stream_id} was not: OpenRe is not configured`);
+                log.warn(`[Bot] device ${id} revoked but its key on OpenRestream stream ${robot.openre_stream_id} was not: OpenRestream is not configured`);
                 return false;
             }
             await openre.rotate(robot.openre_stream_id, robot.owner_subject, { grace_seconds: 0, end_sessions: true });
@@ -597,9 +597,9 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         return inserted || db.maybe('SELECT * FROM devices WHERE node_principal = $1 AND revoked_at IS NULL', [principalId]);
     }
     /**
-     * Issue (or re-issue) a device's WHIP publish key, a new ingest key of its robot's OpenRe stream: the new
+     * Issue (or re-issue) a device's WHIP publish key, a new ingest key of its robot's OpenRestream stream: the new
      * key replaces the old one, which stops working. → { device, publish_key, whip_url?, profile }, the key
-     * shown this once; without OpenRe configured { device, video: 'not_configured', profile }.
+     * shown this once; without OpenRestream configured { device, video: 'not_configured', profile }.
      */
     async function issuePublishKey(id) {
         const live = await db.maybe('SELECT * FROM devices WHERE id = $1 AND revoked_at IS NULL', [id]);

@@ -61,7 +61,7 @@ const allowedFor = (profile, role) => [...(DEFAULT_ALLOW[role] || []).filter((k)
         assert.strictEqual(tiles(renderWidget({ type: 'camera' }, { profile: { ...p, camera: null } })), 1);
     });
 
-    await check('a live OpenRe session rides on the camera tile as its signaling URL, escaped; none given, no attribute', () => {
+    await check('a live OpenRestream session rides on the camera tile as its signaling URL, escaped; none given, no attribute', () => {
         const p = profiles.find((x) => x.id === 'sim.rover');
         const url = 'wss://ingest.openre.stream/w/ses_01J5Z000000000000000000000';
         const owner = renderPanel({ robot: robotFor(p), profile: p, role: 'owner', allowed_commands: allowedFor(p, 'owner'), signaling_url: url });
@@ -178,7 +178,7 @@ const allowedFor = (profile, role) => [...(DEFAULT_ALLOW[role] || []).filter((k)
         assert.deepStrictEqual(simEvents, [], 'a simulator is reported online in the outbox');
     });
 
-    await check('the panel\'s CSP opens exactly esm.sh and OpenRe\'s signaling; the rest of the site keeps its own', async () => {
+    await check('the panel\'s CSP opens exactly esm.sh and OpenRestream\'s signaling; the rest of the site keeps its own', async () => {
         const csp = (await get(`/panel/${simId}`, alex)).headers.get('content-security-policy');
         assert.strictEqual(csp,
             "default-src 'self'; script-src 'self' https://esm.sh; connect-src 'self' wss://ingest.openre.stream; frame-ancestors 'self'; object-src 'none'; base-uri 'self'");
@@ -190,7 +190,7 @@ const allowedFor = (profile, role) => [...(DEFAULT_ALLOW[role] || []).filter((k)
         assert.ok((await (await get('/panel/panel.js')).text()).includes('https://esm.sh/mediasoup-client@3.18.7'));
     });
 
-    await check('a live OpenRe WebRTC session: the owner\'s and a member\'s panel carry its signaling URL, never the key', async () => {
+    await check('a live OpenRestream WebRTC session: the owner\'s and a member\'s panel carry its signaling URL, never the key', async () => {
         const { robot, pairing } = await t.robot(alex, { name: 'Live cam' });
         const paired = await t.call('POST', '/api/v1/pair', { token: null, body: { robot: robot.id, code: pairing.code } });
         assert.strictEqual(paired.status, 201, paired.text);
@@ -201,7 +201,7 @@ const allowedFor = (profile, role) => [...(DEFAULT_ALLOW[role] || []).filter((k)
         html = await (await get(`/panel/${robot.id}`, alex)).text();
         assert.ok(html.includes(`data-signaling-url="ws://127.0.0.1:9936/w/${session.id}"`), html);
         assert.ok(!html.includes(paired.json.publish_key) && !html.includes('ork_'), 'the ingest key is never on the page');
-        assert.strictEqual(t.openre.calls.filter((c) => c.path === `/api/v1/sessions/${session.id}/playback`).at(-1).subject, alex.subject, 'OpenRe is asked as the robot\'s owner');
+        assert.strictEqual(t.openre.calls.filter((c) => c.path === `/api/v1/sessions/${session.id}/playback`).at(-1).subject, alex.subject, 'OpenRestream is asked as the robot\'s owner');
         await t.call('POST', `/api/v1/robots/${robot.id}/operators`, { user: alex, body: { subject: carol.subject, role: 'viewer' } });
         assert.ok((await (await get(`/panel/${robot.id}`, carol)).text()).includes(`data-signaling-url="ws://127.0.0.1:9936/w/${session.id}"`), 'a viewer member plays it too');
         t.openre.endLive(session.id);

@@ -17,7 +17,7 @@
  *             (and d-pad) drive, right stick rotates when the drive has a rotation axis, A = the first tone,
  *             B = stop, Start = e-stop; gamepaddisconnected releases it all
  *   latency   round trip from a command's id to its result on /control (rolling median) + telemetry age
- *   camera    each tile the server marked with a live OpenRe session's signaling URL plays it: the
+ *   camera    each tile the server marked with a live OpenRestream session's signaling URL plays it: the
  *             mediasoup-client viewer flow OpenVibe.Live runs, reconnecting with backoff; a tile with no
  *             URL is left as the server drew it
  *
@@ -498,9 +498,9 @@
         send('point', { x: (e.clientX - left) / width, y: (e.clientY - top) / height });
     });
 
-    // ── Live camera: the robot's OpenRe.Stream WebRTC session ────────────────────────────────────────
+    // ── Live camera: the robot's OpenRestream WebRTC session ────────────────────────────────────────
     // A tile the server marked with a live session's viewer signaling URL plays it: the mediasoup-client
-    // `sfu-viewer-*` flow OpenVibe.Live's watch page runs against OpenRe's /w/<session id> signaling
+    // `sfu-viewer-*` flow OpenVibe.Live's watch page runs against OpenRestream's /w/<session id> signaling
     // (watch → ready → recv transport → consume). mediasoup-client's package ships no browser bundle, so
     // the pinned ESM build Live loads comes from esm.sh — the panel's own CSP allows exactly that origin.
     // A tile with no URL is left alone; one whose session ends keeps its placeholder and reconnects with
@@ -511,7 +511,7 @@
         (m) => m.Device || (m.default && m.default.Device),
         (e) => { mediasoup = null; throw e; }));
 
-    /** The first `type` frame on an OpenRe viewer socket; a viewer error, a close or silence rejects. */
+    /** The first `type` frame on an OpenRestream viewer socket; a viewer error, a close or silence rejects. */
     function viewerWait(ws, type, timeoutMs = 15000) {
         return new Promise((resolve, reject) => {
             if (ws.readyState !== WebSocket.OPEN) return reject(new Error('the camera signaling socket closed'));

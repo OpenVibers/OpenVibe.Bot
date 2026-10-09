@@ -34,9 +34,9 @@ const { boot, check, done } = require('./helpers/app');
         assert.match(html, /src="\/shared\/navbar\.js\?v=[0-9a-f]{12}"/);
     });
 
-    await check('GET /: no promise the service cannot keep (video waits for OpenRe; no store, no unsupported boards)', async () => {
+    await check('GET /: no promise the service cannot keep (video waits for OpenRestream; no store, no unsupported boards)', async () => {
         const html = await (await get('/')).text();
-        assert.match(html, /sends its camera over WebRTC to OpenRe\.Stream and the panel plays it live/);
+        assert.match(html, /sends its camera over WebRTC to OpenRestream and the panel plays it live/);
         for (const claim of [/ESP32/, /ROS 2/, /Android/, /arrive paired/i, /\bbuy\b/i, /webhook/i]) assert.ok(!claim.test(html), `no ${claim}`);
     });
 
