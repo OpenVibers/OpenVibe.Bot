@@ -43,7 +43,27 @@ OpenVibe.Bot pairs a robot's machines, keeps their state and gates every operato
 - OpenVibe.Network: user and service tokens, node tokens, pairing when the authority is `network`, and identity resolution (a `@username` to a subject, and subjects to names, for the panel's People card).
 - OpenRe.Stream: the WHIP ingest base (`BOT_WHIP_BASE`) devices publish to.
 - OpenVibe.Billing: job usage readings go to `billing.usage.record` (`BOT_BILLING_URL`; Bot mints its own Network service token for audience `openvibe.billing` with `billing.usage.record`, and `BOT_BILLING_TOKEN` overrides it); unset, they wait in `run_usage_outbox`.
-- `openvibe-contracts` v0.112.0, `openvibe-sdk` v0.35.0 and `openvibe-shared` v2.15.0 (package.json).
+- `openvibe-contracts` v0.112.0, `openvibe-sdk` v0.37.0 and `openvibe-shared` v2.15.0 (package.json).
+- Account export and deletion (ADR-033): Network grants `events.subscription.manage` (openvibe.events) for the two
+  subscriptions created at boot, then, last and once the release is live, `network.account.export.contribute` and
+  `network.account.deletion.confirm` (openvibe.network).
+
+## Account export and deletion (ADR-033)
+
+`network.account.export_requested` and `network.account.deleted` arrive at `POST /internal/events`. The route is
+loopback-only (nginx answers 404 for `/internal/`, and the handler refuses a forwarded request) and signed with
+`BOT_EVENTS_SECRET`. They are answered by `server/account-data.js` over `openvibe-sdk/account-data`, with one receipt
+per export and deletion in `account_data_events` (migration 0008).
+
+- **Export:** the person's robots, the roles they hold on other robots, their commands and their run jobs. Device
+  credentials and publish keys are hashes and never exported.
+- **Their robots:** each is removed the way its owner would remove it (`robots.remove`: the OpenRe stream key is
+  revoked and the stream archived first). Its pairing codes, operators, queue, local profile and Live conversion go
+  with it, and so does its command history. A device that served only their robots is revoked and loses its name;
+  the row stays because run jobs reference it.
+- **Elsewhere:** their operator role and queue place on other robots go, and their id leaves other robots' command
+  history, e-stop marks, pairing codes and invitations.
+- **Kept:** run jobs they started, whose usage seconds were reported to Billing.
 
 ## Capabilities
 

@@ -19,6 +19,7 @@ const { seedProfiles } = require('./profiles');
 const { createApp } = require('./app');
 const { createValkey } = require('openvibe-sdk/valkey');
 const { gracefulStop } = require('openvibe-sdk/service');
+const { startSubscriptions } = require('openvibe-sdk/account-data');
 const { createRegistry } = require('openvibe-shared/metrics');
 
 async function main() {
@@ -62,6 +63,13 @@ async function main() {
     // WebSocket sockets are not tracked by server.close. drainMs bounds the drain; deadlineMs 5000 keeps the old 5 s
     // hard timer and deadlineExitCode 0 its exit 0. Bot's manifest declares no lifecycle.shutdown deadline, so the
     // kit's 5000 ms default is the right value.
+    // The two account subscriptions at OpenVibe.Events (ADR-033), created when missing; off without EVENTS_URL,
+    // BOT_EVENTS_SECRET or the client secret.
+    const subscriptions = startSubscriptions({
+        eventsUrl: config.events.url, endpoint: `http://127.0.0.1:${config.port}/internal/events`, secret: config.events.secrets[0],
+        networkInternalUrl: config.network.internalUrl, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret,
+    });
+
     const { stop: shutdown } = gracefulStop({
         name: 'Bot',
         server,
@@ -76,6 +84,7 @@ async function main() {
             () => hub.close().catch(() => {}),
             () => outbox.stop(),
             () => usage.stop(),
+            () => { if (subscriptions) subscriptions.stop(); },
         ],
         close: [
             () => db.close().catch(() => {}),

@@ -27,6 +27,8 @@ const { createOpenRe } = require('./openre/client');
 const { createBotOutbox } = require('./events/outbox');
 const { createUsageRelay } = require('./jobs/metering');
 const { createDomain } = require('./domain');
+const accountDataLib = require('./account-data');
+const { createNetworkSender } = require('openvibe-sdk/account-data');
 const { createRealtime } = require('./realtime');
 const { createSimulator } = require('./sim');
 const { createOnvif } = require('./onvif');
@@ -86,6 +88,17 @@ function createApp(opts = {}) {
         next();
     });
     app.use(cookieParser());
+
+    // ── OpenVibe.Events → Bot (loopback only: nginx answers 404 for /internal/) ──
+    // network.account.export_requested and network.account.deleted (ADR-033), answered by openvibe-sdk/account-data's
+    // consumer over account-data.js. It reads the raw body itself (the v2 signature covers it) and refuses a request that
+    // came through a proxy. The sender posts to Network's internal routes with Bot's own token.
+    const accountData = accountDataLib.create({ domain, log });
+    const accountSend = opts.accountSend || (config.oauth.clientSecret
+        ? createNetworkSender({ networkInternalUrl: config.network.internalUrl, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret, fetch: fetchImpl })
+        : async () => { throw new Error('OV_OAUTH_CLIENT_SECRET is not set: Bot cannot answer account events'); });
+    app.post('/internal/events', accountData.consumer({ secrets: config.events.secrets, send: accountSend, log }));
+
     // The OpenVibe Frame's scripts and the showcase stylesheet the front page links (content-hashed URLs).
     app.use('/shared', require('openvibe-shared/serve').handler());
 

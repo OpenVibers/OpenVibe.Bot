@@ -150,6 +150,10 @@ function loadConfig(env = process.env) {
         events: {
             url: trim(env.EVENTS_URL || ''),
             intervalMs: int(env.EVENTS_RELAY_INTERVAL_MS, 2000),
+            // OpenVibe.Events → Bot (ADR-033 account export and deletion, server/account-data.js): the secret(s) that sign
+            // a delivery to POST /internal/events (comma-separated for rotation, 32+ characters each). Unset: the route
+            // answers 503 and no subscription is created at boot.
+            secrets: String(env.BOT_EVENTS_SECRET || '').split(',').map((x) => x.trim()).filter(Boolean),
         },
 
         // Pairing (ADR-043 decision 2): an 8-character Crockford base32 code, XXXX-XXXX, 10 minutes,
