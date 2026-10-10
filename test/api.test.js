@@ -37,9 +37,9 @@ const { boot, check, done } = require('./helpers/app');
 
     await check('a typed Network token (realtime ticket, FedCM assertion) is never a session, even signed by the Network key', async () => {
         assert.strictEqual((await t.call('GET', '/api/v1/robots', { user: alex })).status, 200, 'a session token works');
-        for (const extra of [{ typ: 'realtime', purpose: 'realtime' }, { typ: 'fedcm', aud: 'https://elsewhere.example' }]) {
+        for (const extra of [{ typ: 'realtime', purpose: 'realtime' }, { typ: 'fedcm', aud: 'https://elsewhere.example' }, { purpose: 'export' }]) {
             const r = await t.call('GET', '/api/v1/robots', { token: t.network.signUser(alex, extra) });
-            assert.strictEqual(r.status, 401, `${extra.typ}: ${r.status}`);
+            assert.strictEqual(r.status, 401, `${extra.typ || extra.purpose}: ${r.status}`);
         }
     });
 

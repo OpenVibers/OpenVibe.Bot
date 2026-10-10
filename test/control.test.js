@@ -274,6 +274,15 @@ const plugins = require('./helpers/plugins');
         assert.strictEqual(await weak.waitForClose(), 4002, 'without bot.robot.control a service cannot control');
         const anon = await t.ws('/control');
         assert.strictEqual(await anon.waitForClose(), 4002, 'an anonymous socket is refused');
+        // The socket is authorized before its upgrade is accepted (openvibe-sdk/auth checks are async): a typed Network
+        // token is never a session there, as the cookie or as a Bearer.
+        for (const extra of [{ typ: 'realtime', purpose: 'realtime' }, { typ: 'fedcm' }, { purpose: 'export' }]) {
+            const typed = t.network.signUser(bob, extra);
+            const viaCookie = await t.ws('/control', { headers: { Cookie: `ov_token=${typed}` } });
+            assert.strictEqual(await viaCookie.waitForClose(), 4002, `${JSON.stringify(extra)} as the cookie`);
+            const viaBearer = await t.ws('/control', { headers: { Authorization: `Bearer ${typed}` } });
+            assert.strictEqual(await viaBearer.waitForClose(), 4002, `${JSON.stringify(extra)} as a Bearer`);
+        }
     });
 
     await check('a service token forwards a command over HTTP and the device\'s ack comes back', async () => {

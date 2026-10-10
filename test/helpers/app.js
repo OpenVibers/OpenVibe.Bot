@@ -58,7 +58,7 @@ async function boot(opts = {}) {
     const store = opts.db ? { db: opts.db, store: opts.db.store, close: async () => {} } : await testDb({ store: opts.store });
     await seedProfiles(store.db, { log: { log() {} } });
     const app = createApp({ config, db: store.db, valkey: opts.valkey || null, now: () => Date.now() + clock.offset, log, ...(opts.appOpts || {}) });
-    await app.locals.keys.load();
+    await app.locals.keys.refresh();
     const server = await new Promise((resolve) => {
         const s = http.createServer(app);
         s.on('upgrade', (req, socket, head) => app.locals.hub.handleUpgrade(req, socket, head));
