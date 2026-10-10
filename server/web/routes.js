@@ -71,6 +71,8 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     r.get('/sitemap.xml', (req, res) => {
         res.type('application/xml').send(seo.sitemapXml(PUBLIC_PAGES.map((p) => ({ loc: `${config.baseUrl}${p}` }))));
     });
+    // Browsers ask for /favicon.ico on their own (a 404 page links no icon): the app icon, as SVG.
+    r.get('/favicon.ico', (req, res) => res.type('image/svg+xml').set('Cache-Control', 'public, max-age=86400').send(appIcon.favicon({ site: 'bot' })));
     // The web app manifest (openvibe-shared/app-icon): the same icon design and start URL every OpenVibe site ships.
     r.get('/manifest.webmanifest', (req, res) => {
         res.type('application/manifest+json').send(JSON.stringify(appIcon.manifest({

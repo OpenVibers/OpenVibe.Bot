@@ -36,6 +36,13 @@ const { boot, check, done } = require('./helpers/app');
         }
     });
 
+    await check('GET /favicon.ico: the app icon as SVG (browsers ask for it even on a 404 page)', async () => {
+        const r = await get('/favicon.ico');
+        assert.strictEqual(r.status, 200);
+        assert.match(r.headers.get('content-type'), /^image\/svg\+xml/);
+        assert.match(await r.text(), /<svg/);
+    });
+
     await check('GET /manifest.webmanifest: JSON, OpenVibe.Bot / Bot', async () => {
         const r = await get('/manifest.webmanifest');
         assert.strictEqual(r.status, 200);
