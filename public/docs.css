@@ -1,6 +1,6 @@
 /* OpenVibe.Bot's "Build" pages (/docs, /docs/drivers, /docs/profiles): a docs layout inside the OpenVibe Frame.
    Colours come from the Frame's theme variables, so the pages follow the person's theme. */
-.docs-wrap { max-width: 1120px; margin: 0 auto; padding: 32px 16px 64px; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 40px; align-items: start; }
+.docs-wrap { font-family: var(--ov-font, 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif); max-width: 1120px; margin: 0 auto; padding: 32px 16px 64px; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 40px; align-items: start; }
 .docs-side { position: sticky; top: 76px; display: flex; flex-direction: column; gap: 2px; }
 .docs-side .docs-side-title { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-secondary, #96a7c2); margin: 0 0 8px 10px; }
 .docs-side a { display: block; padding: 8px 10px; border-radius: 8px; color: var(--text-secondary, #96a7c2); text-decoration: none; font-size: 14px; font-weight: 600; }
