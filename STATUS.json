@@ -5,11 +5,11 @@
   "runtime": "node 22, express 4, ws; PostgreSQL 18 via openvibe-sdk/db (pg, or embedded PGlite in tests); Valkey optional; no build step",
   "port": 4630,
   "domain": "openvibe.bot (www -> apex; /device and /control WebSockets; /install)",
-  "contracts": "openvibe-contracts v0.127.0",
+  "contracts": "openvibe-contracts v0.129.0",
   "sdk": "openvibe-sdk v0.38.0",
   "shared": "openvibe-shared v3.0.0",
   "packages": [
-    "openvibe-contracts v0.127.0",
+    "openvibe-contracts v0.129.0",
     "openvibe-sdk v0.38.0",
     "openvibe-shared v3.0.0"
   ],
