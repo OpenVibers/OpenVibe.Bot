@@ -7,7 +7,8 @@
  *   GET  /api/health, /api/ready, /release.json, /metrics (direct loopback callers only)
  *   /api/v1/*    the API (service tokens + user tokens, see api/v1.js)
  *   /auth/*      Network SSO session for people (the control WS accepts the ov_token cookie)
- *   GET  /       the front page (web/home.js)
+ *   GET  /       the front page (web/home.js); /sitemap.xml, /manifest.webmanifest and /robots.txt (web/routes.js)
+ *   GET  /terms, /privacy, /dmca   the legal pages (openvibe-shared/legal)
  *   /robots, /pair/:id, /panel/:id   the signed-in pages (web/routes.js); a `sim` robot is driven by the
  *                in-process simulator (sim/index.js), which server/index.js starts for existing ones at boot
  *
@@ -38,10 +39,23 @@ const { createJobs } = require('./jobs');
 const { createActorLimits } = require('./api/actor-limits');
 const { createSessionRoutes, viewerMiddleware } = require('./web/session');
 const { createWebRoutes } = require('./web/routes');
+const { HOME_CSP } = require('./web/home');
 const { inputError } = require('./util');
 const { createBotReadiness, registerBotGauges } = require('./observability');
 
 const VERSION = require('../package.json').version;
+
+/**
+ * The browser-facing 404 (the API's is problem+json): a plain, JavaScript-free page with a way back.
+ * The app's CSP applies, so it carries no inline styles or scripts.
+ */
+const NOT_FOUND_HTML = `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex"><title>Not found — OpenVibe.Bot</title></head>
+<body><main><h1>Not found</h1><p>There is nothing at this address. Go to the <a href="/">OpenVibe.Bot home page</a>.</p></main></body>
+</html>
+`;
 
 function createApp(opts = {}) {
     const config = opts.config || loadConfig();
@@ -112,12 +126,18 @@ function createApp(opts = {}) {
     const limits = createActorLimits({ config, valkey, now: opts.limitsNow || now, registry: metrics.registry, log });
     app.use('/api/v1', express.json({ limit: '64kb' }), (req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); }, apiAuth.middleware, v1Router({ domain, apiAuth, limits, hub, jobs, config }));
     app.use('/auth', createSessionRoutes(config, userAuth, { fetchImpl }));
+    // ── The legal pages: Terms, Privacy and DMCA on openvibe.bot itself (openvibe-shared/legal). ──
+    // The document carries its own inline theme and OpenVibe Frame boot, which the strict site-wide CSP
+    // refuses, so these three public pages get the front page's allowances (HOME_CSP). The `profile` is the
+    // legal profile from openvibe-contracts manifests/services/bot.json (site.legalProfile).
+    { const legal = require('openvibe-shared/legal');
+      app.get(legal.PATHS, (req, res, next) => { res.setHeader('Content-Security-Policy', HOME_CSP); next(); }, legal.handler({ id: 'bot', service: 'bot', host: 'openvibe.bot', name: 'OpenVibe.Bot', profile: 'games' })); }
     app.use(viewerMiddleware(userAuth));
     app.use(createWebRoutes(config, { domain, sim, onvif, limits, identity, hub, log }));
 
     app.use((req, res) => {
         if (req.path.startsWith('/api/') || req.path.startsWith('/internal/')) return http.sendProblem(res, 404, 'not_found', { ctx: req.ov });
-        return res.status(404).type('text/plain').send('Not found\n');
+        return res.status(404).type('html').send(NOT_FOUND_HTML);
     });
     // eslint-disable-next-line no-unused-vars
     app.use((err, req, res, next) => {
