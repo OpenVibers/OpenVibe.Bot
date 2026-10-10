@@ -35,7 +35,7 @@ function createBotReadiness({ db, valkey = null, keys, config, outbox, hub = nul
         checks: [
             { name: 'db', required: true, check: () => db.ready() },
             { name: 'valkey', required: false, check: () => (valkey ? valkey.ready() : skip('VALKEY_URL unset: per-actor limits are per process (one process only)')) },
-            { name: 'network_jwks', required: false, check: () => (keys.get() ? true : 'Network signing key not loaded yet: tokens cannot be verified') },
+            { name: 'network_jwks', required: false, check: () => (keys.loaded() ? true : 'Network signing key not loaded yet: tokens cannot be verified') },
             { name: 'events', required: false, cacheMs: outbox.enabled ? PING_TTL_MS : 0, timeoutMs: 2500, check: events },
         ],
         details: async (body) => (body.checks.db.status === 'ok'

@@ -83,7 +83,12 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         let path;
         try { path = new URL(req.url, 'http://localhost').pathname; } catch { return socket.destroy(); }
         if (path === '/device') return deviceWss.handleUpgrade(req, socket, head, (ws) => onDeviceSocket(ws, req));
-        if (path === '/control') return controlWss.handleUpgrade(req, socket, head, (ws) => onControlSocket(ws, req));
+        // Authorized before the upgrade is accepted: the socket's handlers exist from its first frame on.
+        if (path === '/control') {
+            return authorizeControl(req).then(
+                (principal) => controlWss.handleUpgrade(req, socket, head, (ws) => onControlSocket(ws, req, principal)),
+                (e) => { log.warn(`[Bot] control upgrade: ${e.message}`); socket.destroy(); });
+        }
         if (path === '/watch') return watchWss.handleUpgrade(req, socket, head, (ws) => onWatchSocket(ws, req));
         socket.destroy();
     }
@@ -157,6 +162,9 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         conn.backlog = null;
     }
 
+    /** What the openvibe-sdk/auth checks in api/auth.js take: Network's keys, issuer and Bot's audience. */
+    const tokenOpts = () => ({ keyOptions: keys.verifyOptions, issuer: config.network.issuer, audience: config.audience });
+
     async function authenticateDevice(conn, credential) {
         const device = await domain.devices.byCredential(credential);
         if (!device) throw new Error('unknown or revoked credential');
@@ -165,15 +173,15 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
 
     /** A node token: verified offline, then bound to its device (created on first use from Network's record). */
     async function authenticateNode(conn, nodeToken) {
-        const r = verifyNode(nodeToken, { publicKey: keys.get(), issuer: config.network.issuer, audience: config.audience });
+        const r = await verifyNode(nodeToken, tokenOpts());
         if (!r.ok) throw new Error(`node token refused: ${r.code}`);
         const device = await domain.devices.bindNode(r.principal);
         conn.node = { principal: r.principal, reauthBy: now() + config.device.nodeReauthMs };
         attachDevice(conn, device);
     }
     /** `reauth`: a fresh node token for the same principal moves the deadline; anything else leaves it. */
-    function onReauth(conn, msg) {
-        const r = verifyNode(typeof msg.token === 'string' ? msg.token : '', { publicKey: keys.get(), issuer: config.network.issuer, audience: config.audience });
+    async function onReauth(conn, msg) {
+        const r = await verifyNode(typeof msg.token === 'string' ? msg.token : '', tokenOpts());
         if (!r.ok) return sendError(conn, 'bot.reauth_refused', r.reason);
         if (r.principal !== conn.node.principal) return sendError(conn, 'bot.reauth_refused', 'the token is for another machine');
         conn.node.reauthBy = now() + config.device.nodeReauthMs;
@@ -364,25 +372,24 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     }
 
     // ── Operator side ─────────────────────────────────────────────────────────────────────────────
-    function authorizeControl(req) {
+    async function authorizeControl(req) {
         const cookie = parseCookies(req.headers.cookie)[ACCESS_COOKIE];
-        if (cookie) { const claims = userAuth.verify(cookie); const p = userPrincipal(claims); if (p) return p; }
+        if (cookie) { const claims = await userAuth.verify(cookie); const p = userPrincipal(claims); if (p) return p; }
         const token = bearer(req);
         if (!token) return null;
         const payload = decodePayload(token);
         if (payload && typeof payload.sub === 'string' && PRINCIPAL_SUB.test(payload.sub)) {
-            const r = verifyService(token, { publicKey: keys.get(), issuer: config.network.issuer, audience: config.audience });
+            const r = await verifyService(token, tokenOpts());
             if (!r.ok || !capabilities.grants(r.claims.cap || [], 'bot.robot.control')) return null;
             const subject = String(req.headers['x-ov-subject'] || '');
             if (!isSubject(subject)) return null;
             return { kind: 'service', sub: r.claims.sub, cap: r.claims.cap || [], subject };
         }
-        const claims = userAuth.verify(token);
+        const claims = await userAuth.verify(token);
         return userPrincipal(claims);
     }
 
-    function onControlSocket(ws, req) {
-        const principal = authorizeControl(req);
+    function onControlSocket(ws, req, principal) {
         if (!principal) return ws.close(4002, 'sign in required');
         const conn = { ws, seq: 0, principal, subject: principal.subject, robotId: null, role: null };
         ws.conn = conn;
