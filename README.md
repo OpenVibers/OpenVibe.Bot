@@ -75,6 +75,9 @@ per export and deletion in `account_data_events` (migration 0008).
 | `bot.robot.control` | the e-stop set and clear (clear is owner-only), the control gate and `POST /robots/:id/commands` (so a bound channel's chat can forward a command over HTTP instead of a hardware socket) |
 | `bot.device.connect` | rotate and revoke a device credential |
 | `bot.job.dispatch` | the internal Run → Bot jobs API (`POST /jobs`, `POST /jobs/:id/cancel`, `GET /jobs/:id`); services only |
+| `bot.resource.read` | the internal authority index (`GET /api/v1/resources`, `GET /api/v1/resources/:ovrn`); services only |
+
+The authority index lists `bot.robot` summaries for OpenVibe.Services. A robot belongs to a person, so a project filter returns an empty page and individual OVRN lookups return 404. Services read it over loopback with `bot.resource.read`.
 
 A person acts on their own robots with a Network user token; a service acts with a service token plus the capability, for the subject it names. The REST routes are in `docs/protocol.md` §3 and the two WebSockets in §§1–2.
 
