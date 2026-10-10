@@ -126,10 +126,13 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     // profile validator is anonymous, so it is rate-limited per address the way the app's other public limits
     // are, and a cross-site form post is refused as every other form post refuses one.
     const validateLimit = limits ? [limits('bot.docs.validate', { minute: 30, hour: 300 })] : [];
-    r.get('/docs', (req, res) => res.type('html').send(renderDocsIndex({ config })));
-    r.get('/docs/drivers', (req, res) => res.type('html').send(renderDriversPage({ config })));
-    r.get('/docs/profiles', (req, res) => res.type('html').send(renderProfilesPage({ config })));
-    r.post('/docs/profiles/validate', ...validateLimit, express.urlencoded({ extended: false, limit: '32kb' }), (req, res, next) => {
+    // The Build pages run inside the OpenVibe Frame (navbar, footer, theme), so they take the front page's CSP.
+    const frameCsp = (req, res, next) => { res.setHeader('Content-Security-Policy', HOME_CSP); next(); };
+    r.get('/docs/docs.css', asset('docs.css', 'text/css'));
+    r.get('/docs', frameCsp, (req, res) => res.type('html').send(renderDocsIndex({ config })));
+    r.get('/docs/drivers', frameCsp, (req, res) => res.type('html').send(renderDriversPage({ config })));
+    r.get('/docs/profiles', frameCsp, (req, res) => res.type('html').send(renderProfilesPage({ config })));
+    r.post('/docs/profiles/validate', frameCsp, ...validateLimit, express.urlencoded({ extended: false, limit: '32kb' }), (req, res, next) => {
         try {
             if (!sameOrigin(req)) return res.status(403).type('text/plain').send('cross-site form posts are refused\n');
             res.setHeader('Cache-Control', 'no-store');

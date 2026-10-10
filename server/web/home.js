@@ -80,6 +80,28 @@ function sections({ signedIn }) {
 <p class="sc-actions"><a class="sc-btn sc-primary" href="/docs">Build for OpenVibe.Bot</a> <a class="sc-btn" href="/docs/drivers">Write a driver</a> <a class="sc-btn" href="/docs/profiles">Robot profiles</a></p></section>`;
 }
 
+/** The OpenVibe Frame around one of Bot's public pages (the front page, the Build docs): navbar, footer, theme. */
+function framePage({ config, title, description, canonicalPath = '/', body, head = '' }) {
+    const nav = {
+        service: 'bot',
+        apiBase: NETWORK_URL,
+        links: [{ label: 'Robots', href: '/robots' }, { label: 'Build', href: '/docs' }],
+        history: { type: 'page', title },
+        sessionUrl: '/auth/me',
+        loginUrl: '/auth/login?next={path}',
+        logoutUrl: '/auth/logout?next={path}',
+        notificationsRealtime: true,
+    };
+    return shell.page({
+        name: SITE_NAME, service: 'bot', lang: 'en', title, siteName: SITE_NAME, description, summary: description,
+        canonical: `${config.baseUrl}${canonicalPath}`, robots: 'index, follow',
+        navbar: nav, footer: { service: 'bot', variant: 'full', mount: '#ov-footer', brandName: SITE_NAME }, home: '/',
+        navLinks: [{ label: 'Robots', href: '/robots' }, { label: 'Build', href: '/docs' }],
+        head: [appIcon.headTags({ site: 'bot' }), '<link rel="manifest" href="/manifest.webmanifest">', head].filter(Boolean).join('\n'),
+        body: `<div id="navbar-mount"></div>\n${body}`,
+    });
+}
+
 function renderHome({ config, signedIn = false }) {
     const nav = {
         service: 'bot',
@@ -113,4 +135,4 @@ ${sections({ signedIn })}
     });
 }
 
-module.exports = { renderHome, HOME_CSP, sections };
+module.exports = { renderHome, framePage, HOME_CSP, sections };
