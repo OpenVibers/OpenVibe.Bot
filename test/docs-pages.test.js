@@ -1,7 +1,7 @@
 'use strict';
 // The public build pages (plan T15): GET /docs, /docs/drivers and /docs/profiles, the profile validator they
 // carry (POST /docs/profiles/validate, POST /api/v1/profiles/validate), and the sitemap that lists them. The
-// pages carry no script, so the site-wide CSP stands; the validator runs the same checks a shipped profile does.
+// pages run inside the OpenVibe Frame with the front page's CSP; the validator runs the same checks a shipped profile does.
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -9,8 +9,8 @@ const { boot, check, done } = require('./helpers/app');
 
 const ROOT = path.join(__dirname, '..');
 const sim = JSON.parse(fs.readFileSync(path.join(ROOT, 'server', 'profiles', 'sim.rover.json'), 'utf8'));
-// The app's own CSP (server/app.js), which the docs pages do not loosen.
-const SITE_CSP = "default-src 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'self'";
+// The docs pages run inside the OpenVibe Frame (navbar, footer, theme), so they carry the front page's CSP.
+const { HOME_CSP: SITE_CSP } = require('../server/web/home');
 
 (async () => {
     const t = await boot({ openre: false });
@@ -21,7 +21,7 @@ const SITE_CSP = "default-src 'self'; frame-ancestors 'self'; object-src 'none';
         body: new URLSearchParams({ profile }).toString(),
     });
 
-    await check('GET /docs: the build index, linking both guides and the robots page, under the site CSP', async () => {
+    await check('GET /docs: the build index, linking both guides and the robots page, inside the OpenVibe Frame', async () => {
         const r = await get('/docs');
         assert.strictEqual(r.status, 200);
         assert.match(r.headers.get('content-type'), /^text\/html/);
@@ -31,7 +31,8 @@ const SITE_CSP = "default-src 'self'; frame-ancestors 'self'; object-src 'none';
         assert.match(html, /href="\/docs\/drivers"/);
         assert.match(html, /href="\/docs\/profiles"/);
         assert.match(html, /href="\/robots"/);
-        assert.ok(!/<script\b/i.test(html), 'no script on a docs page');
+        assert.ok(html.includes('id="navbar-mount"') && html.includes('/docs/docs.css'), 'inside the OpenVibe Frame, with the docs stylesheet');
+        assert.ok(html.includes('aria-current="page"'), 'the sidebar marks the current page');
     });
 
     await check('GET /docs/drivers: the guide, connection kinds, every message, safety rules and testing', async () => {
@@ -72,7 +73,7 @@ const SITE_CSP = "default-src 'self'; frame-ancestors 'self'; object-src 'none';
         assert.match(html, /sim\.rover/);
         assert.match(html, /action="\/docs\/profiles\/validate"/);
         assert.match(html, /<textarea name="profile"/);
-        assert.ok(!/<script\b/i.test(html), 'no script on the profiles page');
+        assert.ok(html.includes('id="navbar-mount"'), 'inside the OpenVibe Frame');
     });
 
     await check('POST /docs/profiles/validate: the shipped sim.rover profile is valid', async () => {

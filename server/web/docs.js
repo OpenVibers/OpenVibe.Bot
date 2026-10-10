@@ -13,7 +13,8 @@
  *   renderProfilesPage({ config, source, result })    GET /docs/profiles, POST /docs/profiles/validate
  *   formatProblems(problems) / validationResult(result)
  */
-const { page, esc } = require('./render');
+const { esc } = require('./render');
+const { framePage } = require('./home');
 const simRover = require('../profiles/sim.rover.json');
 
 // The driver protocol and the bundled drivers live in OpenVibe.Node (the Node core and its plugins/ tree).
@@ -28,19 +29,20 @@ const out = (href, text) => `<a href="${esc(href)}" rel="noopener">${esc(text)}<
 /** A link on this site. */
 const inLink = (href, text) => `<a href="${esc(href)}">${esc(text)}</a>`;
 
-/** The shared header of the three pages, marking the current one. Plain markup: no script anywhere. */
-function docsNav(current) {
-    const items = [['/docs', 'Build'], ['/docs/drivers', 'Write a driver'], ['/docs/profiles', 'Robot profiles'], ['/robots', 'Robots']];
-    const links = items.map(([href, label]) => (href === current
-        ? `<span class="pill">${esc(label)}</span>`
-        : `<a href="${esc(href)}">${esc(label)}</a>`)).join(' ');
-    return `<nav class="topbar"><a class="brand" href="/"><span>OpenVibe<b>.Bot</b></span></a><span class="crumbs">${links}</span></nav>`;
-}
+const PAGES = [['/docs', 'Overview'], ['/docs/drivers', 'Write a driver'], ['/docs/profiles', 'Robot profiles']];
 
-/** The shared footer of the three pages. */
-const docsFoot = () => `<footer class="page"><p class="muted">The Node and its bundled drivers are in `
-    + `${out(`${TREE}/plugins`, 'OpenVibers/OpenVibe.Node')}; the full protocol is `
-    + `${out(`${BLOB}/docs/protocol.md`, 'protocol.md')} and the plugin contract is ${out(`${BLOB}/docs/plugins.md`, 'plugins.md')}.</p></footer>`;
+/** The Build pages inside the OpenVibe Frame: a sidebar of the three pages beside the content, plain markup. */
+function docsPage({ config, path, title, description, content }) {
+    const side = PAGES.map(([href, label]) => `<a href="${esc(href)}"${href === path ? ' aria-current="page"' : ''}>${esc(label)}</a>`).join('');
+    const body = `<div class="docs-wrap">
+<nav class="docs-side" aria-label="Build for OpenVibe.Bot"><p class="docs-side-title">Build</p>${side}<div class="docs-side-rule"></div><a href="/robots">Your robots</a></nav>
+<main id="main" class="docs-main">
+${content}
+<p class="docs-foot muted">The Node and its bundled drivers are in ${out(`${TREE}/plugins`, 'OpenVibers/OpenVibe.Node')}; the full protocol is ${out(`${BLOB}/docs/protocol.md`, 'protocol.md')} and the plugin contract is ${out(`${BLOB}/docs/plugins.md`, 'plugins.md')}.</p>
+</main>
+</div>`;
+    return framePage({ config, title: title.includes('OpenVibe.Bot') ? title : `${title} · OpenVibe.Bot`, description, canonicalPath: path, body, head: '<link rel="stylesheet" href="/docs/docs.css">' });
+}
 
 /** A message type: its name, a sentence, and a short JSON example. */
 const message = (name, text, sample) => `<div class="card"><p><code>${esc(name)}</code> — ${esc(text)}</p>${code(sample)}</div>`;
@@ -48,8 +50,7 @@ const message = (name, text, sample) => `<div class="card"><p><code>${esc(name)}
 // ── GET /docs ─────────────────────────────────────────────────────────────────────────────────────
 
 function renderDocsIndex({ config }) {
-    const body = `${docsNav('/docs')}
-<main class="page">
+    const content = `
 <h1>Build for OpenVibe.Bot</h1>
 <p class="muted">OpenVibe.Bot drives a robot from its profile. Two things are open to build against: the <b>driver</b> — a separate program the OpenVibe Node runs — and the <b>profile</b>, the JSON that turns a driver's capabilities into a panel.</p>
 <section class="card"><h2>Write a driver</h2>
@@ -68,16 +69,14 @@ function renderDocsIndex({ config }) {
 <li>Bundled drivers: ${out(`${TREE}/plugins/dryrun`, 'dryrun')}, ${out(`${TREE}/plugins/adeept_adr036`, 'adeept_adr036')}, ${out(`${TREE}/plugins/cozmo`, 'cozmo')} and ${out(`${TREE}/plugins/relay`, 'relay')}.</li>
 <li>Profiles ship in this repository (${inLink('/api/v1/profiles', 'GET /api/v1/profiles')}) and are validated by the same loader the pages use.</li>
 </ul>
-</main>
-${docsFoot()}`;
-    return page('Build for OpenVibe.Bot', body);
+`;
+    return docsPage({ config, path: '/docs', title: 'Build for OpenVibe.Bot', description: 'Build drivers and robot profiles for OpenVibe.Bot, the open robot control panel: the protocol, the profile format and a validator.', content });
 }
 
 // ── GET /docs/drivers ──────────────────────────────────────────────────────────────────────────────
 
 function renderDriversPage({ config }) {
-    const body = `${docsNav('/docs/drivers')}
-<main class="page">
+    const content = `
 <h1>Write a driver</h1>
 <p class="muted">A driver is how OpenVibe.Bot moves a specific piece of hardware. This page is the spec: build against it instead of reverse-engineering Bot. The full contract is ${out(`${BLOB}/docs/plugins.md`, 'plugins.md')} in OpenVibe.Node.</p>
 
@@ -219,9 +218,8 @@ ${code('{ "plugins": [ { "name": "dryrun", "config": { "record": "/tmp/dryrun.js
 
 <section class="card"><h2>Contribute it</h2>
 <p>Open a pull request to ${out(NODE, 'OpenVibers/OpenVibe.Node')} adding your driver under ${out(`${TREE}/plugins`, 'plugins/')}, with the robot profile it pairs with. The profile is validated by Bot's loader (<code>bot.robot-profile@1</code> plus the capability, driver, widget and command registries), and the driver is reviewed before it runs on anyone's Node. A genuinely new capability, driver or widget name is one line in Bot's registries — never a schema change.</p></section>
-</main>
-${docsFoot()}`;
-    return page('Write a driver', body);
+`;
+    return docsPage({ config, path: '/docs/drivers', title: 'Write a driver', description: 'How to write a driver for the OpenVibe Node: JSON lines over stdio, the lifecycle, every message, the safety rules, a Python example and how to test it.', content });
 }
 
 // ── GET /docs/profiles · POST /docs/profiles/validate ─────────────────────────────────────────────
@@ -244,8 +242,7 @@ function validationResult(result) {
 
 function renderProfilesPage({ config, source = '', result = null } = {}) {
     const example = JSON.stringify(simRover, null, 2);
-    const body = `${docsNav('/docs/profiles')}
-<main class="page">
+    const content = `
 <h1>Robot profiles</h1>
 <p class="muted">A robot profile (<code>bot.robot-profile@1</code>) is the contract between a robot and its panel. The panel is a function of the profile: a new robot needs a profile, not code. Profiles ship as <code>server/profiles/*.json</code>, are validated by the loader, and are served at ${inLink('/api/v1/profiles', 'GET /api/v1/profiles')}.</p>
 
@@ -279,9 +276,8 @@ ${code(example)}</section>
 <p class="muted">Tools can POST the profile as JSON to <code>/api/v1/profiles/validate</code> and read <code>{ valid, problems }</code> back.</p></section>
 
 ${validationResult(result)}
-</main>
-${docsFoot()}`;
-    return page('Robot profiles', body);
+`;
+    return docsPage({ config, path: '/docs/profiles', title: 'Robot profiles', description: 'The bot.robot-profile@1 format that turns a driver\'s capabilities into a panel, a full example, and a validator for your own profile.', content });
 }
 
 module.exports = { renderDocsIndex, renderDriversPage, renderProfilesPage, validationResult };
