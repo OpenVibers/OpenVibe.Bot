@@ -11,6 +11,7 @@
  * | GET    /profiles, /profiles/:id                | — (public)             | anyone                              |
  * | POST   /profiles/validate                      | — (public)             | anyone (the profile validator)      |
  * | GET    /kits, /kits/:id                        | — (public)             | anyone                              |
+ * | GET    /resources, /resources/:ovrn            | bot.resource.read      | — (services only, loopback)         |
  * | GET    /robots                                 | bot.robot.read         | own robots (?owner= only themself)  |
  * | POST   /robots                                 | bot.robot.manage       | the owner (new robot + pairing code)|
  * | GET    /robots/:id                             | bot.robot.read         | a member (owner/operator/viewer)    |
@@ -38,6 +39,7 @@ const { http } = require('openvibe-contracts');
 const { fail, userSubject, isRobotId, json } = require('../util');
 const { getProfile, listProfiles, checkProfile } = require('../profiles');
 const kits = require('../kits');
+const resourceIndex = require('./resource-index');
 
 const CAP = {
     read: 'bot.robot.read',
@@ -50,6 +52,7 @@ const CAP = {
 function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config }) {
     const r = express.Router();
     r.use(limits.reads('bot.read'));
+    r.use('/resources', resourceIndex.router({ db: domain.db, apiAuth }));
     const manage = limits('bot.robot.manage', { minute: 30, hour: 300 });
     const control = limits('bot.control', { minute: 120, hour: 1200 });
     // The command route counts against the acted-for person, not the service token: a bound channel's chat
