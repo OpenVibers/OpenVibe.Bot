@@ -1,9 +1,9 @@
 'use strict';
 
 /**
- * The non-API surface: the front page at `/` (web/home.js), `/robots.txt`, `/install`, a 302 to
- * OpenVibe.Node's installer script (the one-paste command, ADR-043), and the signed-in pages (the five-minute
- * path and the profile-rendered panel, plan T15 step 3):
+ * The non-API surface: the front page at `/` (web/home.js), `/robots.txt`, `/sitemap.xml`,
+ * `/manifest.webmanifest`, `/install`, a 302 to OpenVibe.Node's installer script (the one-paste command,
+ * ADR-043), and the signed-in pages (the five-minute path and the profile-rendered panel, plan T15 step 3):
  *
  *   GET  /robots           the signed-in person's robots and the "add a robot" form
  *   POST /robots           add one (form post) → 303 to its panel (a `sim` robot), else 201 with its pairing page
@@ -30,6 +30,8 @@
  */
 const path = require('path');
 const express = require('express');
+const seo = require('openvibe-shared/seo');
+const appIcon = require('openvibe-shared/app-icon');
 const { getProfile, listProfiles } = require('../profiles');
 const { frameAncestors } = require('../config');
 const { BotError } = require('../util');
@@ -39,6 +41,11 @@ const { renderHome, HOME_CSP } = require('./home');
 
 const PUBLIC = path.join(__dirname, '..', '..', 'public');
 const HOLD_RESEND_MS = 150;
+// The tagline stated for openvibe.bot (openvibe-contracts manifests/services/bot.json site.tagline).
+const SITE_TAGLINE = 'An open control panel for robots';
+// Every public GET page, for the sitemap. The interactive pages (/robots, /pair/, /panel/) need a session and
+// are Disallowed in robots.txt; the API and sign-in are not pages.
+const PUBLIC_PAGES = ['/', '/install', '/terms', '/privacy', '/dmca'];
 // The panel plays the robot's live video with mediasoup-client, whose npm package ships no browser
 // bundle: the page imports the pinned ESM build OpenVibe.Live uses from esm.sh, and its viewer
 // signaling endpoint is OpenRestream's wss host (OpenRestream README "playback descriptor"). Exactly these two
@@ -58,6 +65,16 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         'Disallow: /robots', 'Disallow: /pair/', 'Disallow: /panel/', 'Disallow: /install', `Sitemap: ${config.baseUrl}/sitemap.xml`, ''].join('\n')));
     // `curl -fsSL` follows the redirect. The target is config only (checked at boot): no query parameter steers it.
     r.get('/install', (req, res) => res.redirect(302, config.installer.sourceUrl));
+    // The sitemap lists every public GET page (openvibe-shared/seo); robots.txt already names it.
+    r.get('/sitemap.xml', (req, res) => {
+        res.type('application/xml').send(seo.sitemapXml(PUBLIC_PAGES.map((p) => ({ loc: `${config.baseUrl}${p}` }))));
+    });
+    // The web app manifest (openvibe-shared/app-icon): the same icon design and start URL every OpenVibe site ships.
+    r.get('/manifest.webmanifest', (req, res) => {
+        res.type('application/manifest+json').send(JSON.stringify(appIcon.manifest({
+            site: 'bot', name: 'OpenVibe.Bot', shortName: 'Bot', description: SITE_TAGLINE, startUrl: '/',
+        })));
+    });
     if (!domain) return r;
 
     const asset = (file, type) => (req, res) => { res.setHeader('Cache-Control', 'no-cache'); res.type(type).sendFile(path.join(PUBLIC, file)); };
