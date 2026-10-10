@@ -60,6 +60,26 @@ const { boot, check, done } = require('./helpers/app');
         }
     });
 
+    await check('owner narrows to one person\'s robots, combines with kind, pages once each, and is checked', async () => {
+        assert.deepStrictEqual((await get(`?owner=${alice.subject}`)).json.resources.map((r) => r.id), [first.id, third.id].sort());
+        assert.deepStrictEqual((await get(`?owner=${bob.subject}&kind=bot.robot`)).json.resources.map((r) => r.id), [second.id]);
+        assert.deepStrictEqual((await get(`?owner=${alice.subject}&kind=bot.unknown`)).json.resources, []);
+        assert.deepStrictEqual((await get('?owner=agt_01J8ZQ4Y7N3M2K1H0G9F8E7D6C')).json.resources, [], 'a robot\'s owner is a person');
+        const seen = [];
+        let cursor = null;
+        do {
+            const page = (await get(`?owner=${alice.subject}&limit=1${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`)).json;
+            assert.ok(contracts.validate('common.resource-list-result@1', page).valid);
+            seen.push(...page.resources.map((r) => r.id));
+            cursor = page.next_cursor;
+        } while (cursor);
+        assert.deepStrictEqual(seen, [first.id, third.id].sort());
+        for (const bad of ['svc:live', 'usr_short']) {
+            const response = await get(`?owner=${encodeURIComponent(bad)}`);
+            assert.deepStrictEqual([response.status, response.json.code], [400, 'resources.bad_query'], bad);
+        }
+    });
+
     await check('a service token with bot.resource.read is required on both routes', async () => {
         for (const path of ['', '/ovrn%3Abot%3Aprj_01J8ZQ4Y7N3M2K1H0G9F8E7D6C%3Arobot%2F' + first.id]) {
             const anonymous = await get(path, { token: null });

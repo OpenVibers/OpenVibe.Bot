@@ -1,6 +1,11 @@
 'use strict';
 
-/** Bot's authority resource index for OpenVibe.Services (ADR-048). Robots are person-owned. */
+/**
+ * Bot's authority resource index for OpenVibe.Services (ADR-048). Robots are person-owned.
+ * GET /api/v1/resources?project=&kind=&owner=&cursor=&limit=: `owner` (usr_…/agt_…) answers only that subject's
+ * robots (openvibe-sdk 0.41 sends it for a person's own resources; a robot's owner is a person, so an agt_ owner
+ * matches nothing). A robot is in no project, so a project filter matches nothing. A malformed filter is a 400.
+ */
 const express = require('express');
 const contracts = require('openvibe-contracts');
 const { fail } = require('../util');
@@ -10,6 +15,7 @@ const KIND = 'bot.robot';
 const CAPABILITY = 'bot.resource.read';
 const PROJECT_ID_RE = /^prj_[0-9A-HJKMNP-TV-Z]{26}$/;
 const USER_SUBJECT_RE = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
+const SUBJECT_RE = /^(usr|agt)_[0-9A-HJKMNP-TV-Z]{26}$/;
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 1000;
 
@@ -38,6 +44,8 @@ function filtersOf(query) {
     const project = query.project === undefined || query.project === '' ? null : query.project;
     if (project !== null && (typeof project !== 'string' || !PROJECT_ID_RE.test(project))) return { error: 'project must be a prj_ id' };
     const kind = typeof query.kind === 'string' && query.kind !== '' ? query.kind : null;
+    const owner = query.owner === undefined || query.owner === '' ? null : query.owner;
+    if (owner !== null && (typeof owner !== 'string' || !SUBJECT_RE.test(owner))) return { error: 'owner must be a usr_ or agt_ subject id' };
     let limit = DEFAULT_LIMIT;
     if (query.limit !== undefined && query.limit !== '') {
         if (typeof query.limit !== 'string' || !/^\d+$/.test(query.limit) || Number(query.limit) < 1 || Number(query.limit) > MAX_LIMIT) return { error: `limit must be an integer 1-${MAX_LIMIT}` };
@@ -48,7 +56,7 @@ function filtersOf(query) {
         cursor = typeof query.cursor === 'string' ? decodeCursor(query.cursor) : null;
         if (!cursor) return { error: 'cursor is not one this index issued' };
     }
-    return { project, kind, limit, cursor };
+    return { project, kind, owner, limit, cursor };
 }
 
 function router({ db, apiAuth }) {
@@ -69,8 +77,10 @@ function router({ db, apiAuth }) {
         const filters = filtersOf(req.query);
         if (filters.error) return bad(res, filters.error, req.ov);
         if (filters.project || (filters.kind && filters.kind !== KIND)) return res.json({ resources: [], next_cursor: null });
+        if (filters.owner && !USER_SUBJECT_RE.test(filters.owner)) return res.json({ resources: [], next_cursor: null });
         const rows = await db.many(`SELECT id, owner_subject, name, estop_latched, created_at, updated_at
-            FROM robots WHERE ($1::text IS NULL OR id > $1) ORDER BY id LIMIT $2`, [filters.cursor, filters.limit + 1]);
+            FROM robots WHERE ($1::text IS NULL OR id > $1) AND ($3::text IS NULL OR owner_subject = $3) ORDER BY id LIMIT $2`,
+        [filters.cursor, filters.limit + 1, filters.owner]);
         const resources = rows.slice(0, filters.limit).map(robotSummary);
         const next_cursor = rows.length > filters.limit ? encodeCursor(resources[resources.length - 1].id) : null;
         return res.json({ resources, next_cursor });
