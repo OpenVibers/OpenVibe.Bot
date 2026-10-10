@@ -75,14 +75,16 @@ function sections({ signedIn }) {
             { icon: 'ov:check', title: 'Cozmo', text: 'Through the device agent on a computer next to it.' },
             { icon: 'ov:check', title: 'A simulated rover', text: 'Runs inside Bot, so you can try the whole panel with no hardware.' },
         ],
-    });
+    }) + `<section class="sc-sec" id="build"><h2>Build for OpenVibe.Bot</h2>
+<p class="sc-lede">Write a driver for a robot, or describe one with a profile and let the panel render it. The driver and profile spec, with a validator and the simulated rover, lives on the build pages.</p>
+<p class="sc-actions"><a class="sc-btn sc-primary" href="/docs">Build for OpenVibe.Bot</a> <a class="sc-btn" href="/docs/drivers">Write a driver</a> <a class="sc-btn" href="/docs/profiles">Robot profiles</a></p></section>`;
 }
 
 function renderHome({ config, signedIn = false }) {
     const nav = {
         service: 'bot',
         apiBase: NETWORK_URL,
-        links: [{ label: 'Robots', href: '/robots' }],
+        links: [{ label: 'Robots', href: '/robots' }, { label: 'Build', href: '/docs' }],
         history: { type: 'page', title: SITE_NAME },
         sessionUrl: '/auth/me',
         loginUrl: '/auth/login?next={path}',
@@ -98,7 +100,7 @@ function renderHome({ config, signedIn = false }) {
         summary: DESCRIPTION,
         canonical: `${config.baseUrl}/`,
         robots: 'index, follow',
-        navbar: nav, footer, home: '/', navLinks: [{ label: 'Robots', href: '/robots' }],
+        navbar: nav, footer, home: '/', navLinks: [{ label: 'Robots', href: '/robots' }, { label: 'Build', href: '/docs' }],
         head: [
             appIcon.headTags({ site: 'bot' }),
             '<link rel="manifest" href="/manifest.webmanifest">',

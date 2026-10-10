@@ -37,6 +37,8 @@ const { frameAncestors } = require('../config');
 const { BotError } = require('../util');
 const kits = require('../kits');
 const { renderPanel, renderEmbedRefused, renderRobotsPage, renderPairingPage } = require('./render');
+const { renderDocsIndex, renderDriversPage, renderProfilesPage } = require('./docs');
+const { checkProfile } = require('../profiles');
 const { renderHome, HOME_CSP } = require('./home');
 
 const PUBLIC = path.join(__dirname, '..', '..', 'public');
@@ -45,7 +47,7 @@ const HOLD_RESEND_MS = 150;
 const SITE_TAGLINE = 'An open control panel for robots';
 // Every public GET page, for the sitemap. The interactive pages (/robots, /pair/, /panel/) need a session and
 // are Disallowed in robots.txt; the API and sign-in are not pages.
-const PUBLIC_PAGES = ['/', '/install', '/terms', '/privacy', '/dmca'];
+const PUBLIC_PAGES = ['/', '/install', '/docs', '/docs/drivers', '/docs/profiles', '/terms', '/privacy', '/dmca'];
 // The panel plays the robot's live video with mediasoup-client, whose npm package ships no browser
 // bundle: the page imports the pinned ESM build OpenVibe.Live uses from esm.sh, and its viewer
 // signaling endpoint is OpenRestream's wss host (OpenRestream README "playback descriptor"). Exactly these two
@@ -118,6 +120,29 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         if (!origin) return true;
         try { return new URL(origin).origin === new URL(config.baseUrl).origin || new URL(origin).host === req.headers.host; } catch { return false; }
     };
+
+    // ── The public build pages (plan T15): /docs, /docs/drivers and /docs/profiles. ──
+    // They are rendered with the app's page helper, carry no script, and run under the site-wide CSP. The
+    // profile validator is anonymous, so it is rate-limited per address the way the app's other public limits
+    // are, and a cross-site form post is refused as every other form post refuses one.
+    const validateLimit = limits ? [limits('bot.docs.validate', { minute: 30, hour: 300 })] : [];
+    r.get('/docs', (req, res) => res.type('html').send(renderDocsIndex({ config })));
+    r.get('/docs/drivers', (req, res) => res.type('html').send(renderDriversPage({ config })));
+    r.get('/docs/profiles', (req, res) => res.type('html').send(renderProfilesPage({ config })));
+    r.post('/docs/profiles/validate', ...validateLimit, express.urlencoded({ extended: false, limit: '32kb' }), (req, res, next) => {
+        try {
+            if (!sameOrigin(req)) return res.status(403).type('text/plain').send('cross-site form posts are refused\n');
+            res.setHeader('Cache-Control', 'no-store');
+            const source = typeof (req.body && req.body.profile) === 'string' ? req.body.profile : '';
+            let result;
+            if (!source.trim()) result = { valid: false, problems: ['Paste a profile JSON to validate.'] };
+            else {
+                try { result = checkProfile(JSON.parse(source)); }
+                catch (e) { result = { valid: false, problems: [`not valid JSON: ${e.message}`] }; }
+            }
+            return res.type('html').send(renderProfilesPage({ config, source, result }));
+        } catch (e) { return next(e); }
+    });
 
     // The embed flag is web-only: domain.present.robot (and so /api/v1) does not carry it.
     const presentForPage = (row) => ({ ...domain.present.robot(row), embed_public: !!row.embed_public });

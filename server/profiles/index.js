@@ -206,6 +206,28 @@ function validateProfile(p) {
     };
 }
 
+/**
+ * Validate a value exactly as a shipped profile is validated, for the public validator (GET /docs/profiles,
+ * POST /docs/profiles/validate, POST /api/v1/profiles/validate): the contracts schema plus the loader's own
+ * rules, reported as a list of readable problems instead of throwing on the first. A shipped profile still
+ * loads through loadProfiles/validateProfile, unchanged. Returns { valid, problems[, profile] }.
+ */
+function checkProfile(value) {
+    if (!isObject(value)) return { valid: false, problems: ['a profile must be a JSON object'] };
+    const contract = validate('bot.robot-profile@1', value);
+    if (!contract.valid) {
+        return { valid: false, problems: (contract.errors || []).map((e) => {
+            const at = String(e.path || '').replace(/^\//, '').replace(/\//g, '.');
+            return at ? `${at}: ${e.message}` : String(e.message);
+        }) };
+    }
+    try {
+        return { valid: true, problems: [], profile: validateProfile(value) };
+    } catch (e) {
+        return { valid: false, problems: [e && e.detail ? e.detail : String((e && e.message) || e)] };
+    }
+}
+
 /** Every profile in server/profiles/*.json, validated. Throws on the first invalid file (a broken ship). */
 function loadProfiles(dir = DIR) {
     const files = fs.readdirSync(dir).filter((f) => f.endsWith('.json')).sort();
@@ -263,4 +285,4 @@ function reservedKeyReason(key, profile) {
     return null;
 }
 
-module.exports = { validateProfile, loadProfiles, seedProfiles, getProfile, listProfiles, reservedKeyReason, CAPABILITIES, WIDGETS, DRIVERS, COMMAND_KINDS };
+module.exports = { validateProfile, checkProfile, loadProfiles, seedProfiles, getProfile, listProfiles, reservedKeyReason, CAPABILITIES, WIDGETS, DRIVERS, COMMAND_KINDS };
