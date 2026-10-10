@@ -44,7 +44,7 @@ OpenVibe.Bot pairs a robot's machines, keeps their state and gates every operato
 - OpenVibe.Network: user and service tokens, node tokens, pairing when the authority is `network`, and identity resolution (a `@username` to a subject, and subjects to names, for the panel's People card).
 - OpenRestream: the WHIP ingest base (`BOT_WHIP_BASE`) devices publish to.
 - OpenVibe.Billing: job usage readings go to `billing.usage.record` (`BOT_BILLING_URL`; Bot mints its own Network service token for audience `openvibe.billing` with `billing.usage.record`, and `BOT_BILLING_TOKEN` overrides it); unset, they wait in `run_usage_outbox`.
-- `openvibe-contracts` v0.126.0, `openvibe-sdk` v0.37.0 and `openvibe-shared` v2.20.3 (package.json).
+- `openvibe-contracts` v0.127.0, `openvibe-sdk` v0.37.0 and `openvibe-shared` v2.20.3 (package.json).
 - Account export and deletion (ADR-033): Network grants `events.subscription.manage` (openvibe.events) for the two
   subscriptions created at boot, then, last and once the release is live, `network.account.export.contribute` and
   `network.account.deletion.confirm` (openvibe.network).
@@ -121,7 +121,7 @@ Set `BOT_ONVIF_CAMERAS` (JSON, unset by default) to the server-side cameras Bot 
 OpenVibe.Sites no longer generates `deploy/nginx/openvibe.bot.conf` (sites.json marks the vhost as owned by OpenVibe.Bot), and Bot serves nothing from a Sites checkout: the legal pages, `robots.txt`, `sitemap.xml`, `manifest.webmanifest` and the 404 page all come from the app. A Sites deploy leaves an installed vhost it no longer generates in place, so the current Sites vhost keeps serving openvibe.bot until Bot's first deploy installs this file over it; later Sites deploys never overwrite Bot's `/device` and `/control` routes.
 
 <!-- versions:start -->
-- openvibe-contracts: v0.126.0
+- openvibe-contracts: v0.127.0
 - openvibe-sdk: v0.37.0
 - openvibe-shared: v2.20.3
 <!-- versions:end -->
