@@ -441,4 +441,4 @@ function renderPairingPage({ robot, pairing, profile = null }) {
     return page(`Pair ${robot.name}`, body, { scripts: ['/panel/panel.js'] });
 }
 
-module.exports = { renderPanel, renderEmbedRefused, renderWidget, renderRobotsPage, renderPairingPage, camerasOf, esc };
+module.exports = { page, renderPanel, renderEmbedRefused, renderWidget, renderRobotsPage, renderPairingPage, camerasOf, esc };

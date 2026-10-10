@@ -9,6 +9,7 @@
  * | Method & path                                  | Capability (services)  | People                              |
  * |------------------------------------------------|------------------------|-------------------------------------|
  * | GET    /profiles, /profiles/:id                | — (public)             | anyone                              |
+ * | POST   /profiles/validate                      | — (public)             | anyone (the profile validator)      |
  * | GET    /kits, /kits/:id                        | — (public)             | anyone                              |
  * | GET    /robots                                 | bot.robot.read         | own robots (?owner= only themself)  |
  * | POST   /robots                                 | bot.robot.manage       | the owner (new robot + pairing code)|
@@ -35,7 +36,7 @@
 const express = require('express');
 const { http } = require('openvibe-contracts');
 const { fail, userSubject, isRobotId, json } = require('../util');
-const { getProfile, listProfiles } = require('../profiles');
+const { getProfile, listProfiles, checkProfile } = require('../profiles');
 const kits = require('../kits');
 
 const CAP = {
@@ -131,6 +132,14 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config }) {
         const p = await getProfile(domain.db, req.params.id);
         if (!p) fail(404, 'bot.profile_not_found', 'no such profile');
         res.json({ profile: p.profile });
+    }));
+    // The same validator the /docs/profiles form runs (server/profiles checkProfile): a profile in,
+    // { valid, problems[] } out. Public, and rate-limited per address exactly as the form is.
+    r.post('/profiles/validate', limits('bot.docs.validate', { minute: 30, hour: 300 }), wrap((req, res) => {
+        const body = req.body;
+        const value = body && typeof body.profile === 'object' && body.profile !== null ? body.profile : body;
+        const result = checkProfile(value);
+        res.json({ valid: result.valid, problems: result.problems, ...(result.profile ? { profile: result.profile } : {}) });
     }));
 
     // ── Kits (public read; the "Get a robot" catalogue, server/kits/*.json) ────────────────────────
