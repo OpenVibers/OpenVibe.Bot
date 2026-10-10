@@ -68,6 +68,9 @@ function createUserAuth(config, keys) {
         if (!claims || typeof claims !== 'object') return null;
         if (typeof claims.sub === 'string' && /^(svc|app|mod|node):/.test(claims.sub)) return null;
         if (claims.actor_type === 'service' || claims.actor_type === 'node') return null;
+        // A typed token is never a session: a realtime ticket (typ realtime) or a FedCM assertion (typ fedcm, issued to
+        // another site) is signed by the same key, and this check takes no audience (openvibe-sdk/auth's rule).
+        if (claims.typ !== undefined || claims.purpose !== undefined) return null;
         return claims;
     }
     return { client, verify };
