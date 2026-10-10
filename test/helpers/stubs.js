@@ -50,8 +50,8 @@ async function startNetwork() {
         const now = Math.floor(Date.now() / 1000);
         return serviceAuth.signServiceToken({ iss: issuer, sub, actor_type: 'service', aud, cap, iat: now, exp: now + expSec, jti: crypto.randomBytes(8).toString('hex') }, privatePem);
     }
-    function signUser(u) {
-        return jwt.sign({ sub: String(u.networkId || ++n), subject_id: u.subject, username: u.username, display_name: u.display_name || u.username, role: u.role || 'user' },
+    function signUser(u, extra = {}) {
+        return jwt.sign({ sub: String(u.networkId || ++n), subject_id: u.subject, username: u.username, display_name: u.display_name || u.username, role: u.role || 'user', ...extra },
             privatePem, { algorithm: 'RS256', issuer, expiresIn: '1h' });
     }
     // Node principals: the view Network's principalView answers (server/registry/node-principals.js).

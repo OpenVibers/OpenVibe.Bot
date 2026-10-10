@@ -35,6 +35,14 @@ const { boot, check, done } = require('./helpers/app');
         assert.strictEqual(missing.headers.get('content-type'), 'application/problem+json');
     });
 
+    await check('a typed Network token (realtime ticket, FedCM assertion) is never a session, even signed by the Network key', async () => {
+        assert.strictEqual((await t.call('GET', '/api/v1/robots', { user: alex })).status, 200, 'a session token works');
+        for (const extra of [{ typ: 'realtime', purpose: 'realtime' }, { typ: 'fedcm', aud: 'https://elsewhere.example' }]) {
+            const r = await t.call('GET', '/api/v1/robots', { token: t.network.signUser(alex, extra) });
+            assert.strictEqual(r.status, 401, `${extra.typ}: ${r.status}`);
+        }
+    });
+
     await check('a stranger cannot read or manage someone else\'s robot; the owner can', async () => {
         const { robot, pairing } = await t.robot(alex);
         assert.match(pairing.code, /^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/);
