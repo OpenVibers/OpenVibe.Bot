@@ -7,7 +7,8 @@
  *   GET  /api/health, /api/ready, /release.json, /metrics (direct loopback callers only)
  *   /api/v1/*    the API (service tokens + user tokens, see api/v1.js)
  *   /auth/*      Network SSO session for people (the control WS accepts the ov_token cookie)
- *   GET  /       the front page (web/home.js); /sitemap.xml, /manifest.webmanifest and /robots.txt (web/routes.js)
+ *   GET  /       the front page (web/home.js); /sitemap.xml, /robots.txt, /llms.txt, /llms-full.txt and
+ *                /manifest.webmanifest (web/routes.js)
  *   GET  /terms, /privacy, /dmca   the legal pages (openvibe-shared/legal)
  *   /robots, /pair/:id, /panel/:id   the signed-in pages (web/routes.js); a `sim` robot is driven by the
  *                in-process simulator (sim/index.js), which server/index.js starts for existing ones at boot

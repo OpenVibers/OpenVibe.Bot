@@ -1,8 +1,8 @@
 'use strict';
 
 /**
- * The non-API surface: the front page at `/` (web/home.js), `/robots.txt`, `/sitemap.xml`,
- * `/manifest.webmanifest`, `/install`, a 302 to OpenVibe.Node's installer script (the one-paste command,
+ * The non-API surface: the front page at `/` (web/home.js), `/robots.txt`, `/sitemap.xml`, `/llms.txt`,
+ * `/llms-full.txt`, `/manifest.webmanifest`, `/install`, a 302 to OpenVibe.Node's installer script (the one-paste command,
  * ADR-043), and the signed-in pages (the five-minute path and the profile-rendered panel, plan T15 step 3):
  *
  *   GET  /robots           the signed-in person's robots and the "add a robot" form
@@ -48,6 +48,50 @@ const SITE_TAGLINE = 'An open control panel for robots';
 // Every public GET page, for the sitemap. The interactive pages (/robots, /pair/, /panel/) need a session and
 // are Disallowed in robots.txt; the API and sign-in are not pages.
 const PUBLIC_PAGES = ['/', '/install', '/docs', '/docs/drivers', '/docs/profiles', '/terms', '/privacy', '/dmca'];
+// The public pages an AI crawler can read, for /llms.txt and /llms-full.txt (llmstxt.org). Same pages as the
+// sitemap minus /install (a 302 to the installer script, not a page); no signed-in or per-robot page, nothing
+// under the API or /internal. `note` is the one-line llms.txt entry, `text` the page's full text in llms-full.txt,
+// written from what the page and its renderer actually say (README "Owns", web/home.js, web/docs.js, shared/legal).
+const LLMS_NAME = 'OpenVibe.Bot';
+const LLMS_SUMMARY = 'An open control panel for robots: pair a robot with one pasted command and drive it from any '
+    + 'browser, with roles, limits and a latched emergency stop on every command.';
+const LLMS_PAGES = [
+    {
+        path: '/', title: 'OpenVibe.Bot — drive your robot from any browser',
+        note: 'What Bot is, and how a robot goes from added to driving.',
+        text: 'OpenVibe.Bot is the open control panel for robots. Add a robot and pick its profile, pair it by pasting one command on the robot\'s computer, then drive it from any browser. The panel lays its controls out from the robot\'s profile: a touch joystick, the keyboard, a gamepad, buttons and sliders, with a latency meter. Every command passes one gate with roles, per-robot limits, cooldowns and a turn budget, and a latched emergency stop that only the owner clears; a stop pressed on the robot itself holds until it is released there. An owner can add people by username as operators or viewers, or open a queue where visitors take turns. A simulated rover runs inside Bot, so the whole panel can be tried before any hardware exists.',
+    },
+    {
+        path: '/docs', title: 'Build for OpenVibe.Bot',
+        note: 'The build index: drivers and robot profiles.',
+        text: 'The build index for OpenVibe.Bot. Two things are open to build against: a driver, a separate program the OpenVibe Node runs and talks to in JSON lines over stdin/stdout, and a robot profile (bot.robot-profile@1), the JSON that says what a robot can do and which widgets its panel shows. The page links the driver guide and the profile guide, and points to the OpenVibe Node plugins tree, the protocol document and the plugin contract.',
+    },
+    {
+        path: '/docs/drivers', title: 'Write a driver',
+        note: 'The driver protocol: lifecycle, every message and the safety rules.',
+        text: 'The driver protocol spec for OpenVibe.Bot. A driver is a separate executable the OpenVibe Node core starts, in any language, and the two speak JSON lines over stdin/stdout. The page covers what a driver is, the three connection kinds (on-board, bridge and server-side), the start-up lifecycle and restart rules, every message in both directions (hello, command, heartbeat, stop, estop, resume; describe, ready, fault, ack, nack, telemetry, event and video), the safety rules, a minimal Python driver, and how to test and contribute one.',
+    },
+    {
+        path: '/docs/profiles', title: 'Robot profiles',
+        note: 'The bot.robot-profile@1 format, a full example and a validator.',
+        text: 'The robot profile format (bot.robot-profile@1) that OpenVibe.Bot renders a panel from. The page lists the fields (connection kind, motion kinds, commands, widgets and limits), shows a full example, and has a validator for a profile you paste. Profiles ship with Bot, including the simulated rover (sim.rover).',
+    },
+    {
+        path: '/terms', title: 'Terms of Service',
+        note: 'The terms for using OpenVibe.Bot.',
+        text: 'The terms for using OpenVibe.Bot: who may use it, the OpenVibe account, acceptable use, what you may pair and control, and the limits of the project\'s liability. The service is provided as it is, without warranties.',
+    },
+    {
+        path: '/privacy', title: 'Privacy Policy',
+        note: 'What OpenVibe.Bot collects, why, and your choices.',
+        text: 'The privacy policy for OpenVibe.Bot: what the service collects and why, the first-party cookies it sets, what is shared with the services that run the network, how long things are kept, and the choices and rights you have over your data.',
+    },
+    {
+        path: '/dmca', title: 'DMCA & Copyright',
+        note: 'How to send a copyright notice or counter-notice.',
+        text: 'How OpenVibe.Bot handles copyright: its position under the Digital Millennium Copyright Act, how to send a takedown notice, what happens next, counter-notices, and how repeat infringers and false claims are handled.',
+    },
+];
 // The panel plays the robot's live video with mediasoup-client, whose npm package ships no browser
 // bundle: the page imports the pinned ESM build OpenVibe.Live uses from esm.sh, and its viewer
 // signaling endpoint is OpenRestream's wss host (OpenRestream README "playback descriptor"). Exactly these two
@@ -71,6 +115,17 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     r.get('/sitemap.xml', (req, res) => {
         res.type('application/xml').send(seo.sitemapXml(PUBLIC_PAGES.map((p) => ({ loc: `${config.baseUrl}${p}` }))));
     });
+    // /llms.txt and /llms-full.txt (llmstxt.org, openvibe-shared/seo): the public pages as a plain-text map for
+    // language-model crawlers. Only the pages above; the signed-in pages, the API and /internal are not listed.
+    // Same headers as robots.txt: text/plain and no explicit Cache-Control.
+    r.get('/llms.txt', (req, res) => res.type('text/plain').send(seo.llmsTxt({
+        name: LLMS_NAME, summary: LLMS_SUMMARY,
+        sections: [{ title: 'Pages', links: LLMS_PAGES.map((p) => ({ title: p.title, url: `${config.baseUrl}${p.path}`, note: p.note })) }],
+    })));
+    r.get('/llms-full.txt', (req, res) => res.type('text/plain').send(seo.llmsFull({
+        site: LLMS_NAME, summary: LLMS_SUMMARY, base: config.baseUrl,
+        sections: [{ title: 'Pages', pages: LLMS_PAGES.map((p) => ({ title: p.title, url: p.path, text: p.text })) }],
+    })));
     // Browsers ask for /favicon.ico on their own (a 404 page links no icon): the app icon, as SVG.
     r.get('/favicon.ico', (req, res) => res.type('image/svg+xml').set('Cache-Control', 'public, max-age=86400').send(appIcon.favicon({ site: 'bot' })));
     // The web app manifest (openvibe-shared/app-icon): the same icon design and start URL every OpenVibe site ships.
