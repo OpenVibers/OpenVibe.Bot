@@ -100,10 +100,10 @@ function samples(profile, kind, names) {
         assert.strictEqual(p.kind, 'bridge');
         assert.deepStrictEqual(p.capabilities.slice().sort(), ['battery', 'drive.differential', 'head']);
         assert.deepStrictEqual(p.mapping, { driver: 'looi', plugin: 'looi' });
-        assert.deepStrictEqual(Object.keys(p.commands).sort(), ['actuator', 'drive']);
+        assert.deepStrictEqual(Object.keys(p.commands).sort(), ['actuator', 'drive', 'halt'], 'halt is in every profile');
         assert.deepStrictEqual(p.commands.drive.axes, { throttle: [-1, 1], steer: [-1, 1] });
         assert.deepStrictEqual(p.commands.actuator.names, { head: { type: 'number', range: [-1, 1] } });
-        assert.strictEqual(p.camera, undefined);
+        assert.ok(!p.camera, 'no camera of its own');
         assert.ok(p.limits.max_speed <= 0.5 && p.limits.max_command_ms <= 300, 'a desk robot starts slow, with short commands');
     });
 

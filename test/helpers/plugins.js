@@ -8,6 +8,7 @@
  *   COZMO  = plugins/cozmo/openvibe_cozmo/__init__.py
  *   SDK    = plugins/sdk/openvibe_plugin/__init__.py
  *
+ * LOOI   = OpenVibe.Node docs/hardware-looi.md (a community driver; the contract it implements).
  * RELAY  = the relay plugin (plan T15 R9 step 4), a bridge with no hardware of its own.
  *
  * camera.onvif and sim.rover are `kind: "server"` profiles with no Node plugin; their contract is the
@@ -170,13 +171,35 @@ const server = {
     },
 };
 
+/**
+ * LOOI = OpenVibe.Node docs/hardware-looi.md, the contract the community's Generic LOOI driver implements: drive is
+ * throttle/steer -1..1, the one actuator is head -1..1, and halt.
+ */
+const looi = {
+    name: 'looi',
+    accepts(kind, v) {
+        if (kind === 'halt') return halt(v);
+        if (!isObj(v)) return `${kind} value must be an object`;
+        if (kind === 'drive') {
+            if (!('throttle' in v) && !('steer' in v)) return 'drive carries throttle/steer';
+            return only(v, ['throttle', 'steer']) && ['throttle', 'steer'].every((a) => !(a in v) || num(v[a], -1, 1)) ? null : 'drive is throttle/steer -1..1';
+        }
+        if (kind === 'actuator') {
+            if (!only(v, ['name', 'value'])) return 'an actuator is {name, value}';
+            return v.name === 'head' && num(v.value, -1, 1) ? null : 'the one actuator is head -1..1';
+        }
+        return `LOOI takes no ${kind}`;
+    },
+};
+
 /** The contract a profile's commands must meet: its Node plugin, or the server driver. */
 function contractFor(profile) {
     const m = profile.mapping || {};
     if (m.plugin === 'adeept_adr036') return adeept(m.wheels);
     if (m.plugin === 'cozmo') return cozmo();
     if (m.plugin === 'relay') return relay;
+    if (m.plugin === 'looi') return looi;
     return server[profile.id] || null;
 }
 
-module.exports = { adeept, cozmo, relay, server, contractFor, COZMO_FACES };
+module.exports = { adeept, cozmo, relay, looi, server, contractFor, COZMO_FACES };
