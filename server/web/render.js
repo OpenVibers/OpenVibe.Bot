@@ -366,6 +366,7 @@ ${embed ? '' : topbar(`<span class="crumb">${esc(robot.name)}</span>`)}
 ${turnStrip(robot, role)}
 </div>
 ${embed && role === 'watcher' && !signedIn ? `<p class="embed-sign-in" data-drive-bar><button type="button" class="button primary" data-drive>${icon('gamepad')}<span>Drive</span></button> ${outLink(`/panel/${robot.id}`, 'Open on openvibe.bot')}</p>` : ''}
+<p class="notice" data-device-fault role="status" hidden></p>
 <p class="notice" data-notice role="alert" hidden></p>
 <div class="widgets">
 ${widgets.join('\n')}

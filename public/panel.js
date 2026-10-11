@@ -642,6 +642,33 @@
             for (const el of $$('[data-joystick]', section)) { if (ok) el.removeAttribute('aria-disabled'); else el.setAttribute('aria-disabled', 'true'); }
         }
     }
+    // What a device's refusal means, in words (a nack's fault code). A deadline that passed in transit is not news.
+    const NACK_TEXT = {
+        local_stop: 'The robot is stopped on the robot itself; release it there first.',
+        estopped: 'The e-stop is latched.',
+        not_connected: 'The robot is not connected to its device.',
+        no_heartbeat: 'The device lost its link to the robot.',
+        not_ready: 'The robot is still starting.',
+        plugin_down: 'The robot\'s driver is not running.',
+    };
+    const QUIET_NACKS = new Set(['expired']);
+    function nackText(code) {
+        if (!code || QUIET_NACKS.has(code)) return '';
+        return NACK_TEXT[code] || `The robot refused that (${code}).`;
+    }
+    /** The device's own faults (status.faults from the Node: { code, driver, message }), while it is online. */
+    function paintFaults(state) {
+        const el = $('[data-device-fault]');
+        if (!el) return;
+        const faults = state && state.online && state.status && Array.isArray(state.status.faults) ? state.status.faults : [];
+        const text = faults.slice(0, 3).map((f) => {
+            const code = String((f && f.code) || 'fault');
+            const msg = f && f.message ? String(f.message).slice(0, 160) : '';
+            return msg ? `${code}: ${msg}` : code;
+        }).join(' · ');
+        el.textContent = text ? `Device fault: ${text}` : '';
+        el.hidden = !text;
+    }
     function readout(v) {
         if (v == null) return '—';
         if (typeof v !== 'object') return String(v);
@@ -676,6 +703,7 @@
             clear.title = held ? 'Release the stop on the robot first' : '';
         }
         if (latched || held) releaseAll();
+        paintFaults(state);
         setOnline(state.online ? 'online' : 'offline', state.online ? 'Online' : 'Device offline');
         main.dataset.deviceOnline = String(!!state.online);
         if (state.telemetry) lastTelemetryAt = performance.now();
@@ -738,6 +766,8 @@
         } else if (m.type === 'command_result') {
             roundTrip(m.id, m.result);
             if (m.result === 'refused' && m.code !== 'bot.cooldown') notice(m.reason || m.code);
+            else if (m.result === 'nack') { const t = nackText(m.reason); if (t) notice(t); }
+            else if (m.result === 'ack') notice('');
         } else if (m.type === 'error') {
             if (m.code === 'bot.not_an_operator' || m.code === 'bot.robot_not_found') { gone = true; joined = false; enableControls(); }
             notice(m.detail || m.code);

@@ -78,6 +78,24 @@ const { boot, check, done } = require('./helpers/app');
         op.close(); dev.close();
     });
 
+    await check('a device\'s faults reach the panel\'s state, and the panel shows them and the robot\'s refusals in words', async () => {
+        const { robot, dev } = await connected();
+        const op = await ownerJoined(robot.id);
+        op.messages.length = 0;
+        dev.send({ type: 'status', firmware: 'test', capabilities: {}, faults: [{ code: 'not_connected', driver: 'looi', message: 'LOOI is not answering over Bluetooth' }], estop_latched: false });
+        const st = await op.waitFor((m) => m.type === 'robot_state' && m.state.status && m.state.status.faults && m.state.status.faults.length === 1);
+        assert.deepStrictEqual(st.state.status.faults[0], { code: 'not_connected', driver: 'looi', message: 'LOOI is not answering over Bluetooth' });
+        const fs = require('fs');
+        const path = require('path');
+        const panel = fs.readFileSync(path.join(__dirname, '..', 'public', 'panel.js'), 'utf8');
+        assert.match(panel, /state\.status && Array\.isArray\(state\.status\.faults\)/, 'the panel reads the device\'s faults');
+        assert.match(panel, /else if \(m\.result === 'nack'\) \{ const t = nackText\(m\.reason\); if \(t\) notice\(t\); \}/, 'and says why the robot refused');
+        assert.match(panel, /const QUIET_NACKS = new Set\(\['expired'\]\);/, 'a deadline that passed in transit is not news');
+        const html = require('../server/web/render').renderPanel({ robot: { id: robot.id, name: 'R', profile_id: 'sim.rover', estop: { latched: false } }, profile: { id: 'sim.rover', name: 'Rover', commands: {}, widgets: [] }, role: 'operator' });
+        assert.ok(html.includes('data-device-fault'), 'the panel has a place for them');
+        op.close(); dev.close();
+    });
+
     await check('a device cannot latch or report for a robot it is not attached to (bot.forbidden, audited)', async () => {
         const { dev, deviceId } = await connected();
         const { robot: other } = await t.robot(alex);

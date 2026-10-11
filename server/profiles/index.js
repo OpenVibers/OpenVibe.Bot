@@ -48,7 +48,8 @@ const CAPABILITIES = new Set([
 const WIDGETS = new Set(['drive', 'pan-tilt', 'servo', 'lights', 'horn', 'speaker', 'display', 'telemetry', 'battery', 'latency', 'ptz', 'camera', 'head', 'lift', 'buttons', 'video_click']);
 
 /** Device drivers a mapping may name. `relay` is a Node plugin with no hardware map of its own. */
-const DRIVERS = new Set(['pca9685', 'ads7830', 'cozmo', 'onvif', 'sim', 'relay']);
+// `looi`: the community's Generic LOOI driver, a Bluetooth bridge plugin (OpenVibe.Node docs/hardware-looi.md).
+const DRIVERS = new Set(['pca9685', 'ads7830', 'cozmo', 'looi', 'onvif', 'sim', 'relay']);
 
 const ID_RE = /^[a-z][a-z0-9._-]{1,63}$/;
 const KINDS = new Set(['onboard', 'bridge', 'server']);

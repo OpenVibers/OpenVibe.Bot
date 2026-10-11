@@ -58,8 +58,8 @@ function samples(profile, kind, names) {
 (async () => {
     const profiles = loadProfiles();
 
-    await check('the six shipped profiles load and validate', () => {
-        assert.deepStrictEqual([...profiles.keys()].sort(), ['adeept.adr036', 'adeept.adr036.mecanum', 'camera.onvif', 'cozmo', 'relay.generic', 'sim.rover']);
+    await check('the seven shipped profiles load and validate', () => {
+        assert.deepStrictEqual([...profiles.keys()].sort(), ['adeept.adr036', 'adeept.adr036.mecanum', 'camera.onvif', 'cozmo', 'looi', 'relay.generic', 'sim.rover']);
         for (const p of profiles.values()) {
             assert.ok(p.capabilities.length > 0, `${p.id} capabilities`);
             assert.ok(p.widgets.length > 0, `${p.id} widgets`);
@@ -93,6 +93,18 @@ function samples(profile, kind, names) {
         assert.deepStrictEqual(p.commands.display.modes, ['text', 'face', 'image_png_b64']);
         assert.deepStrictEqual(p.commands.actuator.names.lift.range, [0, 1]);
         assert.strictEqual(p.camera.resolution, '320x240');
+    });
+
+    await check('looi is a Bluetooth bridge: tracks and head tilt, battery, no camera of its own (the phone streams)', () => {
+        const p = profiles.get('looi');
+        assert.strictEqual(p.kind, 'bridge');
+        assert.deepStrictEqual(p.capabilities.slice().sort(), ['battery', 'drive.differential', 'head']);
+        assert.deepStrictEqual(p.mapping, { driver: 'looi', plugin: 'looi' });
+        assert.deepStrictEqual(Object.keys(p.commands).sort(), ['actuator', 'drive', 'halt'], 'halt is in every profile');
+        assert.deepStrictEqual(p.commands.drive.axes, { throttle: [-1, 1], steer: [-1, 1] });
+        assert.deepStrictEqual(p.commands.actuator.names, { head: { type: 'number', range: [-1, 1] } });
+        assert.ok(!p.camera, 'no camera of its own');
+        assert.ok(p.limits.max_speed <= 0.5 && p.limits.max_command_ms <= 300, 'a desk robot starts slow, with short commands');
     });
 
     await check('camera.onvif is PTZ only and sim.rover is drive + camera', () => {
