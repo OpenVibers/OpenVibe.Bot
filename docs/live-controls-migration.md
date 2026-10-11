@@ -51,7 +51,7 @@ lines) let viewers drive a streamer's hardware from the channel page:
    existing Pi script keeps working with a one-line change of where it connects. Local policy and the kill switch
    apply as for every plugin.
 5. **Built — the conversion**, `scripts/live-controls-export.sh` and `scripts/convert-live-controls.js` in Bot:
-   an operator runs the export on the Live host (read-only) and the converter here — dry-run first, then
+   an operator runs the export against Live's PostgreSQL (read-only) and the converter here — dry-run first, then
    `--apply`. For each `control_configs` row it creates the robot for the owner's Network subject (Live's
    `linked_accounts`/`subject_projection`, the person's `usr_…`), a robot-local profile from its buttons
    (profile `relay.generic`, the catalogue's bare relay robot: buttons and video clicks, no drive), operators
@@ -69,11 +69,12 @@ lines) let viewers drive a streamer's hardware from the channel page:
 
 ## Running the conversion
 
-On the Live host, where `DB_PATH` points at Live's SQLite file (read-only — no journal is written, nothing in
-Live changes):
+On the Live host, against Live's PostgreSQL database (`ov_live`, since 2026-10-08). The session is read-only
+(`default_transaction_read_only`) and reads one snapshot, so nothing in Live changes:
 
 ```sh
-scripts/live-controls-export.sh /path/to/live.sqlite > export.json
+sudo -u postgres scripts/live-controls-export.sh ov_live > export.json
+# or any connection string psql takes: scripts/live-controls-export.sh 'postgresql://reader@host/ov_live'
 ```
 
 That one document carries only what the conversion needs: `configs`, `buttons`, `whitelist`,
