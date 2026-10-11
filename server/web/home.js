@@ -5,8 +5,8 @@
  * the OpenVibe Frame (openvibe-shared/shell: navbar, footer, theme) around openvibe-shared/showcase sections.
  *
  * The copy says only what works today (README "Owns" and "Devices"): pairing with one pasted command, the
- * panel's controls, the command gate and the latched e-stop, people and the queue, the read-only embed, the
- * simulator, and the kits Bot has drivers for. Live video in the panel waits for OpenRestream to play a
+ * panel's controls, the command gate and the latched e-stop (and a stop held on the robot itself), people and the queue,
+ * the embed under a Live stream (watch, and Drive for anyone allowed), the simulator, and the kits Bot has drivers for. Live video in the panel waits for OpenRestream to play a
  * WHIP-published stream back, and the page says so rather than showing it.
  *
  *   renderHome({ config, signedIn })   the whole document
@@ -62,10 +62,10 @@ function sections({ signedIn }) {
         title: 'What the panel does',
         items: [
             { icon: 'ov:games', title: 'Real controls', text: 'A touch joystick, the keyboard or a gamepad, plus buttons and sliders, laid out from the robot\'s profile, with a latency meter.' },
-            { icon: 'ov:error', title: 'Safe by default', text: 'Per-robot limits, cooldowns and a turn budget on every command. The emergency stop is latched: only the owner clears it, and a halt always gets through.' },
+            { icon: 'ov:error', title: 'Safe by default', text: 'Per-robot limits, cooldowns and a turn budget on every command. The emergency stop is latched: only the owner clears it, a stop pressed on the robot itself holds until it is released there, and a halt always gets through.' },
             { icon: 'ov:history', title: 'Every command on the record', text: 'Allowed or refused, each command is audited and kept for 30 days.' },
             { icon: 'ov:account', title: 'Share control', text: 'Add people by @username as operators or viewers, or open a queue where visitors take turns.' },
-            { icon: 'ov:live', title: 'Show it on your channel', text: 'Let OpenVibe.Live frame the robot\'s read-only panel, so viewers follow its state as someone drives it.' },
+            { icon: 'ov:live', title: 'Show it on your channel', text: 'Bind the robot to your OpenVibe.Live channel and its panel shows under your stream: viewers follow its state, and anyone allowed to drive presses Drive and takes the controls right there.' },
             { icon: 'ov:code', title: 'An API with the same gate', text: 'A REST API for your own apps, held to the same roles, limits and e-stop as the panel.' },
         ],
     }) + showcase.features({
