@@ -85,9 +85,10 @@ async function boot(opts = {}) {
     const SOCKET_WAIT_MS = 20000;
 
     /** A WebSocket client to /device or /control. waitFor(pred) resolves the first matching frame. */
-    function ws(p, { headers = {} } = {}) {
+    function ws(p, { headers = {}, protocols = null } = {}) {
         return new Promise((resolve, reject) => {
-            const socket = new WebSocket(`${base.replace('http', 'ws')}${p}`, { headers });
+            const url = `${base.replace('http', 'ws')}${p}`;
+            const socket = protocols ? new WebSocket(url, protocols, { headers }) : new WebSocket(url, { headers });
             const client = { ws: socket, messages: [], ended: false, waiters: [], closeCode: null };
             const timer = setTimeout(() => reject(new Error(`ws open timeout on ${p}`)), SOCKET_WAIT_MS);
             socket.on('message', (raw) => {

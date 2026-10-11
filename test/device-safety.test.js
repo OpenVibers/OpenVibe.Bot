@@ -54,6 +54,30 @@ const { boot, check, done } = require('./helpers/app');
         op.close(); dev.close();
     });
 
+    await check('a local stop on the device (openvibe-node stop) is shown as one, and the owner clear cannot lift it', async () => {
+        const { robot, dev } = await connected();
+        const op = await ownerJoined(robot.id);
+        dev.send({ type: 'estop_state', latched: true, local_stop: true, reason: 'stop\u0007 button\n on the robot', robot_id: robot.id });
+        const st = await op.waitFor((m) => m.type === 'robot_state' && m.state.device_estop && m.state.device_estop.local === true);
+        assert.strictEqual(st.state.estop.latched, true, 'the device latched the robot');
+        assert.strictEqual(st.state.device_estop.reason, 'stop  button  on the robot', 'the reason is shown as plain, short text');
+        // The owner clears Bot's latch; the device still holds its own and says so again, which latches the robot again.
+        op.send({ type: 'estop_clear' });
+        await dev.waitFor((m) => m.type === 'estop' && m.latched === false);
+        op.messages.length = 0;   // waitFor also searches frames already received: only the ones from here on count
+        dev.send({ type: 'estop_state', latched: true, local_stop: true, robot_id: robot.id });
+        await op.waitFor((m) => m.type === 'robot_state' && m.state.estop.latched === true && m.state.device_estop.local === true);
+        // Released on the robot: the report is latched:false, never local, and Bot's latch waits for the owner.
+        op.messages.length = 0;
+        dev.send({ type: 'estop_state', latched: false, local_stop: true, robot_id: robot.id });
+        const after = await op.waitFor((m) => m.type === 'robot_state' && m.state.device_estop && m.state.device_estop.latched === false);
+        assert.deepStrictEqual([after.state.device_estop.local, after.state.device_estop.reason, after.state.estop.latched], [false, null, true]);
+        const panel = require('fs').readFileSync(require('path').join(__dirname, '..', 'public', 'panel.js'), 'utf8');
+        assert.match(panel, /state\.device_estop\.local/, 'the panel reads the local flag');
+        assert.match(panel, /clear\.disabled = held;/, 'and waits with the clear button while the robot holds its stop');
+        op.close(); dev.close();
+    });
+
     await check('a device cannot latch or report for a robot it is not attached to (bot.forbidden, audited)', async () => {
         const { dev, deviceId } = await connected();
         const { robot: other } = await t.robot(alex);

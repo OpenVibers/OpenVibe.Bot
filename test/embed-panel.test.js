@@ -24,10 +24,10 @@ const { renderPanel } = require('../server/web/render');
         assert.ok(!watcher.includes('data-estop>') && !watcher.includes('data-estop-clear') && !watcher.includes('data-embed-form'));
         assert.ok(watcher.includes('data-role="watcher"') && watcher.includes('data-allowed="[]"'));
         assert.ok(!/<button(?![^>]*disabled)[^>]*data-(hold|stop)/.test(watcher), 'a control is enabled for a watcher');
-        assert.match(watcher, /<a class="button" href="\/panel\/rob_e1" target="_blank" rel="noopener">Sign in to control<\/a>/);
+        assert.match(watcher, /<a class="button" href="\/panel\/rob_e1" target="_blank" rel="noopener">Open on openvibe.bot<\/a>/);
         for (const a of watcher.match(/<a [^>]*>/g)) assert.ok(a.includes('target="_blank"') && a.includes('rel="noopener"'), a);
         const signedIn = renderPanel({ robot: robotRow, profile: SIM, role: 'watcher', allowed_commands: [], mode: 'embed', signedIn: true });
-        assert.ok(!signedIn.includes('Sign in to control'));
+        assert.ok(!signedIn.includes('Open on openvibe.bot'));
         const owner = renderPanel({ robot: { ...robotRow, embed_public: true }, profile: SIM, role: 'owner', allowed_commands: ['drive', 'halt'], mode: 'embed' });
         assert.ok(owner.includes('data-estop>') && owner.includes('data-estop-clear') && !owner.includes('data-embed-form') && !owner.includes('<a '));
         const page = renderPanel({ robot: robotRow, profile: SIM, role: 'owner', allowed_commands: ['drive'] });
@@ -36,9 +36,9 @@ const { renderPanel } = require('../server/web/render');
 
     await check('the panel client: a watcher joins on /watch and never sends anything but join; a camera tile plays only its URL', () => {
         const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'panel.js'), 'utf8');
-        assert.match(js, /const WATCHER = main\.dataset\.role === 'watcher';/);
-        assert.match(js, /new WebSocket\(wsUrl\(WATCHER \? '\/watch' : '\/control'\)\)/);
-        assert.match(js, /if \(WATCHER && frame\.type !== 'join'\) return false;/);
+        assert.match(js, /let watcher = main\.dataset\.role === 'watcher';/);
+        assert.match(js, /const path = watcher \? '\/watch' : '\/control';/);
+        assert.match(js, /if \(watcher && frame\.type !== 'join'\) return false;/);
         // The live camera reads the server's attribute, the pinned mediasoup-client build Live loads, and
         // the sfu-viewer-* flow; a page with no tile carrying it never imports anything.
         assert.match(js, /for \(const tile of \$\$\('\[data-signaling-url\]'\)\) liveCamera\(tile\);/);
@@ -70,7 +70,7 @@ const { renderPanel } = require('../server/web/render');
         assert.strictEqual(r.headers.get('set-cookie'), null);
         const html = await r.text();
         assert.ok(html.includes('data-role="watcher"') && html.includes('data-allowed="[]"') && html.includes('class="embed-page"'));
-        assert.ok(html.includes('Sign in to control') && !html.includes('data-estop>'));
+        assert.ok(html.includes('Open on openvibe.bot') && !html.includes('data-estop>'));
         assert.ok(t.hub.isOnline(`dev_sim_${open.id}`), 'the embed starts the simulator as the panel does');
         // The rest of the site still refuses every frame.
         assert.match((await get(`/panel/${open.id}`, alex)).headers.get('content-security-policy'), /frame-ancestors 'self';/);
@@ -90,9 +90,9 @@ const { renderPanel } = require('../server/web/render');
         const owner = await get(`/panel/${closed.id}/embed`, alex);
         assert.strictEqual(owner.status, 200);
         const oh = await owner.text();
-        assert.ok(oh.includes('data-role="owner"') && oh.includes('data-estop>') && !oh.includes('data-embed-form') && !oh.includes('Sign in to control'));
+        assert.ok(oh.includes('data-role="owner"') && oh.includes('data-estop>') && !oh.includes('data-embed-form') && !oh.includes('Open on openvibe.bot'));
         const stranger = await (await get(`/panel/${open.id}/embed`, bob)).text();
-        assert.ok(stranger.includes('data-role="watcher"') && !stranger.includes('Sign in to control'));
+        assert.ok(stranger.includes('data-role="watcher"') && !stranger.includes('Open on openvibe.bot'));
     });
 
     await check('a live session\'s signaling URL reaches the anonymous public embed; a private robot is refused before it', async () => {

@@ -86,7 +86,7 @@ At most 64 frames wait; any more are answered `error` `bot.not_ready`.
 | `reauth` | `token` | a Network-paired machine only: a fresh node token for the same principal, before the last one expires (300 s); a refused one is answered `error` `bot.reauth_refused` and moves nothing |
 | `ack` | `id` | a command ran (or, keyed by a job id, a job was accepted: §1.2) |
 | `nack` | `id, fault_code` | a command (or a job, §1.2) was refused on the device |
-| `estop_state` | `latched, by, at, robot_id?` | the device's own latch, a **report**; `robot_id` omitted = every robot the device serves. See below |
+| `estop_state` | `latched, by, at, robot_id?, local_stop?, reason?` | the device's own latch, a **report**; `robot_id` omitted = every robot the device serves; `local_stop: true` = held on the machine itself. See below |
 
 `kind` is one of `drive`, `actuator`, `ptz`, `say`, `display`, `halt`, and a device only ever gets the
 kinds its robot's profile declares (§1.1), with values in the shapes and ranges declared there.
@@ -171,6 +171,14 @@ only (`robot_state.state.device_estop`); it never clears Bot's latch — clearin
 (`estop_clear` on `/control`, `POST /robots/:id/estop/clear`), after which Bot sends `estop` with
 `latched: false`. A `robot_id` the device is not attached to is refused with `error` `bot.forbidden`
 and audited (`kind: estop_state`, `result: refused`); nothing changes on that robot.
+
+**A local stop** (`latched: true, local_stop: true`, with an optional `reason`) is one held on the machine
+itself: `openvibe-node stop`, or a driver's own stop button through it. Only a release on that machine
+(`openvibe-node resume`) lifts it; the owner's clear does not. The Node keeps refusing motion (`nack`
+`local_stop`) and reports the latch again after the owner's clear, which latches the robot again. Bot keeps
+`local` and `reason` (plain text, at most 120 characters) in `device_estop`, and the panel says the robot is
+stopped on the robot and holds back its Clear button until the device reports the release. After the release
+(`latched: false`) Bot's own latch still waits for the owner: two keys, the robot's and the owner's.
 
 ### Examples
 

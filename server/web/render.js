@@ -351,7 +351,9 @@ function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs
     const widgets = (profile.widgets || []).map((w, i) => ({ w, i }))
         .sort((a, b) => (a.w.order != null ? a.w.order : 1e9 + a.i) - (b.w.order != null ? b.w.order : 1e9 + b.i))
         .map(({ w }) => renderWidget(w, { profile, allowed_commands, signaling_url }));
-    const estop = ESTOP_ROLES.has(role) ? `<button type="button" class="estop" data-estop>${icon('stop')}<span>E-stop</span></button>` : '';
+    // A framed watcher may take the controls with Drive; its e-stop waits, hidden, for an owner's or operator's join.
+    const estop = ESTOP_ROLES.has(role) ? `<button type="button" class="estop" data-estop>${icon('stop')}<span>E-stop</span></button>`
+        : (embed && role === 'watcher' ? `<button type="button" class="estop" data-estop hidden>${icon('stop')}<span>E-stop</span></button>` : '');
     const clear = role === 'owner' ? `<button type="button" class="estop-clear" data-estop-clear${latched ? '' : ' hidden'}>Clear e-stop</button>` : '';
     const body = `<header class="estop-banner" data-estop-banner data-latched="${latched}">
 ${embed ? '' : topbar(`<span class="crumb">${esc(robot.name)}</span>`)}
@@ -363,7 +365,7 @@ ${embed ? '' : topbar(`<span class="crumb">${esc(robot.name)}</span>`)}
 <p class="meta"><span class="pill online" data-online-pill data-state="connecting"><span class="dot"></span><span data-online-label>Connecting…</span></span> <span class="pill">${esc(profile.name || robot.profile_id)}</span> <span class="pill role" data-role-label>${esc(ROLE_LABEL[role] || role)}</span></p>
 ${turnStrip(robot, role)}
 </div>
-${embed && role === 'watcher' && !signedIn ? `<p class="embed-sign-in">${outLink(`/panel/${robot.id}`, 'Sign in to control')}</p>` : ''}
+${embed && role === 'watcher' && !signedIn ? `<p class="embed-sign-in" data-drive-bar><button type="button" class="button primary" data-drive>${icon('gamepad')}<span>Drive</span></button> ${outLink(`/panel/${robot.id}`, 'Open on openvibe.bot')}</p>` : ''}
 <p class="notice" data-notice role="alert" hidden></p>
 <div class="widgets">
 ${widgets.join('\n')}
@@ -371,6 +373,19 @@ ${widgets.join('\n')}
 ${role === 'owner' && !embed ? `<div class="owner-settings">${localProfileForm(robot, profile, profileForm)}${embedForm(robot)}${streamingForm(robot, streaming)}${people ? peopleCard(robot, people) : ''}</div>` : ''}
 </main>`;
     return page(robot.name, body, { scripts: ['/panel/panel.js'], bodyClass: embed ? 'embed-page' : 'panel-page' });
+}
+
+/**
+ * The Drive popup (/panel/:id/drive): first-party, so it has the openvibe.bot session the frame cannot see. Its script
+ * (public/drive.js) mints a one-time control ticket and hands it to the panel that opened it, then closes.
+ */
+function renderDrivePage({ robot }) {
+    const body = `<main class="page drive-page" data-drive-page data-robot-id="${esc(robot.id)}">
+<div class="card"><h1>${esc(robot.name)}</h1>
+<p data-drive-status role="status">Connecting the panel…</p>
+<p>${outLink(`/panel/${robot.id}`, 'Open the full panel instead')}</p></div>
+</main>`;
+    return page(`Drive ${robot.name}`, body, { scripts: ['/panel/drive.js'], bodyClass: 'drive-popup' });
 }
 
 /** The framed 403: no robot data, only a way out to openvibe.bot (where signing in may grant access). */
@@ -441,4 +456,4 @@ function renderPairingPage({ robot, pairing, profile = null }) {
     return page(`Pair ${robot.name}`, body, { scripts: ['/panel/panel.js'] });
 }
 
-module.exports = { page, renderPanel, renderEmbedRefused, renderWidget, renderRobotsPage, renderPairingPage, camerasOf, esc };
+module.exports = { page, renderPanel, renderEmbedRefused, renderDrivePage, renderWidget, renderRobotsPage, renderPairingPage, camerasOf, esc };

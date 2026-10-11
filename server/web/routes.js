@@ -36,7 +36,7 @@ const { getProfile, listProfiles } = require('../profiles');
 const { frameAncestors } = require('../config');
 const { BotError } = require('../util');
 const kits = require('../kits');
-const { renderPanel, renderEmbedRefused, renderRobotsPage, renderPairingPage } = require('./render');
+const { renderPanel, renderEmbedRefused, renderDrivePage, renderRobotsPage, renderPairingPage } = require('./render');
 const { renderDocsIndex, renderDriversPage, renderProfilesPage } = require('./docs');
 const { checkProfile } = require('../profiles');
 const { renderHome, HOME_CSP } = require('./home');
@@ -84,6 +84,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     const asset = (file, type) => (req, res) => { res.setHeader('Cache-Control', 'no-cache'); res.type(type).sendFile(path.join(PUBLIC, file)); };
     r.get('/panel/panel.js', asset('panel.js', 'application/javascript'));
     r.get('/panel/panel.css', asset('panel.css', 'text/css'));
+    r.get('/panel/drive.js', asset('drive.js', 'application/javascript'));
 
     const requireUser = (req) => {
         if (!req.viewer) throw new BotError(401, 'bot.sign_in', 'sign in first');
@@ -408,6 +409,35 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         const local = role === 'owner' ? await domain.robots.localProfile(robot.id) : null;
         await sendPanel(res, robot, profile, role, 'page', true, { catalogueId: local ? local.source_profile_id : robot.profile_id });
     }));
+
+    // The embed's Drive (server/control-tickets.js): the popup page, first-party, signs in if it must and then mints a
+    // ticket for the panel that opened it. Someone with no way onto the robot is told so here, not at the socket.
+    r.get('/panel/:id/drive', page(async (req, res) => {
+        const me = requireUser(req);
+        const robot = await domain.robots.get(req.params.id);
+        if (!robot) throw new BotError(404, 'bot.robot_not_found', 'no such robot');
+        if (!await memberRole(robot, me)) throw new BotError(403, 'bot.not_an_operator', 'you have no access to drive this robot');
+        res.type('html').send(renderDrivePage({ robot: domain.present.robot(robot) }));
+    }));
+    // A fetch from the popup itself only: the session cookie is SameSite=Lax, and the origin is checked as well.
+    r.post('/panel/:id/ticket', ...manage, async (req, res, next) => {
+        res.setHeader('Cache-Control', 'no-store');
+        try {
+            const site = req.headers['sec-fetch-site'];
+            if (!sameOrigin(req) || (site && site !== 'same-origin')) throw new BotError(403, 'bot.forbidden', 'a ticket is minted only by openvibe.bot itself');
+            const me = requireUser(req);
+            const robot = await domain.robots.get(req.params.id);
+            if (!robot) throw new BotError(404, 'bot.robot_not_found', 'no such robot');
+            if (!await memberRole(robot, me)) throw new BotError(403, 'bot.not_an_operator', 'you have no access to drive this robot');
+            const t = hub && hub.issueControlTicket(me, robot.id);
+            if (!t) throw new BotError(503, 'bot.busy', 'try again in a moment');
+            res.json({ ticket: t.ticket, robot_id: robot.id, expires_in: t.expires_in });
+        } catch (e) {
+            if (e.status && e.code) return res.status(e.status).json({ code: e.code, detail: e.detail || e.code });
+            return next(e);
+        }
+        return undefined;
+    });
 
     // The embed's own CSP replaces the app's for this route only; it sets no cookie and needs none to watch.
     r.get('/panel/:id/embed', page(async (req, res) => {
