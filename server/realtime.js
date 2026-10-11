@@ -22,6 +22,7 @@
  * first result instead of reaching the device again.
  */
 const { WebSocketServer } = require('ws');
+const { createControlTickets, ticketFromProtocols, PROTOCOL: TICKET_PROTOCOL } = require('./control-tickets');
 const { capabilities, ids } = require('openvibe-contracts');
 const { json, iso, prefixedId } = require('./util');
 const { userPrincipal, verifyService, verifyNode, isNodeToken, PRINCIPAL_SUB, decodePayload } = require('./api/auth');
@@ -47,6 +48,7 @@ const isSubject = (v) => typeof v === 'string' && ids.isSubjectId('user', v);
 
 function createRealtime({ config, keys, userAuth, log = console, now = () => Date.now() }) {
     let domain = null;
+    const tickets = createControlTickets({ now });   // the embedded panel's Drive (server/control-tickets.js)
     const deviceConns = new Map();     // device_id → conn
     const subsByRobot = new Map();     // robot_id → Set<conn>
     const pendingCmds = new Map();     // device-facing command id (server-minted) → pending
@@ -56,7 +58,10 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     let closed = false;
 
     const deviceWss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024, perMessageDeflate: false });
-    const controlWss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024, perMessageDeflate: false });
+    // A socket that offers a control ticket gets the ticket protocol back (a browser drops a socket whose offered
+    // subprotocol is not answered); a plain one, none.
+    const controlWss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024, perMessageDeflate: false,
+        handleProtocols: (protocols) => (protocols.has(TICKET_PROTOCOL) ? TICKET_PROTOCOL : false) });
     const watchWss = new WebSocketServer({ noServer: true, maxPayload: WATCH_MAX_PAYLOAD, perMessageDeflate: false });
     const watchConns = new Set();      // every /watch socket, joined or not
     const watchersByAddr = new Map();  // client address → open /watch sockets
@@ -358,8 +363,12 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             await domain.audit.record({ robotId: String(msg.robot_id).slice(0, 64), deviceId: conn.device.id, operatorKind: 'device', kind: 'estop_state', value: { latched }, result: 'refused', reason: 'bot.forbidden' });
             return sendError(conn, 'bot.forbidden', 'this device is not attached to that robot');
         }
+        // local_stop: the latch is held on the machine itself (openvibe-node stop, a driver's own stop button), which
+        // only a release on the machine lifts; the owner's clear does not. Shown on the panel, never trusted for more.
+        const local = latched && msg.local_stop === true;
+        const reason = local && typeof msg.reason === 'string' ? msg.reason.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 120) || null : null;
         for (const robotId of msg.robot_id != null ? [msg.robot_id] : attached) {
-            conn.deviceEstop.set(robotId, { latched, at: iso(now()) });
+            conn.deviceEstop.set(robotId, { latched, local, reason, at: iso(now()) });
             if (latched) {
                 const robot = await domain.robots.get(robotId);
                 if (robot && !robot.estop_latched) {
@@ -376,7 +385,12 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         const cookie = parseCookies(req.headers.cookie)[ACCESS_COOKIE];
         if (cookie) { const claims = await userAuth.verify(cookie); const p = userPrincipal(claims); if (p) return p; }
         const token = bearer(req);
-        if (!token) return null;
+        if (!token) {
+            // The embedded panel's Drive: a one-time ticket, redeemed here and bound to one robot (checked at the join).
+            const offered = ticketFromProtocols(req.headers['sec-websocket-protocol']);
+            const redeemed = offered ? tickets.redeem(offered) : null;
+            return redeemed ? { ...redeemed.principal, ticketRobot: redeemed.robotId } : null;
+        }
         const payload = decodePayload(token);
         if (payload && typeof payload.sub === 'string' && PRINCIPAL_SUB.test(payload.sub)) {
             const r = await verifyService(token, tokenOpts());
@@ -391,7 +405,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
 
     function onControlSocket(ws, req, principal) {
         if (!principal) return ws.close(4002, 'sign in required');
-        const conn = { ws, seq: 0, principal, subject: principal.subject, robotId: null, role: null };
+        const conn = { ws, seq: 0, principal, subject: principal.subject, robotId: null, role: null, ticketRobot: principal.ticketRobot || null };
         ws.conn = conn;
         ws.on('message', (raw) => handleControlMessage(conn, raw).catch((e) => { log.warn(`[Bot] control: ${e.message}`); sendError(conn, e.code || 'bot.internal', e.detail || e.message); }));
         ws.on('close', () => unsubscribe(conn));
@@ -416,6 +430,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
 
     async function onJoin(conn, msg) {
         const robotId = String(msg.robot_id || '');
+        if (conn.ticketRobot && robotId !== conn.ticketRobot) return sendError(conn, 'bot.forbidden', 'this ticket is for another robot');
         const robot = await domain.robots.get(robotId);
         if (!robot) return sendError(conn, 'bot.robot_not_found', 'no such robot');
         let role = await domain.members.roleOf(robotId, conn.subject);
@@ -426,10 +441,13 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         subscribe(conn);
         const profileRow = await getProfile(domain.db, robot.profile_id, robot.profile_version);
         const profile = profileRow ? profileRow.profile : null;
+        // A socket opened with a ticket gets the next one, for its reconnect (the one it used is spent).
+        const next = conn.ticketRobot ? tickets.issue(conn.principal, robotId) : null;
         sendFrame(conn, 'joined', {
             robot: domain.present.robot(robot), role, profile,
             allowed_commands: domain.control.allowedFor(robot, role, profile),
             state: await robotState(robotId, conn.subject),
+            ...(next ? { ticket: next.ticket } : {}),
         });
     }
 
@@ -728,6 +746,8 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         bindDomain(d) { domain = d; },
         bindJobs(j) { jobs = j; },
         handleUpgrade, attachSim, detachSim,
+        /** A one-time ticket for the embedded panel's Drive (POST /panel/:id/ticket), or null. */
+        issueControlTicket(principal, robotId) { return tickets.issue(principal, robotId); },
         isOnline, deviceState, sendToDevice, sendToRobotDevices, broadcast, closeDevice, robotState, refreshConfig, pushEstop, closeWatchers, dropSubject, operatorCommand,
         // Real devices only: a simulator is not a machine anyone runs.
         onlineCount() { let n = 0; for (const c of deviceConns.values()) if (c.online && !c.sim) n++; return n; },

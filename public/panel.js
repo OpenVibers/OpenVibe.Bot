@@ -22,7 +22,10 @@
  *             URL is left as the server drew it
  *
  * A watcher (data-role="watcher": the embed's anonymous, read-only view) joins on /watch instead and only paints
- * the state it is sent: no command, e-stop or clear frame is ever sent from it.
+ * the state it is sent: no command, e-stop or clear frame is ever sent from it. Its Drive button opens
+ * /panel/:id/drive, a first-party popup with the openvibe.bot session the frame cannot see; the popup posts back a
+ * one-time ticket (same origin only), and the panel re-joins on /control offering it as a subprotocol. Each join
+ * made that way carries the next ticket, so a dropped socket reconnects; when none is left it watches again.
  *
  * Also on the pairing page: [data-copy] copies the installer command, and [data-pair-robot] joins the robot on
  * /control (the owner's own, read-only use of it) to flip "Waiting for the device." when the device connects.
@@ -75,7 +78,9 @@
     const main = document.getElementById('panel');
     if (!main) return;
     const ROBOT_ID = main.dataset.robotId;
-    const WATCHER = main.dataset.role === 'watcher';
+    let watcher = main.dataset.role === 'watcher';
+    let ticket = null;        // the next control ticket (the embed's Drive), spent by the connect that offers it
+    let driving = false;      // joined /control with a ticket
     const HOLD_MS = Number(main.dataset.holdMs) || 150;
     const MIN_GAP_MS = 40;        // a moving stick sends at most this often between the hold re-sends
     const STICK_DEADZONE = 0.12;  // touch joystick, fraction of its radius
@@ -99,7 +104,7 @@
     }
     function raw(frame) {
         if (!ws || ws.readyState !== WebSocket.OPEN) return false;
-        if (WATCHER && frame.type !== 'join') return false;   // /watch is read-only
+        if (watcher && frame.type !== 'join') return false;   // /watch is read-only
         ws.send(JSON.stringify({ v: 1, ...frame }));
         return true;
     }
@@ -416,7 +421,7 @@
                 if (PAD_DPAD[b]) keyPress(PAD_DPAD[b], `pad:${b}`);
                 else if (b === 0) { pad.tone = $$('[data-tone]').find((el) => !el.disabled) || null; if (pad.tone) pressTone(pad.tone); }
                 else if (b === 1) { stopDrive(); pad.reset(); }     // a stick still pushed does not drive on
-                else if (b === 9 && $('[data-estop]')) estop();
+                else if (b === 9 && $('[data-estop]:not([hidden])')) estop();
             }
             for (const b of pad.down) if (!now.has(b)) {
                 if (PAD_DPAD[b]) keyRelease(PAD_DPAD[b], `pad:${b}`);
@@ -651,15 +656,26 @@
     function paint(state) {
         if (!state) return;
         const latched = !!(state.estop && state.estop.latched);
+        // The robot's own stop (openvibe-node stop, or its driver's stop button) holds until it is released on the
+        // robot: clearing here cannot lift it, so the button waits and the note says where to release it.
+        const held = !!(state.device_estop && state.device_estop.latched && state.device_estop.local);
         const banner = $('[data-estop-banner]');
-        if (banner) banner.dataset.latched = String(latched);
+        if (banner) banner.dataset.latched = String(latched || held);
         const label = $('[data-estop-state]');
-        if (label) label.textContent = latched ? 'E-stop latched' : 'E-stop clear';
+        if (label) label.textContent = held ? 'Stopped on the robot' : latched ? 'E-stop latched' : 'E-stop clear';
         const note = $('.estop-note');
-        if (note) note.textContent = latched ? ' — the robot stays still until the owner clears it.' : '';
+        if (note) {
+            const why = held && state.device_estop.reason ? ` (${state.device_estop.reason})` : '';
+            note.textContent = held ? ` — its local stop${why} holds until it is released on the robot (openvibe-node resume); then the owner clears it here.`
+                : latched ? ' — the robot stays still until the owner clears it.' : '';
+        }
         const clear = $('[data-estop-clear]');
-        if (clear) clear.hidden = !latched;
-        if (latched) releaseAll();
+        if (clear) {
+            clear.hidden = !latched;
+            clear.disabled = held;
+            clear.title = held ? 'Release the stop on the robot first' : '';
+        }
+        if (latched || held) releaseAll();
         setOnline(state.online ? 'online' : 'offline', state.online ? 'Online' : 'Device offline');
         main.dataset.deviceOnline = String(!!state.online);
         if (state.telemetry) lastTelemetryAt = performance.now();
@@ -706,6 +722,12 @@
         if (m.type === 'joined') {
             joined = true; retry = 0;
             allowed = m.allowed_commands || [];
+            if (m.ticket) ticket = m.ticket;
+            if (driving) {
+                const label = $('[data-role-label]');
+                if (label && m.role) label.textContent = { owner: 'Owner', operator: 'Operator', viewer: 'Viewer', queue: 'In the queue' }[m.role] || m.role;
+                for (const el of $$('[data-estop]')) el.hidden = !(m.role === 'owner' || m.role === 'operator');
+            }
             notice('');
             enableControls();
             paint(m.state);
@@ -723,7 +745,16 @@
     }
 
     function connect() {
-        ws = new WebSocket(wsUrl(WATCHER ? '/watch' : '/control'));
+        const path = watcher ? '/watch' : '/control';
+        if (driving && ticket) {
+            ws = new WebSocket(wsUrl(path), ['ov.ticket', `ov.ticket.${ticket}`]);
+            ticket = null;
+        } else if (driving) {
+            stopDriving('Press Drive to take the controls again.');
+            ws = new WebSocket(wsUrl('/watch'));
+        } else {
+            ws = new WebSocket(wsUrl(path));
+        }
         ws.onopen = () => raw({ type: 'join', robot_id: ROBOT_ID });
         ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch { return; } onFrame(m); };
         ws.onclose = (e) => {
@@ -732,10 +763,42 @@
             joined = false;
             enableControls();
             setOnline('disconnected', 'Reconnecting…');
+            if (e.code === 4002 && driving) { stopDriving('Press Drive to take the controls again.'); setTimeout(connect, 0); return; }
             if (e.code === 4002) { setOnline('disconnected', 'Signed out'); notice('Sign in again to drive this robot.'); return; }
             if (!gone) setTimeout(connect, Math.min(10000, 500 * 2 ** retry++));
         };
     }
+    // ── The embed's Drive ─────────────────────────────────────────────────────────────────────────────
+    function stopDriving(text) {
+        driving = false; watcher = true; ticket = null;
+        for (const el of $$('[data-estop]')) el.hidden = true;
+        const label = $('[data-role-label]');
+        if (label) label.textContent = 'Watching';
+        const bar = $('[data-drive-bar]');
+        if (bar) bar.hidden = false;
+        if (text) notice(text);
+    }
+    let popup = null;
+    for (const btn of $$('[data-drive]')) {
+        btn.addEventListener('click', () => {
+            popup = window.open(`/panel/${encodeURIComponent(ROBOT_ID)}/drive`, 'ov-bot-drive', 'popup,width=440,height=560');
+            if (!popup) window.open(`/panel/${encodeURIComponent(ROBOT_ID)}`, '_blank', 'noopener');
+        });
+    }
+    window.addEventListener('message', (e) => {
+        // Only the popup this panel opened, on this origin, for this robot.
+        if (e.origin !== location.origin || !popup || e.source !== popup) return;
+        const d = e.data || {};
+        if (d.type !== 'ov-bot-ticket' || d.robot_id !== ROBOT_ID || typeof d.ticket !== 'string') return;
+        ticket = d.ticket; driving = true; watcher = false; gone = false;
+        const bar = $('[data-drive-bar]');
+        if (bar) bar.hidden = true;
+        notice('');
+        if (ws) { ws.onclose = null; try { ws.close(); } catch { /* already closed */ } }
+        releaseAll(); joined = false; enableControls();
+        connect();
+    });
+
     enableControls();
     connect();
 })();
