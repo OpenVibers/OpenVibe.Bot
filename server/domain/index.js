@@ -50,7 +50,7 @@ const isCodeShape = (s) => /^[0-9A-HJKMNP-TV-Z]{8}$/.test(s);
 
 // The installer driver a robot's profile needs (OpenVibe.Node install/install.sh --driver). Simulated,
 // camera and unknown profiles get `none`, the dry-run plugin, which is also the installer's default.
-const DRIVER_BY_PROFILE = Object.freeze({ 'adeept.adr036': 'adeept', 'adeept.adr036.mecanum': 'adeept-mecanum', cozmo: 'cozmo' });
+const DRIVER_BY_PROFILE = Object.freeze({ 'adeept.adr036': 'adeept', 'adeept.adr036.mecanum': 'adeept-mecanum', cozmo: 'cozmo', looi: 'looi' });
 const driverForProfile = (profileId) => (Object.hasOwn(DRIVER_BY_PROFILE, profileId) ? DRIVER_BY_PROFILE[profileId] : 'none');
 
 const clampNum = (v, lo, hi, d = 0) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
