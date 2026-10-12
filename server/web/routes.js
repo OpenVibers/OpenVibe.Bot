@@ -104,7 +104,7 @@ const PANEL_CSP = ["default-src 'self'", `script-src 'self' ${PANEL_SCRIPT_SRC}`
 const embedCsp = (config) => ["default-src 'self'", `script-src 'self' ${PANEL_SCRIPT_SRC}`, `connect-src 'self' ${PANEL_CONNECT_SRC}`,
     `frame-ancestors ${frameAncestors(config)}`, "object-src 'none'", "base-uri 'self'"].join('; ');
 
-function createWebRoutes(config, { domain = null, sim = null, onvif = null, limits = null, identity = null, hub = null, log = console } = {}) {
+function createWebRoutes(config, { domain = null, sim = null, onvif = null, limits = null, identity = null, hub = null, log = console, releaseLastmod } = {}) {
     const r = express.Router();
     // The public front page is crawlable; sign-in, the API and every signed-in or per-robot page are not.
     r.get('/robots.txt', (req, res) => res.type('text/plain').send(['User-agent: *', 'Allow: /$', 'Disallow: /auth/', 'Disallow: /api/',
@@ -113,7 +113,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     r.get('/install', (req, res) => res.redirect(302, config.installer.sourceUrl));
     // The sitemap lists every public GET page (openvibe-shared/seo); robots.txt already names it.
     r.get('/sitemap.xml', (req, res) => {
-        res.type('application/xml').send(seo.sitemapXml(PUBLIC_PAGES.map((p) => ({ loc: `${config.baseUrl}${p}` }))));
+        res.type('application/xml').send(seo.sitemapXml(PUBLIC_PAGES.map((p) => ({ loc: `${config.baseUrl}${p}`, lastmod: releaseLastmod }))));
     });
     // /llms.txt and /llms-full.txt (llmstxt.org, openvibe-shared/seo): the public pages as a plain-text map for
     // language-model crawlers. Only the pages above; the signed-in pages, the API and /internal are not listed.

@@ -23,6 +23,8 @@ OpenVibe.Bot pairs a robot's machines, keeps their state and gates every operato
 - The robot's streaming and recording toggles, off by default: `media` records live sessions to OpenVibe.Media and `live` shows them on the owner's OpenVibe.Live channel. They live only on the robot's OpenRestream stream (`recording_mode`, `mirror_to_live`); Bot stores no copy and the owner, not an operator, flips them (`GET`/`POST /api/v1/robots/:id/streaming`).
 - Dispatching `platform.job@1` jobs to a paired Node over `/device` (`server/jobs/index.js` over `server/jobs/dispatch.js`; the internal `bot.job.dispatch` API is `POST /api/v1/jobs`, `POST /jobs/:id/cancel`, `GET /jobs/:id`) and metering them per wall-clock second (`run_jobs`, `run_usage_outbox`; docs/protocol.md §1.2).
 
+Sitemap entries use the release commit time for these code-backed pages.
+
 ## Does not own
 
 - Identity, subjects and tokens (OpenVibe.Network) and the robot's record on Network.
