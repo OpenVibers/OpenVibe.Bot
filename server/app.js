@@ -134,7 +134,7 @@ function createApp(opts = {}) {
     { const legal = require('openvibe-shared/legal');
       app.get(legal.PATHS, (req, res, next) => { res.setHeader('Content-Security-Policy', HOME_CSP); next(); }, legal.handler({ id: 'bot', service: 'bot', host: 'openvibe.bot', name: 'OpenVibe.Bot', profile: 'games' })); }
     app.use(viewerMiddleware(userAuth));
-    app.use(createWebRoutes(config, { domain, sim, onvif, limits, identity, hub, log }));
+    app.use(createWebRoutes(config, { domain, sim, onvif, limits, identity, hub, log, releaseLastmod: release.full().released_at === release.full().booted_at ? undefined : release.full().released_at }));
 
     app.use((req, res) => {
         if (req.path.startsWith('/api/') || req.path.startsWith('/internal/')) return http.sendProblem(res, 404, 'not_found', { ctx: req.ov });

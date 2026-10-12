@@ -3,6 +3,17 @@
 // the web app manifest and the browser-facing 404. Bot serves them itself now, and the nginx vhost no longer
 // points at a Sites root.
 const assert = require('assert');
+
+function assertSitemapLastmods(xml, tag = 'url') {
+    const entries = [...xml.matchAll(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, 'g'))];
+    for (const [, body] of entries) {
+        const match = /<lastmod>(\d{4}-\d{2}-\d{2})<\/lastmod>/.exec(body);
+        assert.ok(match, body);
+        assert.strictEqual(new Date(match[1]).toISOString().slice(0, 10), match[1]);
+    }
+    return entries;
+}
+
 const fs = require('fs');
 const path = require('path');
 const { boot, check, done } = require('./helpers/app');
@@ -34,6 +45,7 @@ const { boot, check, done } = require('./helpers/app');
         for (const p of ['/', '/install', '/terms', '/privacy', '/dmca']) {
             assert.ok(xml.includes(`<loc>http://bot.test${p}</loc>`), `sitemap lists ${p}`);
         }
+        assert.ok(assertSitemapLastmods(xml).length >= 5);
     });
 
     await check('GET /favicon.ico: the app icon as SVG (browsers ask for it even on a 404 page)', async () => {
