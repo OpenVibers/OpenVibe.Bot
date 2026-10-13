@@ -37,7 +37,7 @@ const allowedFor = (profile, role) => [...(DEFAULT_ALLOW[role] || []).filter((k)
             assert.ok(!html(role).includes('data-estop>') && !html(role).includes('data-estop-clear'), `${role} sees an e-stop button`);
             assert.ok(html(role).includes('data-estop-banner data-latched="true"'), `${role} does not see the latched banner`);
         }
-        assert.match(renderWidget(p.widgets[0], { profile: p, allowed_commands: [] }), /disabled/);
+        assert.match(renderWidget(p.widgets.find((w) => w.command), { profile: p, allowed_commands: [] }), /disabled/);
     });
 
     await check('one camera tile per camera the profile lists, each the placeholder with its shape', () => {
@@ -45,11 +45,13 @@ const allowedFor = (profile, role) => [...(DEFAULT_ALLOW[role] || []).filter((k)
         for (const p of profiles.filter((x) => x.widgets.some((w) => w.type === 'camera'))) {
             const html = renderPanel({ robot: robotFor(p), profile: p, role: 'owner', allowed_commands: allowedFor(p, 'owner') });
             assert.strictEqual(tiles(html), camerasOf(p).length, p.id);
-            assert.ok(html.includes('No live video right now.'), p.id);
+            // A simulated rover's camera is drawn in the page (public/sim-view.js); a real one waits for video.
+            if (p.mapping.driver === 'sim') assert.ok(html.includes('data-sim-camera') && html.includes('The rover is starting.') && html.includes('/panel/sim-view.js'), p.id);
+            else assert.ok(html.includes('No live video right now.') && !html.includes('data-sim-camera') && !html.includes('sim-view.js'), p.id);
             if (p.camera && p.camera.resolution) assert.ok(html.includes(`data-resolution="${p.camera.resolution}"`), p.id);
             assert.doesNotMatch(html, /<video|whip_url|publish_key/, `${p.id}: no stream address on the page`);
         }
-        const p = profiles.find((x) => x.id === 'sim.rover');
+        const p = profiles.find((x) => x.id === 'adeept.adr036');
         const two = { ...p, camera: [{ name: 'Front', transport: 'whip', resolution: '640x360' }, { name: 'Arm', transport: 'whip', resolution: '320x240' }] };
         const html = renderPanel({ robot: robotFor(two), profile: two, role: 'owner', allowed_commands: [] });
         assert.strictEqual(tiles(html), 2);
@@ -62,7 +64,9 @@ const allowedFor = (profile, role) => [...(DEFAULT_ALLOW[role] || []).filter((k)
     });
 
     await check('a live OpenRestream session rides on the camera tile as its signaling URL, escaped; none given, no attribute', () => {
-        const p = profiles.find((x) => x.id === 'sim.rover');
+        const sim = profiles.find((x) => x.id === 'sim.rover');
+        assert.ok(!renderPanel({ robot: robotFor(sim), profile: sim, role: 'owner', allowed_commands: [], signaling_url: 'wss://x/w/1' }).includes('data-signaling-url'), 'a simulated camera never plays a stream');
+        const p = profiles.find((x) => x.id === 'adeept.adr036');
         const url = 'wss://ingest.openre.stream/w/ses_01J5Z000000000000000000000';
         const owner = renderPanel({ robot: robotFor(p), profile: p, role: 'owner', allowed_commands: allowedFor(p, 'owner'), signaling_url: url });
         assert.ok(owner.includes(`data-signaling-url="${url}"`), 'the owner\'s tile carries the URL');
@@ -191,7 +195,7 @@ const allowedFor = (profile, role) => [...(DEFAULT_ALLOW[role] || []).filter((k)
     });
 
     await check('a live OpenRestream WebRTC session: the owner\'s and a member\'s panel carry its signaling URL, never the key', async () => {
-        const { robot, pairing } = await t.robot(alex, { name: 'Live cam' });
+        const { robot, pairing } = await t.robot(alex, { name: 'Live cam', profile_id: 'adeept.adr036' });
         const paired = await t.call('POST', '/api/v1/pair', { token: null, body: { robot: robot.id, code: pairing.code } });
         assert.strictEqual(paired.status, 201, paired.text);
         const streamId = (await t.db.maybe('SELECT openre_stream_id FROM robots WHERE id = $1', [robot.id])).openre_stream_id;

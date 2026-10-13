@@ -1,19 +1,30 @@
 {
   "id": "sim.rover",
-  "version": 1,
+  "version": 2,
   "name": "Simulated rover",
   "vendor": "OpenVibe",
   "kind": "server",
-  "description": "The browser simulator on the openvibe.bot home: a differential-drive rover with a camera, driven by the same gate and profile as real hardware.",
-  "capabilities": ["drive.differential", "camera"],
+  "description": "A differential-drive rover in a small arena, simulated by OpenVibe.Bot (or in your browser at /try): a front camera, an ultrasonic range finder, three line sensors over a strip of tape, a battery, RGB headlights and a horn, driven through the same gate and profile as real hardware.",
+  "capabilities": ["drive.differential", "camera", "sensor.ultrasonic", "sensor.line", "battery", "lights.rgb", "speaker.horn"],
   "mapping": { "driver": "sim" },
   "commands": {
-    "drive": { "axes": { "throttle": [-1, 1], "steer": [-1, 1] } }
+    "drive": { "axes": { "throttle": [-1, 1], "steer": [-1, 1] } },
+    "actuator": {
+      "names": {
+        "headlights": { "type": "rgb" },
+        "horn": { "type": "tone", "hz": [220, 880] }
+      }
+    }
   },
   "widgets": [
-    { "type": "drive", "capability": "drive.differential", "label": "Drive", "order": 1, "command": { "kind": "drive" } },
-    { "type": "camera", "capability": "camera", "label": "Camera", "order": 2 },
-    { "type": "latency", "label": "Latency", "order": 3 }
+    { "type": "camera", "capability": "camera", "label": "Front camera", "order": 1 },
+    { "type": "drive", "capability": "drive.differential", "label": "Drive", "order": 2, "command": { "kind": "drive" } },
+    { "type": "telemetry", "capability": "sensor.ultrasonic", "label": "Distance ahead", "order": 3 },
+    { "type": "telemetry", "capability": "sensor.line", "label": "Line sensors", "order": 4 },
+    { "type": "battery", "capability": "battery", "label": "Battery", "order": 5 },
+    { "type": "lights", "capability": "lights.rgb", "label": "Headlights", "order": 6, "command": { "kind": "actuator", "names": ["headlights"] } },
+    { "type": "horn", "capability": "speaker.horn", "label": "Horn", "order": 7, "command": { "kind": "actuator", "names": ["horn"] } },
+    { "type": "latency", "label": "Latency", "order": 8 }
   ],
   "camera": { "transport": "whip", "resolution": "640x360" },
   "limits": { "max_speed": 1, "max_turn": 1, "max_command_ms": 300, "heartbeat_ms": 1000 }

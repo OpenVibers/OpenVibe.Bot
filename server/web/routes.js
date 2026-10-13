@@ -32,7 +32,7 @@ const path = require('path');
 const express = require('express');
 const seo = require('openvibe-shared/seo');
 const appIcon = require('openvibe-shared/app-icon');
-const { getProfile, listProfiles } = require('../profiles');
+const { getProfile, listProfiles, loadProfiles } = require('../profiles');
 const { frameAncestors } = require('../config');
 const { BotError } = require('../util');
 const kits = require('../kits');
@@ -43,11 +43,13 @@ const { renderHome, HOME_CSP } = require('./home');
 
 const PUBLIC = path.join(__dirname, '..', '..', 'public');
 const HOLD_RESEND_MS = 150;
+// The rover /try drives, as shipped (server/profiles/sim.rover.json, validated).
+const TRY_PROFILE = loadProfiles().get('sim.rover');
 // The tagline stated for openvibe.bot (openvibe-contracts manifests/services/bot.json site.tagline).
 const SITE_TAGLINE = 'An open control panel for robots';
 // Every public GET page, for the sitemap. The interactive pages (/robots, /pair/, /panel/) need a session and
 // are Disallowed in robots.txt; the API and sign-in are not pages.
-const PUBLIC_PAGES = ['/', '/install', '/docs', '/docs/drivers', '/docs/profiles', '/terms', '/privacy', '/dmca'];
+const PUBLIC_PAGES = ['/', '/try', '/install', '/docs', '/docs/drivers', '/docs/profiles', '/terms', '/privacy', '/dmca'];
 // The public pages an AI crawler can read, for /llms.txt and /llms-full.txt (llmstxt.org). Same pages as the
 // sitemap minus /install (a 302 to the installer script, not a page); no signed-in or per-robot page, nothing
 // under the API or /internal. `note` is the one-line llms.txt entry, `text` the page's full text in llms-full.txt,
@@ -60,6 +62,11 @@ const LLMS_PAGES = [
         path: '/', title: 'OpenVibe.Bot — drive your robot from any browser',
         note: 'What Bot is, and how a robot goes from added to driving.',
         text: 'OpenVibe.Bot is the open control panel for robots. Add a robot and pick its profile, pair it by pasting one command on the robot\'s computer, then drive it from any browser. The panel lays its controls out from the robot\'s profile: a touch joystick, the keyboard, a gamepad, buttons and sliders, with a latency meter. Every command passes one gate with roles, per-robot limits, cooldowns and a turn budget, and a latched emergency stop that only the owner clears; a stop pressed on the robot itself holds until it is released there. An owner can add people by username as operators or viewers, or open a queue where visitors take turns. A simulated rover runs inside Bot, so the whole panel can be tried before any hardware exists.',
+    },
+    {
+        path: '/try', title: 'Try the panel with a simulated rover',
+        note: 'Drive a simulated rover in the browser, no account and no hardware.',
+        text: 'A rover simulated in the visitor\'s own browser, driven through the same OpenVibe.Bot panel a paired robot gets: a touch joystick, the keyboard (W A S D or the arrows, Space to stop) or a gamepad, with the same command shaping, deadman and latched e-stop. It has a front camera drawn from its position in a small arena, an ultrasonic distance sensor, three line sensors over a strip of yellow tape, a battery, RGB headlights and a horn. Nothing pressed there moves real hardware, and nothing needs an account. The page ends with the way to a real robot: add one, pair its computer with one pasted command, and the same panel drives it.',
     },
     {
         path: '/docs', title: 'Build for OpenVibe.Bot',
@@ -140,6 +147,21 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     r.get('/panel/panel.js', asset('panel.js', 'application/javascript'));
     r.get('/panel/panel.css', asset('panel.css', 'text/css'));
     r.get('/panel/drive.js', asset('drive.js', 'application/javascript'));
+    r.get('/panel/sim-world.js', asset('sim-world.js', 'application/javascript'));
+    r.get('/panel/sim-view.js', asset('sim-view.js', 'application/javascript'));
+    r.get('/panel/try-device.js', asset('try-device.js', 'application/javascript'));
+
+    // /try: the real panel driving a rover simulated in the visitor's own browser (public/try-device.js), so anyone
+    // can try it with no account and no hardware (plan T15 "a simulated robot in the browser"). Nothing reaches the
+    // server after the page: no socket, no robot row, no limit to spend. The site-wide CSP holds (no outside source).
+    const tryAllowed = Object.keys(TRY_PROFILE.commands);
+    r.get('/try', (req, res) => {
+        res.setHeader('Cache-Control', 'public, max-age=300');
+        res.type('html').send(renderPanel({
+            robot: { id: 'try', name: 'Practice rover', profile_id: TRY_PROFILE.id, access_policy: 'private', estop: { latched: false } },
+            profile: TRY_PROFILE, role: 'owner', allowed_commands: tryAllowed, holdResendMs: HOLD_RESEND_MS, tryIt: true,
+        }));
+    });
 
     const requireUser = (req) => {
         if (!req.viewer) throw new BotError(401, 'bot.sign_in', 'sign in first');

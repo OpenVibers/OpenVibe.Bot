@@ -107,9 +107,11 @@ function samples(profile, kind, names) {
         assert.ok(p.limits.max_speed <= 0.5 && p.limits.max_command_ms <= 300, 'a desk robot starts slow, with short commands');
     });
 
-    await check('camera.onvif is PTZ only and sim.rover is drive + camera', () => {
+    await check('camera.onvif is PTZ only; sim.rover is a whole rover (drive, camera, range and line sensors, battery, headlights, horn)', () => {
         assert.deepStrictEqual(profiles.get('camera.onvif').capabilities.slice().sort(), ['camera', 'ptz']);
-        assert.deepStrictEqual(profiles.get('sim.rover').capabilities.slice().sort(), ['camera', 'drive.differential']);
+        assert.deepStrictEqual(profiles.get('sim.rover').capabilities.slice().sort(),
+            ['battery', 'camera', 'drive.differential', 'lights.rgb', 'sensor.line', 'sensor.ultrasonic', 'speaker.horn']);
+        assert.strictEqual(profiles.get('sim.rover').version, 2);
     });
 
     await check('relay.generic is the bare relay robot: buttons only, no drive, no hardware of its own', () => {

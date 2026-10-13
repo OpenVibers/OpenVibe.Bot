@@ -56,7 +56,7 @@ const icon = (name, cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24" ar
 const AXIS_ICONS = { throttle: ['down', 'up'], y: ['down', 'up'], steer: ['left', 'right'], x: ['left', 'right'], rotation: ['ccw', 'cw'], pan: ['left', 'right'], tilt: ['down', 'up'], zoom: ['minus', 'plus'] };
 const AXIS_NAME = { throttle: 'Forward / back', y: 'Forward / back', steer: 'Steer', x: 'Sideways', rotation: 'Turn on the spot', pan: 'Pan', tilt: 'Tilt', zoom: 'Zoom' };
 
-function page(title, body, { scripts = [], bodyClass = '' } = {}) {
+function page(title, body, { scripts = [], bodyClass = '', description = null, canonical = null } = {}) {
     return `<!doctype html>
 <html lang="en">
 <head>
@@ -64,7 +64,11 @@ function page(title, body, { scripts = [], bodyClass = '' } = {}) {
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#11151c">
-<title>${esc(title)} — OpenVibe.Bot</title>
+<title>${esc(title)} — OpenVibe.Bot</title>${description ? `
+<meta name="description" content="${esc(description)}">
+<meta property="og:title" content="${esc(title)} — OpenVibe.Bot">
+<meta property="og:description" content="${esc(description)}">` : ''}${canonical ? `
+<link rel="canonical" href="https://openvibe.bot${esc(canonical)}">` : ''}
 <link rel="stylesheet" href="/panel/panel.css">
 </head>
 <body${bodyClass ? ` class="${esc(bodyClass)}"` : ''}>
@@ -76,7 +80,7 @@ ${scripts.map((s) => `<script src="${esc(s)}" defer></script>`).join('\n')}
 }
 
 const disabledUnless = (ok) => (ok ? '' : ' disabled');
-const topbar = (crumb = '') => `<nav class="topbar"><a class="brand" href="/robots">${icon('robot')}<span>OpenVibe<b>.Bot</b></span></a>${crumb}</nav>`;
+const topbar = (crumb = '', home = '/robots') => `<nav class="topbar"><a class="brand" href="${esc(home)}">${icon('robot')}<span>OpenVibe<b>.Bot</b></span></a>${crumb}</nav>`;
 
 /** Hold buttons, one pair per axis: pressed sends the axis at its end of the range, released sends 0. */
 function axisButtons(axes, enabled) {
@@ -109,19 +113,23 @@ function drivePad(axes, enabled) {
         + `<button type="button" class="stop" data-stop${disabledUnless(enabled)}>${icon('square')}<span>Stop</span></button></div>`;
 }
 
+/** An actuator's name as a label: backpack_lights → Backpack lights. */
+const humanName = (name) => { const s = String(name).replace(/_/g, ' '); return s.charAt(0).toUpperCase() + s.slice(1); };
+
 /** One control per actuator the widget drives, by the actuator's declared type. */
 function actuatorControl(name, a, enabled) {
     const off = disabledUnless(enabled);
+    const label = humanName(name);
     if (a.type === 'number') {
         const [lo, hi] = a.range;
         const start = Math.min(hi, Math.max(lo, 0));
-        return `<label class="control slider"><span class="control-name">${esc(name)}</span> <input type="range" min="${esc(lo)}" max="${esc(hi)}" step="${esc((hi - lo) / 40)}" value="${esc(start)}" data-actuator="${esc(name)}"${off}></label>`;
+        return `<label class="control slider"><span class="control-name">${esc(label)}</span> <input type="range" min="${esc(lo)}" max="${esc(hi)}" step="${esc((hi - lo) / 40)}" value="${esc(start)}" data-actuator="${esc(name)}"${off}></label>`;
     }
     if (a.type === 'rgb') {
-        return `<div class="control colour"><label><span class="control-name">${esc(name)}</span> <input type="color" value="#ffffff" data-rgb="${esc(name)}"${off}></label>`
+        return `<div class="control colour"><label><span class="control-name">${esc(label)}</span> <input type="color" value="#ffffff" data-rgb="${esc(name)}"${off}></label>`
             + ` <button type="button" class="quiet" data-rgb-off="${esc(name)}"${off}>Off</button></div>`;
     }
-    if (a.type === 'tone') return `<button type="button" class="hold tone" data-tone="${esc(name)}"${off}>${icon('horn')}<span>${esc(name)}</span></button>`;
+    if (a.type === 'tone') return `<button type="button" class="hold tone" data-tone="${esc(name)}"${off}>${icon('horn')}<span>${esc(label)}</span></button>`;
     return `<label class="control toggle"><input type="checkbox" data-bool="${esc(name)}"${off}> <span class="control-name">${esc(name)}</span></label>`;
 }
 
@@ -129,6 +137,14 @@ function actuatorControl(name, a, enabled) {
  * The cameras a profile lists: `camera` is one camera ({ transport, resolution, name? }) or a list of them.
  * A profile with a camera widget and no camera entry still gets one slot.
  */
+const isSim = (profile) => !!(profile && profile.mapping && profile.mapping.driver === 'sim');
+
+/** The panel's scripts: the client, plus the shared arena and its camera for a simulated robot (and /try's local rover). */
+function panelScripts(profile, local = false) {
+    if (!isSim(profile)) return ['/panel/panel.js'];
+    return ['/panel/sim-world.js', ...(local ? ['/panel/try-device.js'] : []), '/panel/panel.js', '/panel/sim-view.js'];
+}
+
 function camerasOf(profile = {}) {
     const c = profile.camera;
     const list = Array.isArray(c) ? c.filter((x) => x && typeof x === 'object') : (c && typeof c === 'object' ? [c] : []);
@@ -142,16 +158,18 @@ function camerasOf(profile = {}) {
  */
 function cameraTiles(w, profile, signaling_url = null, pointEnabled = false) {
     const all = camerasOf(profile).map((c, i) => ({ c, i }));
+    // A simulated robot's camera is drawn in the page from its pose (public/sim-view.js), never streamed.
+    const simulated = isSim(profile);
     const pick = w.camera != null ? all.filter(({ c, i }) => c.name === w.camera || i === w.camera) : all;
     return (pick.length ? pick : all).map(({ c, i }) => {
         const res = typeof c.resolution === 'string' && /^\d+x\d+$/.test(c.resolution) ? c.resolution : '';
         const title = c.name || (all.length > 1 ? `Camera ${i + 1}` : '');
         const caption = [title, res.replace('x', '×'), c.transport ? String(c.transport).toUpperCase() : ''].filter(Boolean).join(' · ');
-        return `<figure class="camera" data-camera="${esc(i)}"${res ? ` data-resolution="${esc(res)}"` : ''}${c.transport ? ` data-transport="${esc(c.transport)}"` : ''}`
-            + `${signaling_url ? ` data-signaling-url="${esc(signaling_url)}"` : ''}>`
+        return `<figure class="camera" data-camera="${esc(i)}"${res ? ` data-resolution="${esc(res)}"` : ''}${c.transport && !simulated ? ` data-transport="${esc(c.transport)}"` : ''}`
+            + `${simulated ? ' data-sim-camera' : signaling_url ? ` data-signaling-url="${esc(signaling_url)}"` : ''}>`
             + `<div class="camera-screen" data-camera-screen${pointEnabled ? ' data-video-click' : ''}>${icon('camera', 'icon camera-icon')}`
-            + '<p class="camera-title">No live video right now.</p>'
-            + '<p class="camera-sub">The camera shows here while the robot is online and sending video.</p></div>'
+            + `<p class="camera-title">${simulated ? 'The rover is starting.' : 'No live video right now.'}</p>`
+            + `<p class="camera-sub">${simulated ? 'Its camera shows here once the simulator is running.' : 'The camera shows here while the robot is online and sending video.'}</p></div>`
             + (caption ? `<figcaption>${esc(caption)}</figcaption>` : '')
             + '</figure>';
     }).join('');
@@ -345,7 +363,7 @@ function turnStrip(robot, role) {
     return `<div class="turn" data-turn hidden><span class="turn-state" data-turn-state></span><span class="turn-meta" data-turn-meta></span><form method="post" action="/robots/${esc(robot.id)}/queue/leave" data-turn-leave><button type="submit" class="quiet">Leave the queue</button></form></div>`;
 }
 
-function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs = 150, mode = 'page', signedIn = true, streaming = null, people = null, signaling_url = null, profileForm = {} }) {
+function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs = 150, mode = 'page', signedIn = true, streaming = null, people = null, signaling_url = null, profileForm = {}, tryIt = false }) {
     const embed = mode === 'embed';
     const latched = !!(robot.estop && robot.estop.latched);
     const widgets = (profile.widgets || []).map((w, i) => ({ w, i }))
@@ -356,24 +374,51 @@ function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs
         : (embed && role === 'watcher' ? `<button type="button" class="estop" data-estop hidden>${icon('stop')}<span>E-stop</span></button>` : '');
     const clear = role === 'owner' ? `<button type="button" class="estop-clear" data-estop-clear${latched ? '' : ' hidden'}>Clear e-stop</button>` : '';
     const body = `<header class="estop-banner" data-estop-banner data-latched="${latched}">
-${embed ? '' : topbar(`<span class="crumb">${esc(robot.name)}</span>`)}
+${embed ? '' : tryIt ? topbar('<span class="crumb">Try the panel</span>', '/') : topbar(`<span class="crumb">${esc(robot.name)}</span>`)}
 <div class="estop-bar"><p class="estop-state" role="status" aria-live="assertive"><span class="estop-dot"></span><span data-estop-state>${latched ? 'E-stop latched' : 'E-stop clear'}</span><span class="estop-note">${latched ? ' — the robot stays still until the owner clears it.' : ''}</span></p>${clear}${estop}</div>
 </header>
-<main id="panel" tabindex="0" data-robot-id="${esc(robot.id)}" data-role="${esc(role)}" data-hold-ms="${esc(holdResendMs)}" data-allowed="${data(allowed_commands)}">
+<main id="panel" tabindex="0" data-robot-id="${esc(robot.id)}" data-role="${esc(role)}" data-hold-ms="${esc(holdResendMs)}" data-allowed="${data(allowed_commands)}"${tryIt ? ' data-transport="local"' : ''}>
 <div class="panel-head">
 <h1>${esc(robot.name)}</h1>
 <p class="meta"><span class="pill online" data-online-pill data-state="connecting"><span class="dot"></span><span data-online-label>Connecting…</span></span> <span class="pill">${esc(profile.name || robot.profile_id)}</span> <span class="pill role" data-role-label>${esc(ROLE_LABEL[role] || role)}</span></p>
 ${turnStrip(robot, role)}
 </div>
+${tryIt ? tryIntro() : ''}
 ${embed && role === 'watcher' && !signedIn ? `<p class="embed-sign-in" data-drive-bar><button type="button" class="button primary" data-drive>${icon('gamepad')}<span>Drive</span></button> ${outLink(`/panel/${robot.id}`, 'Open on openvibe.bot')}</p>` : ''}
 <p class="notice" data-device-fault role="status" hidden></p>
 <p class="notice" data-notice role="alert" hidden></p>
 <div class="widgets">
 ${widgets.join('\n')}
 </div>
-${role === 'owner' && !embed ? `<div class="owner-settings">${localProfileForm(robot, profile, profileForm)}${embedForm(robot)}${streamingForm(robot, streaming)}${people ? peopleCard(robot, people) : ''}</div>` : ''}
+${tryIt ? tryOutro(profile) : ''}${role === 'owner' && !embed && !tryIt ? `<div class="owner-settings">${localProfileForm(robot, profile, profileForm)}${embedForm(robot)}${streamingForm(robot, streaming)}${people ? peopleCard(robot, people) : ''}</div>` : ''}
 </main>`;
-    return page(robot.name, body, { scripts: ['/panel/panel.js'], bodyClass: embed ? 'embed-page' : 'panel-page' });
+    return page(tryIt ? 'Try the panel with a simulated rover' : robot.name, body, {
+        scripts: panelScripts(profile, tryIt), bodyClass: embed ? 'embed-page' : 'panel-page',
+        description: tryIt ? TRY_DESCRIPTION : null, canonical: tryIt ? '/try' : null,
+    });
+}
+
+const TRY_DESCRIPTION = 'Drive a simulated rover from your browser, no account and no hardware: the same OpenVibe.Bot panel, '
+    + 'safety gate and e-stop a real robot gets, with a live camera, a distance sensor, line sensors, headlights and a horn.';
+
+/** /try's opening lines: what this is, and that nothing here is real hardware. */
+function tryIntro() {
+    return `<section class="try-intro" aria-labelledby="try-h">
+<h2 id="try-h">Drive a rover, right here</h2>
+<p>This rover is simulated in your browser, so nothing you press moves real hardware. It goes through the same panel a paired robot gets: the same controls, the same limits, and an e-stop that holds until it is cleared.</p>
+<ul class="try-keys"><li><kbd>W A S D</kbd> or the arrows, or drag the joystick</li><li><kbd>Space</kbd> stops</li><li>Follow the yellow tape, or find the crates</li></ul>
+<p><button type="button" class="button quiet" data-try-reset>Back to the start</button></p>
+</section>`;
+}
+
+/** /try's closing card: from the simulator to a real robot, and the profile this panel was drawn from. */
+function tryOutro(profile) {
+    return `<section class="try-next card" aria-labelledby="try-next-h">
+<h2 id="try-next-h">Ready for a real one?</h2>
+<p>Add a robot, pair its computer with one pasted command, and this panel drives it. A Raspberry Pi rover, a Cozmo through a nearby computer, an ONVIF camera or a phone are all a few minutes away.</p>
+<p class="try-actions"><a class="button primary" href="/robots#add-robot">Add a robot</a> <a class="button quiet" href="/docs/profiles">How a profile draws this panel</a> <a class="button quiet" href="/docs/drivers">Write a driver</a></p>
+</section>
+<script type="application/json" id="try-profile">${JSON.stringify(profile).replace(/</g, '\\u003c')}</script>`;
 }
 
 /**
@@ -457,4 +502,4 @@ function renderPairingPage({ robot, pairing, profile = null }) {
     return page(`Pair ${robot.name}`, body, { scripts: ['/panel/panel.js'] });
 }
 
-module.exports = { page, renderPanel, renderEmbedRefused, renderDrivePage, renderWidget, renderRobotsPage, renderPairingPage, camerasOf, esc };
+module.exports = { page, renderPanel, panelScripts, isSim, TRY_DESCRIPTION, renderEmbedRefused, renderDrivePage, renderWidget, renderRobotsPage, renderPairingPage, camerasOf, esc };

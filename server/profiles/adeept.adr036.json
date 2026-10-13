@@ -12,7 +12,8 @@
     "speaker.horn",
     "sensor.ultrasonic",
     "sensor.line",
-    "battery"
+    "battery",
+    "camera"
   ],
   "mapping": {
     "driver": "pca9685",
@@ -38,11 +39,13 @@
     }
   },
   "widgets": [
+    { "type": "camera", "capability": "camera", "label": "Camera", "order": 0 },
     { "type": "drive", "capability": "drive.differential", "label": "Drive", "order": 1, "command": { "kind": "drive" } },
     { "type": "pan-tilt", "capability": "servo.pan_tilt", "label": "Pan / tilt", "order": 2, "command": { "kind": "actuator", "names": ["pan", "tilt"] } },
     { "type": "lights", "capability": "lights.rgb", "label": "Lights", "order": 3, "command": { "kind": "actuator", "names": ["lights"] } },
     { "type": "horn", "capability": "speaker.horn", "label": "Horn", "order": 4, "command": { "kind": "actuator", "names": ["buzzer"] } },
     { "type": "telemetry", "capability": "sensor.ultrasonic", "label": "Distance", "order": 5 },
+    { "type": "telemetry", "capability": "sensor.line", "label": "Line tracking", "order": 5 },
     { "type": "battery", "capability": "battery", "label": "Battery", "order": 6 },
     { "type": "latency", "label": "Latency", "order": 7 }
   ],

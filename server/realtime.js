@@ -45,6 +45,20 @@ function parseCookies(header) {
 }
 const bearer = (req) => { const h = String(req.headers.authorization || ''); return h.startsWith('Bearer ') ? h.slice(7).trim() : null; };
 const isSubject = (v) => typeof v === 'string' && ids.isSubjectId('user', v);
+// The keys the Node's drivers report a sensor capability under (the Adeept and Cozmo plugins: distance_cm, line).
+const SENSOR_KEYS = { ultrasonic: ['distance_cm'], line: ['line'], cliff: ['cliff', 'picked_up'], pickup: ['picked_up', 'pickup'] };
+const finite = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+const rgbOrNull = (c) => (c && typeof c === 'object' ? { r: finite(c.r), g: finite(c.g), b: finite(c.b) } : null);
+/** A simulated rover's view for a watcher: its pose, drive, lights and horn as numbers, nothing else. */
+function simView(sim) {
+    const drive = {};
+    for (const [k, v] of Object.entries(sim.drive && typeof sim.drive === 'object' ? sim.drive : {}).slice(0, 5)) drive[String(k).slice(0, 16)] = finite(v);
+    return {
+        pose: { x: finite(sim.pose.x), y: finite(sim.pose.y), heading: finite(sim.pose.heading) },
+        drive, headlights: rgbOrNull(sim.headlights),
+        horn: sim.horn && typeof sim.horn === 'object' ? { hz: finite(sim.horn.hz) } : null, bumped: !!sim.bumped,
+    };
+}
 
 function createRealtime({ config, keys, userAuth, log = console, now = () => Date.now() }) {
     let domain = null;
@@ -685,11 +699,16 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         if (robot && robot.access_policy === 'queue') state.queue = await domain.queue.state(robotId, subjectForQueue);
         return state;
     }
-    /** The telemetry keys a profile's readout widgets show (`telemetry` widgets, `sensor.<key>` capabilities). */
+    /**
+     * The telemetry keys a profile's readout widgets show (`telemetry` widgets, `sensor.<key>` capabilities): the
+     * capability's name, and the keys the Node's drivers report it under (public/panel.js SENSOR_KEYS).
+     */
     function readoutKeys(profile) {
         const keys = new Set();
         for (const w of (profile && profile.widgets) || []) {
-            if (w && w.type === 'telemetry' && typeof w.capability === 'string' && w.capability) keys.add(w.capability.replace(/^sensor\./, ''));
+            if (!w || w.type !== 'telemetry' || typeof w.capability !== 'string' || !w.capability) continue;
+            const name = w.capability.replace(/^sensor\./, '');
+            for (const k of [name, ...(SENSOR_KEYS[name] || [])]) keys.add(k);
         }
         return [...keys];
     }
@@ -702,11 +721,13 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         const sensors = t && t.sensors && typeof t.sensors === 'object' ? t.sensors : {};
         const picked = {};
         for (const k of readouts) if (Object.prototype.hasOwnProperty.call(sensors, k)) picked[k] = sensors[k];
+        // A simulated rover's pose and lights draw its camera (public/sim-view.js); a real device has no `sim`.
+        const sim = t && t.sim && typeof t.sim === 'object' && t.sim.pose ? simView(t.sim) : null;
         return {
             robot_id: state.robot_id, online: state.online,
             estop: { latched: !!(state.estop && state.estop.latched) },
             latency_ms: state.latency_ms, battery: state.battery,
-            telemetry: t ? { sensors: picked } : null,
+            telemetry: t ? { sensors: picked, ...(sim ? { sim } : {}) } : null,
         };
     }
     function broadcast(robotId) {

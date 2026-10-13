@@ -13,13 +13,19 @@
  *
  * No device row is written: the simulator's id is `dev_sim_<robot id>`, and a real device online for the same
  * robot takes precedence over it.
+ *
+ * The rover lives in the arena public/sim-world.js describes (the same module the browser draws its camera from):
+ * walls and crates stop it, and its telemetry carries what a real rover's would (`sensors.distance_cm`,
+ * `sensors.line`) plus `sim` ({ pose, drive, headlights, horn, bumped }) for the panel's simulated camera.
  */
 const { getProfile } = require('../profiles');
+const world = require('../../public/sim-world');
 
 const isSimProfile = (profile) => !!(profile && profile.mapping && profile.mapping.driver === 'sim');
 const BATTERY_FLOOR = 20;          // % the simulated pack never drains below
 const DRAIN_PER_S = 0.05;          // % per second while moving
-const EXISTS_EVERY = 20;           // telemetry ticks between checks that the robot still exists
+const EXISTS_EVERY = 20;           // telemetry frames between checks that the robot still exists
+const PHYSICS_MS = 50;             // the rover moves at 20 Hz; telemetry goes out at the hub's sample rate
 
 function createSimulator({ config, domain, hub, now = () => Date.now(), log = console }) {
     const sims = new Map();        // robot_id → sim
@@ -30,11 +36,11 @@ function createSimulator({ config, domain, hub, now = () => Date.now(), log = co
     function start(robot) {
         if (sims.has(robot.id)) return sims.get(robot.id);
         const device = { id: `dev_sim_${robot.id}`, robot_ids: [robot.id], kind: 'server', name: 'simulator' };
-        const sim = { robotId: robot.id, device, link: null, timers: [], stopTimer: null, estop: !!robot.estop_latched, drive: {}, other: {}, battery: 100, pose: { x: 0, y: 0, heading: 0 }, at: now(), ticks: 0 };
+        const sim = { robotId: robot.id, device, link: null, timers: [], stopTimer: null, estop: !!robot.estop_latched, drive: {}, other: {}, battery: 100, pose: { ...world.START }, bumped: false, headlights: null, horn: null, hornUntil: 0, at: now(), sentAt: 0, ticks: 0 };
         sims.set(robot.id, sim);
         connect(sim);
         sim.timers.push(every(heartbeatMs, () => sim.link && sim.link.deliver({ type: 'heartbeat', t: now(), rtt_ms: 1 })));
-        sim.timers.push(every(telemetryMs, () => tick(sim)));
+        sim.timers.push(every(PHYSICS_MS, () => tick(sim)));
         return sim;
     }
     function connect(sim) {
@@ -61,6 +67,12 @@ function createSimulator({ config, domain, hub, now = () => Date.now(), log = co
             // The deadman: no newer command by the deadline → stop, as the Node does.
             sim.stopTimer = Number.isFinite(f.deadline_ms) ? setTimeout(() => halt(sim), Math.max(0, f.deadline_ms - now())) : null;
             if (sim.stopTimer && sim.stopTimer.unref) sim.stopTimer.unref();
+        } else if (f.kind === 'actuator' && f.value && f.value.name === 'headlights') {
+            sim.headlights = f.value.value || null;
+        } else if (f.kind === 'actuator' && f.value && f.value.name === 'horn') {
+            // A tone sounds while it is held: the panel re-sends it, and its deadline ends it like a motion command's.
+            sim.horn = f.value.value || null;
+            sim.hornUntil = sim.horn && Number.isFinite(f.deadline_ms) ? f.deadline_ms : 0;
         } else {
             sim.other[f.kind] = f.value;
         }
@@ -72,7 +84,8 @@ function createSimulator({ config, domain, hub, now = () => Date.now(), log = co
         sim.link.deliver({
             type: 'telemetry',
             battery: { volts: Math.round((6.4 + (2 * sim.battery) / 100) * 100) / 100, percent: Math.round(sim.battery) },
-            sensors: {}, rtt_ms: 1, drive: { ...sim.drive }, pose: { ...sim.pose },
+            sensors: { distance_cm: world.distanceCm(sim.pose), line: world.line(sim.pose) }, rtt_ms: 1, drive: { ...sim.drive }, pose: { ...sim.pose },
+            sim: { pose: { ...sim.pose }, drive: { ...sim.drive }, headlights: sim.headlights, horn: sim.horn, bumped: sim.bumped },
         });
     }
 
@@ -80,15 +93,23 @@ function createSimulator({ config, domain, hub, now = () => Date.now(), log = co
         const t = now();
         const dt = Math.max(0, (t - sim.at) / 1000);
         sim.at = t;
-        // A simple kinematic model: forward speed from throttle (or y), turn rate from steer (or rotation).
-        const speed = Number(sim.drive.throttle != null ? sim.drive.throttle : sim.drive.y) || 0;
-        const turn = Number(sim.drive.steer != null ? sim.drive.steer : sim.drive.rotation) || 0;
-        const strafe = Number(sim.drive.x) || 0;
-        sim.pose.heading = (sim.pose.heading + turn * 90 * dt + 360) % 360;
-        const rad = (sim.pose.heading * Math.PI) / 180;
-        sim.pose.x = Math.round((sim.pose.x + (speed * Math.sin(rad) + strafe * Math.cos(rad)) * 0.5 * dt) * 1000) / 1000;
-        sim.pose.y = Math.round((sim.pose.y + (speed * Math.cos(rad) - strafe * Math.sin(rad)) * 0.5 * dt) * 1000) / 1000;
-        if (speed || turn || strafe) sim.battery = Math.max(BATTERY_FLOOR, sim.battery - DRAIN_PER_S * dt);
+        // The arena's kinematics (public/sim-world.js); a stalled loop's long gap is cut into short steps so a bump is never jumped over.
+        const moving = Object.values(sim.drive).some((v) => Number(v));
+        if (moving) {
+            let bumped = false;
+            for (let left = Math.min(dt, 2); left > 0; left -= 0.05) {
+                const r = world.step(sim.pose, sim.drive, Math.min(0.05, left));
+                sim.pose = r.pose;
+                if (r.bumped) { bumped = true; break; }
+            }
+            if (bumped && !sim.bumped) halt(sim);          // the bumper stops the wheels, as the deadman does
+            sim.bumped = bumped;
+            sim.battery = Math.max(BATTERY_FLOOR, sim.battery - DRAIN_PER_S * dt);
+        } else sim.bumped = false;
+        if (sim.hornUntil && t > sim.hornUntil) { sim.horn = null; sim.hornUntil = 0; }
+        if (t - sim.sentAt < telemetryMs) return;
+        sim.sentAt = t;
+        sim.pose = { x: Math.round(sim.pose.x * 1000) / 1000, y: Math.round(sim.pose.y * 1000) / 1000, heading: Math.round(sim.pose.heading * 10) / 10 };
         // The hub marks a silent device offline for good; a simulator that fell behind (a stalled loop) reconnects.
         if (!hub.isOnline(sim.device.id)) connect(sim);
         else telemetry(sim);

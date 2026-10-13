@@ -46,15 +46,15 @@ function sections({ signedIn }) {
         lede: 'An open control panel for robots. Add a robot, pair it with one pasted command, and drive it with a touch joystick, '
             + 'the keyboard or a gamepad. Every command passes one gate, with roles, limits and an emergency stop that only you clear.',
         actions: signedIn
-            ? [{ label: 'Your robots', href: '/robots', primary: true }, { label: 'How it works', href: '#how' }]
-            : [{ label: 'Sign in with OpenVibe', href: '/auth/login?next=%2Frobots', primary: true }, { label: 'How it works', href: '#how' }],
+            ? [{ label: 'Your robots', href: '/robots', primary: true }, { label: 'Try the panel', href: '/try' }, { label: 'How it works', href: '#how' }]
+            : [{ label: 'Try it now, no account', href: '/try', primary: true }, { label: 'Sign in with OpenVibe', href: '/auth/login?next=%2Frobots' }, { label: 'How it works', href: '#how' }],
         note: 'Alpha. A paired robot sends its camera over WebRTC to OpenRestream and the panel plays it live; the first supported kit is the Adeept 4WD Smart Car for Raspberry Pi.',
     }) + showcase.steps({
         id: 'how',
         title: 'Online in three steps',
         lede: 'The robot connects out to OpenVibe, so there are no ports to open on your router.',
         items: [
-            { title: 'Add a robot', text: 'Name it and pick its profile. A simulated rover works straight away, before any hardware exists.' },
+            { title: 'Add a robot', text: 'Name it and pick its profile. A simulated rover works straight away, before any hardware exists, and the one at /try needs no account at all.' },
             { title: 'Pair it', text: 'Paste one command on the robot\'s computer. It installs the OpenVibe device agent with a one-time code; the robot\'s credential is stored hashed and can be revoked any time.' },
             { title: 'Drive it', text: 'Open the robot\'s panel in any browser, phone included.' },
         ],
@@ -73,7 +73,7 @@ function sections({ signedIn }) {
         items: [
             { icon: 'ov:check', title: 'Adeept 4WD Smart Car', text: 'The Raspberry Pi kit, with its parts list and build guide; a mecanum-wheel build has its own profile. The first robot on OpenVibe.Bot.' },
             { icon: 'ov:check', title: 'Cozmo', text: 'Through the device agent on a computer next to it.' },
-            { icon: 'ov:check', title: 'A simulated rover', text: 'Runs inside Bot, so you can try the whole panel with no hardware.' },
+            { icon: 'ov:check', title: 'A simulated rover', text: 'A rover in a small arena with a camera, a range finder, line sensors, headlights and a horn. Drive it at /try in your browser, with no account and no hardware.' },
         ],
     }) + `<section class="sc-sec" id="build"><h2>Build for OpenVibe.Bot</h2>
 <p class="sc-lede">Write a driver for a robot, or describe one with a profile and let the panel render it. The driver and profile spec, with a validator and the simulated rover, lives on the build pages.</p>
