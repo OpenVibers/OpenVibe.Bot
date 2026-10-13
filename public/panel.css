@@ -177,7 +177,7 @@ main { padding: 1rem max(1rem, env(safe-area-inset-right)) calc(1.5rem + env(saf
 }
 @media (min-width: 64rem) and (min-height: 32.01rem) {
   .widgets { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .widget-camera { grid-column: 1 / span 2; grid-row: span 2; }
+  .widget-camera { grid-column: 1 / span 2; grid-row: span 2; align-self: start; }
   .widget-drive { grid-column: 3; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
@@ -279,3 +279,19 @@ main { padding: 1rem max(1rem, env(safe-area-inset-right)) calc(1.5rem + env(saf
 .drive-page { max-width: 28rem; }
 .drive-page h1 { margin: 0 0 0.5rem; font-size: 1.2rem; }
 .embed-sign-in { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+
+/* A simulated rover's camera (public/sim-view.js): the drawn view fills the tile, the arena map sits in a corner. */
+.camera-screen > .sim-camera { position: absolute; inset: 0; width: 100%; height: 100%; display: block; background: #000; }
+.camera-screen > .sim-map { position: absolute; right: 0.5rem; bottom: 0.5rem; width: clamp(6.5rem, 26%, 12rem); height: auto; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.18); }
+.camera-screen > .sim-hud { position: absolute; left: 0.6rem; bottom: 0.6rem; padding: 0.15rem 0.5rem; border-radius: 6px; background: rgba(0, 0, 0, 0.55); color: #e6edf3; font: 600 0.8rem ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+.camera-screen.sim-live > .camera-icon, .camera-screen.sim-live > .camera-title, .camera-screen.sim-live > .camera-sub { display: none; }
+
+/* /try: what this is before the panel, and the way to a real robot after it. */
+.try-intro { grid-column: 1 / -1; margin: 0 0 1rem; max-width: 52rem; }
+.try-intro h2 { margin: 0 0 0.35rem; font-size: 1.15rem; }
+.try-intro p { margin: 0.35rem 0; color: var(--muted); line-height: 1.55; }
+.try-keys { display: flex; flex-wrap: wrap; gap: 0.4rem 1.25rem; margin: 0.5rem 0; padding: 0; list-style: none; color: var(--muted); font-size: 0.9rem; }
+.try-next { margin-top: 1.25rem; max-width: 52rem; }
+.try-next h2 { margin: 0 0 0.35rem; font-size: 1.1rem; }
+.try-next p { color: var(--muted); line-height: 1.55; }
+.try-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0; }

@@ -103,7 +103,7 @@
         n.hidden = !text;
     }
     function raw(frame) {
-        if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+        if (!ws || ws.readyState !== 1) return false;     // OPEN, for a WebSocket and /try's local socket alike
         if (watcher && frame.type !== 'join') return false;   // /watch is read-only
         ws.send(JSON.stringify({ v: 1, ...frame }));
         return true;
@@ -117,6 +117,7 @@
         if (!joined || !allowed.includes(kind)) return false;
         const id = newId();
         if (!raw({ type: 'command', id, kind, value })) return false;
+        window.dispatchEvent(new CustomEvent('ov-bot-command', { detail: { kind, value } }));
         sentAt.set(id, performance.now());
         if (sentAt.size > 200) sentAt.delete(sentAt.keys().next().value);
         return true;
@@ -669,10 +670,23 @@
         el.textContent = text ? `Device fault: ${text}` : '';
         el.hidden = !text;
     }
-    function readout(v) {
+    // A readout's sensor keys by the widget's capability, as the Node's drivers report them (Adeept: distance_cm and
+    // line {left, middle, right}; Cozmo: cliff and picked_up), else the capability's own name. One key found shows its
+    // value; several show each by name.
+    const SENSOR_KEYS = { ultrasonic: ['distance_cm', 'ultrasonic'], line: ['line'], cliff: ['cliff', 'picked_up'], pickup: ['picked_up', 'pickup'] };
+    function sensorValue(sensors, capability) {
+        const name = capability.replace(/^sensor\./, '');
+        const found = (SENSOR_KEYS[name] || [name]).filter((key) => sensors[key] !== undefined);
+        if (!found.length) return [null, undefined];
+        if (found.length === 1) return [found[0], sensors[found[0]]];
+        return ['', Object.fromEntries(found.map((key) => [key, sensors[key]]))];
+    }
+    const flag = (x) => (x === true ? 'on' : x === false ? 'off' : x);
+    function readout(v, key = null) {
         if (v == null) return '—';
-        if (typeof v !== 'object') return String(v);
-        return Object.entries(v).map(([k, x]) => `${k}: ${typeof x === 'object' ? JSON.stringify(x) : x}`).join(' · ') || '—';
+        if (key === 'distance_cm' && typeof v === 'number') return v >= 400 ? 'over 4 m' : `${Math.round(v)} cm`;
+        if (typeof v !== 'object') return String(flag(v));
+        return Object.entries(v).map(([k, x]) => `${k.replace(/_/g, ' ')}: ${typeof x === 'object' ? JSON.stringify(x) : flag(x)}`).join(' · ') || '—';
     }
     function setOnline(state, label) {
         const pill = $('[data-online-pill]');
@@ -714,9 +728,10 @@
         for (const el of $$('[data-battery-text]')) el.textContent = state.battery != null ? `${Math.round(state.battery * 100)} %` : '—';
         const sensors = state.telemetry && state.telemetry.sensors;
         for (const el of $$('[data-telemetry]')) {
-            const key = el.dataset.telemetry.replace(/^sensor\./, '');
-            el.textContent = readout(sensors ? (sensors[key] !== undefined ? sensors[key] : sensors) : null);
+            const [key, value] = sensors ? sensorValue(sensors, el.dataset.telemetry) : [null, null];
+            el.textContent = readout(key != null ? value : null, key);
         }
+        window.dispatchEvent(new CustomEvent('ov-bot-state', { detail: state }));
     }
 
     // ── The turn queue strip (a `queue` robot's signed-in non-member) ─────────────────────────────────
@@ -774,8 +789,17 @@
         }
     }
 
+    // /try's rover lives in the page (public/try-device.js): its socket answers /control's frames locally.
+    const LOCAL = main.dataset.transport === 'local' ? window.OVBotLocalSocket : null;
     function connect() {
         const path = watcher ? '/watch' : '/control';
+        if (LOCAL) {
+            ws = new LOCAL(wsUrl(path));
+            ws.onopen = () => raw({ type: 'join', robot_id: ROBOT_ID });
+            ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch { return; } onFrame(m); };
+            ws.onclose = () => { releaseAll(); joined = false; enableControls(); };
+            return;
+        }
         if (driving && ticket) {
             ws = new WebSocket(wsUrl(path), ['ov.ticket', `ov.ticket.${ticket}`]);
             ticket = null;

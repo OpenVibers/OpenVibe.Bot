@@ -36,6 +36,7 @@
     "display": { "modes": ["text", "face", "image_png_b64"], "faces": ["neutral", "happy", "sad", "surprised", "sleepy", "angry"], "max_chars": 200 }
   },
   "widgets": [
+    { "type": "camera", "capability": "camera", "label": "Camera", "order": 0 },
     { "type": "drive", "capability": "drive.differential", "label": "Drive", "order": 1, "command": { "kind": "drive" } },
     { "type": "head", "capability": "head", "label": "Head", "order": 2, "command": { "kind": "actuator", "names": ["head"] } },
     { "type": "lift", "capability": "lift", "label": "Lift", "order": 3, "command": { "kind": "actuator", "names": ["lift"] } },

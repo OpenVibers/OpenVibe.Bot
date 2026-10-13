@@ -156,6 +156,13 @@ const server = {
         name: 'sim (server)',
         accepts(kind, v) {
             if (kind === 'halt') return halt(v);
+            if (kind === 'actuator') {
+                // server/sim: headlights take {r,g,b} integers 0..255 or null; the horn {hz} 220..880 or null.
+                if (!isObj(v) || !only(v, ['name', 'value'])) return 'actuator is {name, value}';
+                if (v.name === 'headlights') return v.value === null || (isObj(v.value) && only(v.value, ['r', 'g', 'b']) && ['r', 'g', 'b'].every((k) => Number.isInteger(v.value[k]) && num(v.value[k], 0, 255))) ? null : 'headlights is {r,g,b} 0..255 or null';
+                if (v.name === 'horn') return v.value === null || (isObj(v.value) && only(v.value, ['hz']) && num(v.value.hz, 220, 880)) ? null : 'horn is {hz} 220..880 or null';
+                return `no actuator ${v.name}`;
+            }
             if (kind !== 'drive') return `kind ${kind} not supported`;
             return isObj(v) && only(v, ['throttle', 'steer']) && num(v.throttle, -1, 1) && num(v.steer, -1, 1) ? null : 'drive is {throttle, steer} -1..1';
         },

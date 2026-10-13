@@ -96,6 +96,9 @@ const { renderPanel } = require('../server/web/render');
     });
 
     await check('a live session\'s signaling URL reaches the anonymous public embed; a private robot is refused before it', async () => {
+        // A camera that streams (a simulated rover's camera is drawn in the page, never played).
+        const { robot: open } = await t.robot(alex, { name: 'Public car', profile_id: 'adeept.adr036' });
+        await t.domain.robots.setEmbedPublic(open.id, true);
         const code = (await t.call('POST', `/api/v1/robots/${open.id}/pairing-code`, { user: alex })).json;
         const paired = await t.call('POST', '/api/v1/pair', { token: null, body: { robot: open.id, code: code.code } });
         assert.strictEqual(paired.status, 201, paired.text);
@@ -128,7 +131,9 @@ const { renderPanel } = require('../server/web/render');
         assert.deepStrictEqual(Object.keys(j.state).sort(), ['battery', 'estop', 'latency_ms', 'online', 'robot_id', 'telemetry']);
         assert.deepStrictEqual(Object.keys(j.state.estop), ['latched']);
         const s = await w.waitFor((m) => m.type === 'robot_state' && m.state.telemetry);
-        assert.deepStrictEqual(s.state.telemetry, { sensors: {} }, 'the drive and pose telemetry reached a watcher');
+        // The profile's readouts by the driver's keys, and a simulated rover's camera view; never the raw drive or pose.
+        assert.deepStrictEqual(Object.keys(s.state.telemetry).sort(), ['sensors', 'sim'], 'the drive and pose telemetry reached a watcher');
+        assert.deepStrictEqual(Object.keys(s.state.telemetry.sensors).sort(), ['distance_cm', 'line']);
         assert.ok(s.state.online && s.state.battery > 0);
         w.close();
     });
