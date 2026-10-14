@@ -240,8 +240,23 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     }
     /** Opt a robot in or out of anonymous read-only embedding (the owner check is the caller's; no event). */
     async function setEmbedPublic(id, value) {
-        await db.query('UPDATE robots SET embed_public = $2, updated_at = $3 WHERE id = $1', [id, !!value, iso(now())]);
+        // Unlisting is part of stopping public watching: a listed robot is always watchable.
+        await db.query(`UPDATE robots SET embed_public = $2, updated_at = $3${value ? '' : ', listed = false, listed_at = NULL'} WHERE id = $1`, [id, !!value, iso(now())]);
         return getRobot(id);
+    }
+    /**
+     * List a robot in the public directory (/robots, its page /r/:id) or take it out. Listing makes it watchable by
+     * anyone (embed_public), since a directory entry nobody can watch is no entry; unlisting leaves embedding as it was.
+     * The owner check is the caller's.
+     */
+    async function setListed(id, value) {
+        if (value) await db.query('UPDATE robots SET listed = true, listed_at = COALESCE(listed_at, $2), embed_public = true, updated_at = $2 WHERE id = $1', [id, iso(now())]);
+        else await db.query('UPDATE robots SET listed = false, listed_at = NULL, updated_at = $2 WHERE id = $1', [id, iso(now())]);
+        return getRobot(id);
+    }
+    /** The listed robots, newest listing first (the directory). */
+    async function listListed({ limit = 60 } = {}) {
+        return db.many('SELECT * FROM robots WHERE listed ORDER BY listed_at DESC, id LIMIT $1', [Math.max(1, Math.min(200, limit))]);
     }
     /**
      * Remove a robot. Its OpenRestream stream's key is revoked first (rotated with no grace, its sessions ended), so
@@ -998,7 +1013,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     return {
         db, now, config, log, outbox, link,
         present: { robot: presentRobot, device: presentDevice, video: presentVideo },
-        robots: { create: createRobot, list: listRobots, get: getRobot, update: updateRobot, setEmbedPublic, remove: removeRobot,
+        robots: { create: createRobot, list: listRobots, get: getRobot, update: updateRobot, setEmbedPublic, setListed, listListed, remove: removeRobot,
             localProfile, saveLocalProfile, useCatalogueProfile },
         members: { roleOf, add: addOperator, remove: removeOperator, list: listOperators },
         pairing: { create: createPairingCode, redeem, prune: prunePairingCodes, installerCommand, driverForProfile, whipUrl },

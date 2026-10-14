@@ -36,10 +36,11 @@ const { getProfile, listProfiles, loadProfiles } = require('../profiles');
 const { frameAncestors } = require('../config');
 const { BotError } = require('../util');
 const kits = require('../kits');
-const { renderPanel, renderEmbedRefused, renderDrivePage, renderRobotsPage, renderPairingPage } = require('./render');
+const { renderPanel, renderEmbedRefused, renderDrivePage, renderPairingPage } = require('./render');
 const { renderDocsIndex, renderDriversPage, renderProfilesPage } = require('./docs');
 const { checkProfile } = require('../profiles');
 const { renderHome, HOME_CSP } = require('./home');
+const { renderDirectory, renderModels, renderModel, renderRobotPage, renderAddRobot, modelOf } = require('./directory');
 
 const PUBLIC = path.join(__dirname, '..', '..', 'public');
 const HOLD_RESEND_MS = 150;
@@ -49,7 +50,7 @@ const TRY_PROFILE = loadProfiles().get('sim.rover');
 const SITE_TAGLINE = 'An open control panel for robots';
 // Every public GET page, for the sitemap. The interactive pages (/robots, /pair/, /panel/) need a session and
 // are Disallowed in robots.txt; the API and sign-in are not pages.
-const PUBLIC_PAGES = ['/', '/try', '/install', '/docs', '/docs/drivers', '/docs/profiles', '/terms', '/privacy', '/dmca'];
+const PUBLIC_PAGES = ['/', '/try', '/robots', '/models', '/install', '/docs', '/docs/drivers', '/docs/profiles', '/terms', '/privacy', '/dmca'];
 // The public pages an AI crawler can read, for /llms.txt and /llms-full.txt (llmstxt.org). Same pages as the
 // sitemap minus /install (a 302 to the installer script, not a page); no signed-in or per-robot page, nothing
 // under the API or /internal. `note` is the one-line llms.txt entry, `text` the page's full text in llms-full.txt,
@@ -67,6 +68,16 @@ const LLMS_PAGES = [
         path: '/try', title: 'Try the panel with a simulated rover',
         note: 'Drive a simulated rover in the browser, no account and no hardware.',
         text: 'A rover simulated in the visitor\'s own browser, driven through the same OpenVibe.Bot panel a paired robot gets: a touch joystick, the keyboard (W A S D or the arrows, Space to stop) or a gamepad, with the same command shaping, deadman and latched e-stop. It has a front camera drawn from its position in a small arena, an ultrasonic distance sensor, three line sensors over a strip of yellow tape, a battery, RGB headlights and a horn. Nothing pressed there moves real hardware, and nothing needs an account. The page ends with the way to a real robot: add one, pair its computer with one pasted command, and the same panel drives it.',
+    },
+    {
+        path: '/robots', title: 'Robots',
+        note: 'The robot directory: robots people list, watchable live, and the models Bot drives.',
+        text: 'The OpenVibe.Bot robot directory. Owners may list a robot; a listed robot has a public page where anyone can watch it live through its read-only panel, and a robot whose owner opened a queue lets signed-in visitors take timed turns at the controls. The page also lists every model Bot has a profile for, and, for a signed-in person, their own robots with the way to add one.',
+    },
+    {
+        path: '/models', title: 'Models',
+        note: 'Every robot model Bot drives, by how it connects.',
+        text: 'The robots OpenVibe.Bot drives, grouped by how they connect: simulated (the rover that runs in Bot and in the browser), on-board (the OpenVibe Node on the robot\'s own computer: the Adeept ADR036 4WD car and its mecanum build, the relay robot for any Linux board), bridge (the Node on a computer or phone next to the robot: Cozmo through PyCozmo, the LOOI desk robot over Bluetooth) and server-side (ONVIF pan-tilt-zoom cameras, nothing to install). Each model has a page with how it connects, its setup steps, its guide and the controls its panel gets.',
     },
     {
         path: '/docs', title: 'Build for OpenVibe.Bot',
@@ -103,8 +114,9 @@ const LLMS_PAGES = [
 // bundle: the page imports the pinned ESM build OpenVibe.Live uses from esm.sh, and its viewer
 // signaling endpoint is OpenRestream's wss host (OpenRestream README "playback descriptor"). Exactly these two
 // sources, on the panel and embed pages only — the site-wide CSP (server/app.js) stays as it is.
-const PANEL_SCRIPT_SRC = 'https://esm.sh';
-const PANEL_CONNECT_SRC = 'wss://ingest.openre.stream';
+// Plus Cloudflare's Web Analytics beacon, which the edge adds to every HTML page.
+const PANEL_SCRIPT_SRC = 'https://esm.sh https://static.cloudflareinsights.com';
+const PANEL_CONNECT_SRC = 'wss://ingest.openre.stream https://cloudflareinsights.com';
 const PANEL_CSP = ["default-src 'self'", `script-src 'self' ${PANEL_SCRIPT_SRC}`, `connect-src 'self' ${PANEL_CONNECT_SRC}`,
     "frame-ancestors 'self'", "object-src 'none'", "base-uri 'self'"].join('; ');
 /** The embed's own CSP: the panel's sources plus the frame-ancestors allow-list. */
@@ -115,12 +127,21 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     const r = express.Router();
     // The public front page is crawlable; sign-in, the API and every signed-in or per-robot page are not.
     r.get('/robots.txt', (req, res) => res.type('text/plain').send(['User-agent: *', 'Allow: /$', 'Disallow: /auth/', 'Disallow: /api/',
-        'Disallow: /robots', 'Disallow: /pair/', 'Disallow: /panel/', 'Disallow: /install', `Sitemap: ${config.baseUrl}/sitemap.xml`, ''].join('\n')));
+        'Disallow: /robots/new', 'Disallow: /pair/', 'Disallow: /panel/', 'Disallow: /install', `Sitemap: ${config.baseUrl}/sitemap.xml`, ''].join('\n')));
     // `curl -fsSL` follows the redirect. The target is config only (checked at boot): no query parameter steers it.
     r.get('/install', (req, res) => res.redirect(302, config.installer.sourceUrl));
     // The sitemap lists every public GET page (openvibe-shared/seo); robots.txt already names it.
-    r.get('/sitemap.xml', (req, res) => {
-        res.type('application/xml').send(seo.sitemapXml(PUBLIC_PAGES.map((p) => ({ loc: `${config.baseUrl}${p}`, lastmod: releaseLastmod }))));
+    r.get('/sitemap.xml', async (req, res, next) => {
+        try {
+            const pages = PUBLIC_PAGES.map((p) => ({ loc: `${config.baseUrl}${p}`, lastmod: releaseLastmod }));
+            if (domain) {
+                for (const row of await listProfiles(domain.db)) pages.push({ loc: `${config.baseUrl}/models/${row.profile.id}`, lastmod: releaseLastmod });
+                for (const robot of await domain.robots.listListed({ limit: 200 })) {
+                    pages.push({ loc: `${config.baseUrl}/r/${robot.id}`, lastmod: new Date(robot.updated_at).toISOString() });
+                }
+            }
+            res.type('application/xml').send(seo.sitemapXml(pages));
+        } catch (e) { next(e); }
     });
     // /llms.txt and /llms-full.txt (llmstxt.org, openvibe-shared/seo): the public pages as a plain-text map for
     // language-model crawlers. Only the pages above; the signed-in pages, the API and /internal are not listed.
@@ -150,6 +171,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     r.get('/panel/sim-world.js', asset('sim-world.js', 'application/javascript'));
     r.get('/panel/sim-view.js', asset('sim-view.js', 'application/javascript'));
     r.get('/panel/try-device.js', asset('try-device.js', 'application/javascript'));
+    r.get('/directory.css', asset('directory.css', 'text/css'));
 
     // /try: the real panel driving a rover simulated in the visitor's own browser (public/try-device.js), so anyone
     // can try it with no account and no hardware (plan T15 "a simulated robot in the browser"). Nothing reaches the
@@ -228,16 +250,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     });
 
     // The embed flag is web-only: domain.present.robot (and so /api/v1) does not carry it.
-    const presentForPage = (row) => ({ ...domain.present.robot(row), embed_public: !!row.embed_public });
-
-    async function robotsPage(req, res, me, extra = {}) {
-        const robots = (await domain.robots.list(me.subject)).map(presentForPage);
-        const profiles = (await listProfiles(domain.db)).map((p) => p.profile);
-        // A kit's "Add this robot" arrives as ?profile=<id>: the add form opens with that model chosen.
-        const asked = typeof req.query.profile === 'string' && profiles.some((p) => p.id === req.query.profile) ? req.query.profile : null;
-        const values = extra.values || (asked ? { profile_id: asked } : {});
-        res.type('html').send(renderRobotsPage({ robots, profiles, kits: kits.list(), ...extra, values }));
-    }
+    const presentForPage = (row) => ({ ...domain.present.robot(row), embed_public: !!row.embed_public, listed: !!row.listed });
 
     // The front page of openvibe.bot (server/web/home.js): public, indexable, with the OpenVibe Frame. Its two
     // actions differ by sign-in, so it is never stored by a shared cache.
@@ -248,7 +261,61 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         res.type('html').send(renderHome({ config, signedIn: !!req.viewer }));
     });
 
-    r.get('/robots', page(async (req, res) => robotsPage(req, res, requireUser(req))));
+    // ── The directory (plan T15 "a robot directory (/robots)"): public pages inside the OpenVibe Frame. ──
+    const catalogue = async () => (await listProfiles(domain.db)).map((row) => modelOf(row.profile));
+    const namesOf = async (subjects) => {
+        if (!identity || !subjects.length) return new Map();
+        try { return await identity.names([...new Set(subjects)]); } catch (e) { log.warn(`[Bot] directory names: ${e.message}`); return new Map(); }
+    };
+    const onlineOf = async (id) => { try { return !!(hub && (await hub.robotState(id)).online); } catch { return false; } };
+
+    r.get('/robots', frameCsp, page(async (req, res) => {
+        res.setHeader('Cache-Control', 'private, no-cache');
+        res.setHeader('Vary', 'Cookie');
+        const models = await catalogue();
+        const byId = new Map(models.map((m) => [m.id, m]));
+        const modelName = (row) => (byId.get(row.profile_id) || { name: row.profile_id.startsWith('local.') ? 'Its own profile' : row.profile_id }).name;
+        const rows = await domain.robots.listListed({ limit: 60 });
+        const names = await namesOf(rows.map((r) => r.owner_subject));
+        const listed = await Promise.all(rows.map(async (row) => ({
+            id: row.id, name: row.name, access_policy: row.access_policy, model_name: modelName(row),
+            owner: names.get(row.owner_subject) || null, online: await onlineOf(row.id),
+        })));
+        const mine = req.viewer ? (await domain.robots.list(req.viewer.subject)).map((row) => ({ id: row.id, name: row.name, listed: !!row.listed, model_name: modelName(row) })) : null;
+        res.type('html').send(renderDirectory({ config, listed, mine, models, signedIn: !!req.viewer }));
+    }));
+    r.get('/models', frameCsp, page(async (req, res) => {
+        res.setHeader('Cache-Control', 'public, max-age=300');
+        res.type('html').send(renderModels({ config, models: await catalogue() }));
+    }));
+    r.get('/models/:id', frameCsp, page(async (req, res) => {
+        const model = (await catalogue()).find((m) => m.id === req.params.id);
+        if (!model) throw new BotError(404, 'bot.profile_not_found', 'no such model');
+        res.setHeader('Cache-Control', 'public, max-age=300');
+        res.type('html').send(renderModel({ config, model, kit: kits.list().find((k) => k.profile_id === model.id) || null }));
+    }));
+    // A listed robot's public page; its owner and members see their own robot's page whether it is listed or not.
+    r.get('/r/:id', frameCsp, page(async (req, res) => {
+        res.setHeader('Cache-Control', 'private, no-cache');
+        res.setHeader('Vary', 'Cookie');
+        const robot = await domain.robots.get(req.params.id);
+        const role = robot && req.viewer ? await memberRole(robot, req.viewer) : null;
+        if (!robot || (!robot.listed && !role)) throw new BotError(404, 'bot.robot_not_found', 'no such robot');
+        const row = await getProfile(domain.db, robot.profile_id, robot.profile_version);
+        const model = row ? modelOf(row.profile) : { id: robot.profile_id, name: robot.profile_id };
+        const owner = (await namesOf([robot.owner_subject])).get(robot.owner_subject) || null;
+        const state = { online: await onlineOf(robot.id) };
+        res.type('html').send(renderRobotPage({ config, robot: { id: robot.id, name: robot.name, access_policy: robot.access_policy }, model, owner, state, role: role === 'queue' ? null : role }));
+    }));
+    // Adding a robot (the five-minute path's first step): name it, choose what it is, who may drive.
+    async function addPage(req, res, extra = {}) {
+        res.setHeader('Content-Security-Policy', HOME_CSP);
+        const models = (await catalogue()).filter((m) => !m.id.startsWith('local.'));
+        const asked = typeof req.query.profile === 'string' && models.some((m) => m.id === req.query.profile) ? req.query.profile : null;
+        const values = extra.values || (asked ? { profile_id: asked } : {});
+        res.type('html').send(renderAddRobot({ config, models, values, error: extra.error || null }));
+    }
+    r.get('/robots/new', page(async (req, res) => { requireUser(req); return addPage(req, res); }));
 
     r.post('/robots', ...manage, express.urlencoded({ extended: false, limit: '8kb' }), page(async (req, res) => {
         const me = requireUser(req);
@@ -259,7 +326,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         try {
             ({ robot, pairing } = await domain.robots.create({ owner: me.subject, name: values.name, profile_id: values.profile_id, access_policy: values.access_policy }));
         } catch (e) {
-            if (e.status === 422) { res.status(422); return robotsPage(req, res, me, { error: e.detail || e.code, values }); }
+            if (e.status === 422) { res.status(422); return addPage(req, res, { error: e.detail || e.code, values }); }
             throw e;
         }
         // A simulated robot needs no machine: straight to its panel. Otherwise the code create minted is shown here.
@@ -282,6 +349,19 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         if (robot.owner_subject !== me.subject) throw new BotError(403, 'bot.forbidden', 'only the owner may pair a device');
         const pairing = await domain.pairing.create(robot.id, me.subject, undefined, robot);
         res.type('html').send(renderPairingPage({ robot: domain.present.robot(robot), pairing, profile: await profileOf(robot) }));
+    }));
+
+    r.post('/robots/:id/listing', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        const robot = await domain.robots.get(req.params.id);
+        if (!robot) throw new BotError(404, 'bot.robot_not_found', 'no such robot');
+        if (robot.owner_subject !== me.subject) throw new BotError(403, 'bot.forbidden', 'only the owner may list a robot');
+        const sent = req.body && req.body.listed;
+        const value = Array.isArray(sent) ? sent[sent.length - 1] : sent;
+        if (value !== 'on' && value !== 'off') throw new BotError(422, 'bot.invalid_input', 'listed must be on or off');
+        await domain.robots.setListed(robot.id, value === 'on');
+        res.redirect(303, `/panel/${robot.id}`);
     }));
 
     r.post('/robots/:id/embed', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {

@@ -60,12 +60,10 @@ const { loadConfig, frameAncestors } = require('../server/config');
         assert.strictEqual(on.status, 303);
         assert.strictEqual(on.headers.get('location'), `/panel/${robot.id}`);
         assert.strictEqual(await flag(robot.id), true);
-        for (const p of [`/panel/${robot.id}`, '/robots']) {
-            const html = await (await get(p, alex)).text();
-            assert.match(html, new RegExp(`action="/robots/${robot.id}/embed"`), p);
-            assert.match(html, /name="embed_public" value="on" checked/, p);
-            assert.match(html, /never the controls/, p);
-        }
+        const html = await (await get(`/panel/${robot.id}`, alex)).text();
+        assert.match(html, new RegExp(`action="/robots/${robot.id}/embed"`));
+        assert.match(html, /name="embed_public" value="on" checked/);
+        assert.match(html, /never the controls/);
         const r = await t.call('GET', `/api/v1/robots/${robot.id}`, { user: alex });
         assert.ok(!r.text.includes('embed_public'));
         const off = await post(url, alex, { embed_public: 'off' });

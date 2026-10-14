@@ -55,7 +55,7 @@ const { renderPanel } = require('../server/web/render');
     let ipN = 0;
     // Each watcher from its own address unless one is named (the test server trusts one proxy hop, as production).
     const watch = (ip = `10.0.0.${++ipN}`) => t.ws('/watch', { headers: { 'X-Forwarded-For': ip } });
-    const EMBED_CSP = "default-src 'self'; script-src 'self' https://esm.sh; connect-src 'self' wss://ingest.openre.stream; frame-ancestors 'self' https://openvibe.live https://www.openvibe.live; object-src 'none'; base-uri 'self'";
+    const EMBED_CSP = "default-src 'self'; script-src 'self' https://esm.sh https://static.cloudflareinsights.com; connect-src 'self' wss://ingest.openre.stream https://cloudflareinsights.com; frame-ancestors 'self' https://openvibe.live https://www.openvibe.live; object-src 'none'; base-uri 'self'";
     const auditCount = async (id) => (await t.domain.audit.list(id, { limit: 100 })).length;
 
     const { robot: open } = await t.robot(alex, { name: 'Public rover' });
@@ -74,7 +74,7 @@ const { renderPanel } = require('../server/web/render');
         assert.ok(t.hub.isOnline(`dev_sim_${open.id}`), 'the embed starts the simulator as the panel does');
         // The rest of the site still refuses every frame.
         assert.match((await get(`/panel/${open.id}`, alex)).headers.get('content-security-policy'), /frame-ancestors 'self';/);
-        assert.match((await get('/robots', alex)).headers.get('content-security-policy'), /frame-ancestors 'self';/);
+        assert.match((await get('/robots', alex)).headers.get('content-security-policy'), /frame-ancestors 'none';/, 'the directory (a Frame page) refuses every frame');
     });
 
     await check('a robot that is not public: 403 with a link out and no robot data; unknown: 404; members keep their role', async () => {
