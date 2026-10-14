@@ -79,3 +79,16 @@
     .dir-row-actions { margin-left: 0; width: 100%; }
     .dir-live iframe { height: 86vh; }
 }
+
+/* Community robots (/robots/submit, /robots/submissions, community models). */
+.dir-community { color: #2dd4bf; margin-left: 4px; }
+.dir-card-head > span { display: inline-flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.dir-field.dir-wide { max-width: none; }
+.dir-form textarea { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border, #1f2d47); background: var(--bg-primary, #0a0f1c); color: var(--text-primary, #e6edf7); resize: vertical; width: 100%; box-sizing: border-box; }
+.dir-form textarea:focus, .dir-form input[type="url"]:focus { outline: 2px solid var(--accent, #3b82f6); outline-offset: 1px; }
+.dir-form input[type="url"] { font: inherit; min-height: 44px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--border, #1f2d47); background: var(--bg-primary, #0a0f1c); color: var(--text-primary, #e6edf7); }
+.dir-sub { display: block; }
+.dir-sub-body { padding: 0 18px 14px; }
+.dir-sub-body form { margin: 8px 0 0; }
+.dir-pre { max-height: 320px; overflow: auto; padding: 10px 12px; border-radius: 10px; background: var(--bg-primary, #0a0f1c); border: 1px solid var(--border, #1f2d47); font: 12.5px/1.45 ui-monospace, monospace; }
+.dir-review .dir-field input { font: inherit; min-height: 40px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border, #1f2d47); background: var(--bg-primary, #0a0f1c); color: var(--text-primary, #e6edf7); }

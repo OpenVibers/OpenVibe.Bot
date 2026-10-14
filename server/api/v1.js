@@ -49,7 +49,7 @@ const CAP = {
     dispatch: 'bot.job.dispatch',
 };
 
-function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config }) {
+function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, submissions = null }) {
     const r = express.Router();
     r.use(limits.reads('bot.read'));
     r.use('/resources', resourceIndex.router({ db: domain.db, apiAuth }));
@@ -131,10 +131,18 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config }) {
         const rows = await listProfiles(domain.db);
         res.json({ profiles: rows.map((p) => p.profile) });
     }));
+    // Bot's public key for community profiles' signatures (server/submissions.js): Ed25519 over the canonical JSON.
+    r.get('/profiles/signing-key', wrap(async (req, res) => {
+        const key = submissions && submissions.signingKey();
+        if (!key) fail(404, 'bot.signing_unavailable', 'no profile signing key is configured');
+        res.json({ key });
+    }));
+    // A community profile also carries the signature its approval made, and where its driver and guide are.
     r.get('/profiles/:id', wrap(async (req, res) => {
         const p = await getProfile(domain.db, req.params.id);
         if (!p) fail(404, 'bot.profile_not_found', 'no such profile');
-        res.json({ profile: p.profile });
+        const signature = submissions && p.id.startsWith('community.') ? await submissions.signatureFor(p.id, p.version) : null;
+        res.json({ profile: p.profile, ...(signature ? { signature } : {}) });
     }));
     // The same validator the /docs/profiles form runs (server/profiles checkProfile): a profile in,
     // { valid, problems[] } out. Public, and rate-limited per address exactly as the form is.

@@ -5,11 +5,11 @@
   "runtime": "node 22, express 4, ws; PostgreSQL 18 via openvibe-sdk/db (pg, or embedded PGlite in tests); Valkey optional; no build step",
   "port": 4630,
   "domain": "openvibe.bot (www -> apex; /device and /control WebSockets; /install)",
-  "contracts": "openvibe-contracts v0.157.0",
+  "contracts": "openvibe-contracts v0.160.0",
   "sdk": "openvibe-sdk v0.44.0",
   "shared": "openvibe-shared v4.1.3",
   "packages": [
-    "openvibe-contracts v0.157.0",
+    "openvibe-contracts v0.160.0",
     "openvibe-sdk v0.44.0",
     "openvibe-shared v4.1.3"
   ],
@@ -45,6 +45,7 @@
     "/try (public, no account): the real panel on a sim.rover that runs in the visitor's browser (public/try-device.js answers /control locally with the gate's value shaping, the deadman and the latched e-stop); listed in the sitemap and llms.txt",
     "the robot directory (Frame pages, server/web/directory.js): public /robots (listed robots with online state, model and owner; every model; a signed-in person's own robots), /models and /models/:id (how it connects, setup steps, guide, panel controls), /r/:id (a listed robot's public page with its live embeddable panel), /robots/new (name, model choice grouped by connection kind, who may drive); owners list from the panel (POST /robots/:id/listing, robots.listed, migration 0009), listing turns on embed_public and unwatching unlists; listed robots and every model are in the sitemap",
     "a phone as the robot (profile phone.camera, driver phone, Contracts 0.157.0): the pairing page's QR code (server/web/qr.js, qrcode-generator) opens /device/phone with the robot and code in the fragment; the phone pairs over POST /api/v1/pair and its browser is the device (public/phone-device.js): /device with the credential as the subprotocol ov.device.<credential>, the camera over WHIP to OpenRestream, say (speech synthesis), display (faces, text), torch, chime, battery and tilt telemetry, a local Stop (estop_state local_stop); /device/phone has its own CSP (the WHIP ingest origin) and Permissions-Policy camera=(self)",
+    "community robots (server/submissions.js, migration 0010): submit at /robots/submit (id community.<name>, driver plugin + mapping.plugin, Contracts 0.160.0, https driver and guide links, licence), status at /robots/submissions, admin review there (approve signs Ed25519 over canonical JSON with BOT_PROFILE_SIGNING_KEY and inserts robot_profiles; reject needs a note); GET /api/v1/profiles/:id carries the signature, GET /api/v1/profiles/signing-key the public key; /models lists them under From the community with credits; in the ADR-033 export, and deletion drops unapproved ones and keeps approved ones authorless",
     "the panel's People card: the owner adds an operator or viewer by @username (OpenVibe.Network resolves the name to a subject) and removes them again, shown with Network's names; a signed-in visitor on an open-queue robot sees their turn or their place in line and can leave the queue, promoting the next person (POST /robots/:id/operators and …/operators/:subject/remove, POST /robots/:id/queue/leave)",
     "panel input: a touch joystick, the keyboard and a gamepad (Gamepad API), each held control re-sent while held and zeroed at once on release; a latency meter (round-trip median and telemetry age); one camera tile per camera the profile lists, playing the robot's live OpenRestream WebRTC session (the Adeept and Cozmo profiles carry a camera widget since 2026-10-13); a readout shows the sensor keys the Node's drivers report (distance_cm, line, cliff and picked_up); a live online indicator on /pair/:id read from /control",
     "platform.job@1 jobs dispatched to a paired Node over /device (platform.job-frame@1: resent unacked on reconnect, only to an advertised runtime class) and metered per second into run_usage_outbox for billing.usage.record",
