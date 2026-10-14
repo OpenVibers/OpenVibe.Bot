@@ -104,6 +104,7 @@ const PROFILE = {
         assert.ok(models.includes('From the community') && models.includes('href="/models/community.ballbot"'));
         const page = await (await get('/models/community.ballbot')).text();
         assert.ok(page.includes('Submitted by @mia') && page.includes('https://github.com/mia/ballbot-driver') && page.includes(key.key_id));
+        assert.ok(page.includes(`openvibe-node profile verify community.ballbot --key-id ${key.key_id}`), 'the model page says how to check it on a machine');
         assert.match(await (await get('/robots/new?profile=community.ballbot', sam)).text(), /value="community\.ballbot" checked/);
         const made = await t.call('POST', '/api/v1/robots', { user: sam, body: { name: 'My ballbot', profile_id: 'community.ballbot' } });
         assert.strictEqual(made.status, 201, made.text);
