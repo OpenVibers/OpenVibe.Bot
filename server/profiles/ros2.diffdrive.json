@@ -1,0 +1,22 @@
+{
+  "id": "ros2.diffdrive",
+  "version": 1,
+  "name": "ROS 2 robot",
+  "vendor": "ROS 2",
+  "kind": "onboard",
+  "description": "Any ROS 2 robot that drives on cmd_vel (geometry_msgs/Twist): TurtleBot 3 or 4, a Jackal, a home-built base. The OpenVibe Node's ros2 driver reaches it through rosbridge (or as a ROS 2 node with rclpy): drive, a camera from a JPEG CompressedImage topic, the distance ahead from a laser scan or range sensor, and the battery. Mecanum and omni bases are ros2.holonomic.",
+  "capabilities": ["drive.differential", "camera", "sensor.ultrasonic", "battery"],
+  "mapping": { "driver": "plugin", "plugin": "ros2" },
+  "commands": {
+    "drive": { "axes": { "throttle": [-1, 1], "steer": [-1, 1] } }
+  },
+  "widgets": [
+    { "type": "camera", "capability": "camera", "label": "Camera", "order": 0 },
+    { "type": "drive", "capability": "drive.differential", "label": "Drive", "order": 1, "command": { "kind": "drive" } },
+    { "type": "telemetry", "capability": "sensor.ultrasonic", "label": "Distance ahead", "order": 2 },
+    { "type": "battery", "capability": "battery", "label": "Battery", "order": 3 },
+    { "type": "latency", "label": "Latency", "order": 4 }
+  ],
+  "camera": { "transport": "whip", "resolution": "640x480" },
+  "limits": { "max_speed": 1, "max_turn": 1, "max_command_ms": 300, "heartbeat_ms": 1000 }
+}

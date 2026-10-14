@@ -20,11 +20,13 @@ const { driverForProfile } = require('../server/domain');
         }
     });
 
-    await check('driverForProfile: adeept, adeept-mecanum, cozmo, looi, else none', async () => {
+    await check('driverForProfile: adeept, adeept-mecanum, cozmo, looi, ros2, ros2-holonomic, else none', async () => {
         assert.strictEqual(driverForProfile('adeept.adr036'), 'adeept');
         assert.strictEqual(driverForProfile('adeept.adr036.mecanum'), 'adeept-mecanum');
         assert.strictEqual(driverForProfile('cozmo'), 'cozmo');
         assert.strictEqual(driverForProfile('looi'), 'looi');
+        assert.strictEqual(driverForProfile('ros2.diffdrive'), 'ros2');
+        assert.strictEqual(driverForProfile('ros2.holonomic'), 'ros2-holonomic');
         for (const id of ['sim.rover', 'camera.onvif', 'toString', undefined]) assert.strictEqual(driverForProfile(id), 'none', String(id));
     });
 

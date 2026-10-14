@@ -66,6 +66,17 @@ const MODELS = {
         setup: ['Any ONVIF pan-tilt-zoom camera: Bot moves it, with the same gate and limits as a robot.', 'Today an operator names the camera in Bot\'s configuration (its address and the names of its secrets).'],
         guide: { href: 'https://github.com/OpenVibers/OpenVibe.Bot#readme', label: 'ONVIF notes' },
     },
+    'ros2.diffdrive': {
+        connect: 'onboard', order: 5,
+        setup: ['Any ROS 2 robot that drives on cmd_vel: TurtleBot 3 or 4, a Jackal, your own base.', 'On the robot run a rosbridge server, then paste the pairing command on the robot or a computer beside it; the installer sets up the ros2 driver.',
+            'Set your topics and safe speeds (cmd_vel, the camera\'s CompressedImage, max_linear) in the Node\'s config.json.'],
+        guide: { href: `${NODE_BLOB}/plugins/ros2/README.md`, label: 'ROS 2 driver guide' },
+    },
+    'ros2.holonomic': {
+        connect: 'onboard', order: 5,
+        setup: ['A ROS 2 base with mecanum or omni wheels: it moves sideways too (linear x and y on cmd_vel).', 'Pair it with the same one command; the installer picks the holonomic setting.'],
+        guide: { href: `${NODE_BLOB}/plugins/ros2/README.md`, label: 'ROS 2 driver guide' },
+    },
     'relay.generic': {
         connect: 'onboard', order: 6,
         setup: ['Any Raspberry Pi or Linux machine running the OpenVibe Node.', 'Each button on the panel is passed to a script of yours by the relay driver: lights, a door, a motor board.'],
@@ -146,7 +157,7 @@ ${listed.length ? `<ul class="dir-grid">${listed.map(robotCard).join('')}</ul>`
 <section class="dir-sec" aria-labelledby="models-h"><div class="dir-sec-head"><h2 id="models-h">Models it drives</h2>${link('/models', 'All models')}</div>
 <ul class="dir-grid">${sortModels(models).map(modelCard).join('')}</ul></section>
 <section class="dir-sec" aria-labelledby="byo-h"><h2 id="byo-h">Something else?</h2>
-<p class="muted">Any robot with a computer on it or next to it can join: a Raspberry Pi or other Linux board, an ESP32, a ROS 2 robot, an ONVIF camera. Describe it with a profile and the panel draws itself; write a driver in any language for the hardware, then submit it so anyone can add one.</p>
+<p class="muted">Any robot with a computer on it or next to it can join: a Raspberry Pi or other Linux board, an ESP32, a ROS 2 robot (it has its own models above), an ONVIF camera. Describe it with a profile and the panel draws itself; write a driver in any language for the hardware, then submit it so anyone can add one.</p>
 <p class="dir-actions">${link('/robots/submit', 'Submit a robot', 'dir-btn dir-primary')} ${link('/docs/profiles', 'Robot profiles', 'dir-btn')} ${link('/docs/drivers', 'Write a driver', 'dir-btn')}</p></section>`;
     return shell({ config, path: '/robots', title: 'Robots', description: 'Robots on OpenVibe.Bot: watch the ones people list live, see every model it drives, and add your own.', body });
 }
@@ -222,7 +233,7 @@ ${error ? `<p class="dir-error" role="alert">${esc(error)}</p>` : ''}
 <label class="dir-field"><span class="dir-field-label">Name</span><input type="text" name="name" maxlength="80" required autocomplete="off" placeholder="e.g. Kitchen rover" value="${esc(values.name || '')}"></label>
 <fieldset class="dir-fieldset"><legend class="dir-field-label">What are you connecting?</legend>
 ${groups.map(([title, ms]) => `<p class="dir-group">${esc(title)}</p><div class="dir-choices">${ms.map(option).join('')}</div>`).join('\n')}
-<p class="muted dir-note">Something else (an ESP32, a ROS 2 robot, your own board)? Choose the relay robot and drive it with your own script, or ${link('/docs/profiles', 'write a profile')} for it.</p>
+<p class="muted dir-note">Something else (an ESP32, your own board)? Choose the relay robot and drive it with your own script, or ${link('/docs/profiles', 'write a profile')} for it.</p>
 </fieldset>
 <label class="dir-field"><span class="dir-field-label">Who may drive</span><select name="access_policy">${POLICIES.map(([v, l]) => `<option value="${esc(v)}"${v === (values.access_policy || 'private') ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
 <p><button type="submit" class="dir-btn dir-primary">Add robot</button></p>

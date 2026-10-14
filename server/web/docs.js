@@ -66,7 +66,7 @@ function renderDocsIndex({ config }) {
 <ul>
 <li>The <b>OpenVibe Node</b> (${out(NODE, 'OpenVibers/OpenVibe.Node')}) is the agent on the robot's machine: it pairs, holds the control link, and runs the drivers.</li>
 <li>Drivers are Node <b>plugins</b> (${out(`${TREE}/plugins`, 'plugins/')}), written against the Python runtime ${out(`${TREE}/plugins/sdk`, 'openvibe_plugin')} or any language over the raw protocol.</li>
-<li>Bundled drivers: ${out(`${TREE}/plugins/dryrun`, 'dryrun')}, ${out(`${TREE}/plugins/adeept_adr036`, 'adeept_adr036')}, ${out(`${TREE}/plugins/cozmo`, 'cozmo')} and ${out(`${TREE}/plugins/relay`, 'relay')}. LOOI's driver is written by LOOI owners against the contract in ${out(`${TREE}/docs/hardware-looi.md`, 'docs/hardware-looi.md')} (profile <code>looi</code>, installer <code>--driver looi</code>).</li>
+<li>Bundled drivers: ${out(`${TREE}/plugins/dryrun`, 'dryrun')}, ${out(`${TREE}/plugins/adeept_adr036`, 'adeept_adr036')}, ${out(`${TREE}/plugins/cozmo`, 'cozmo')}, ${out(`${TREE}/plugins/relay`, 'relay')} and ${out(`${TREE}/plugins/ros2`, 'ros2')} (any ROS 2 robot on <code>cmd_vel</code>, through rosbridge or rclpy; profiles <code>ros2.diffdrive</code> and <code>ros2.holonomic</code>, installer <code>--driver ros2</code>). LOOI's driver is written by LOOI owners against the contract in ${out(`${TREE}/docs/hardware-looi.md`, 'docs/hardware-looi.md')} (profile <code>looi</code>, installer <code>--driver looi</code>).</li>
 <li>Profiles ship in this repository (${inLink('/api/v1/profiles', 'GET /api/v1/profiles')}) and are validated by the same loader the pages use.</li>
 </ul>
 `;

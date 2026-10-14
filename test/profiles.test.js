@@ -58,8 +58,8 @@ function samples(profile, kind, names) {
 (async () => {
     const profiles = loadProfiles();
 
-    await check('the eight shipped profiles load and validate', () => {
-        assert.deepStrictEqual([...profiles.keys()].sort(), ['adeept.adr036', 'adeept.adr036.mecanum', 'camera.onvif', 'cozmo', 'looi', 'phone.camera', 'relay.generic', 'sim.rover']);
+    await check('the ten shipped profiles load and validate', () => {
+        assert.deepStrictEqual([...profiles.keys()].sort(), ['adeept.adr036', 'adeept.adr036.mecanum', 'camera.onvif', 'cozmo', 'looi', 'phone.camera', 'relay.generic', 'ros2.diffdrive', 'ros2.holonomic', 'sim.rover']);
         for (const p of profiles.values()) {
             assert.ok(p.capabilities.length > 0, `${p.id} capabilities`);
             assert.ok(p.widgets.length > 0, `${p.id} widgets`);

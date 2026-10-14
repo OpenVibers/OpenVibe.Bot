@@ -10,6 +10,8 @@
  *
  * LOOI   = OpenVibe.Node docs/hardware-looi.md (a community driver; the contract it implements).
  * RELAY  = the relay plugin (plan T15 R9 step 4), a bridge with no hardware of its own.
+ * ROS2   = plugins/ros2/openvibe_ros2/__init__.py (Ros2.handle): drive only (say needs say_topic, which no shipped
+ *          profile assumes); throttle/steer, or x/y/rotation when the profile's base is holonomic.
  *
  * camera.onvif and sim.rover are `kind: "server"` profiles with no Node plugin; their contract is the
  * value table in docs/protocol.md.
@@ -150,6 +152,23 @@ const relay = {
     },
 };
 
+// ROS2 Ros2.handle: drive → a Twist from throttle/steer (differential) or x/y/rotation (holonomic: true), each -1..1.
+function ros2(holonomic) {
+    const axes = holonomic ? ['x', 'y', 'rotation'] : ['throttle', 'steer'];
+    return {
+        name: `ros2 (${holonomic ? 'holonomic' : 'differential'})`,
+        accepts(kind, v) {
+            if (kind === 'halt') return halt(v);
+            if (!isObj(v)) return `${kind} value must be an object`;
+            if (kind === 'drive') {
+                if (!axes.some((a) => a in v)) return `drive carries ${axes.join('/')}`;
+                return only(v, axes) && axes.every((a) => !(a in v) || num(v[a], -1, 1)) ? null : `drive is ${axes.join('/')} -1..1`;
+            }
+            return `kind ${kind} not supported`;
+        },
+    };
+}
+
 /** The server-side drivers (docs/protocol.md, command values). */
 const server = {
     'sim.rover': {
@@ -231,7 +250,8 @@ function contractFor(profile) {
     if (m.plugin === 'cozmo') return cozmo();
     if (m.plugin === 'relay') return relay;
     if (m.plugin === 'looi') return looi;
+    if (m.plugin === 'ros2') return ros2(!!(profile.commands && profile.commands.drive && 'x' in profile.commands.drive.axes));
     return server[profile.id] || null;
 }
 
-module.exports = { adeept, cozmo, relay, looi, phone, server, contractFor, COZMO_FACES, PHONE_FACES };
+module.exports = { adeept, cozmo, relay, looi, ros2, phone, server, contractFor, COZMO_FACES, PHONE_FACES };
