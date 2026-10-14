@@ -1,0 +1,22 @@
+{
+  "id": "ros2.holonomic",
+  "version": 1,
+  "name": "ROS 2 robot (mecanum or omni)",
+  "vendor": "ROS 2",
+  "kind": "onboard",
+  "description": "A ROS 2 robot with mecanum or omni wheels that moves in any direction on cmd_vel (linear x and y, angular z). The OpenVibe Node's ros2 driver reaches it through rosbridge (or as a ROS 2 node with rclpy): drive, a camera from a JPEG CompressedImage topic, the distance ahead from a laser scan or range sensor, and the battery.",
+  "capabilities": ["drive.mecanum", "camera", "sensor.ultrasonic", "battery"],
+  "mapping": { "driver": "plugin", "plugin": "ros2" },
+  "commands": {
+    "drive": { "axes": { "x": [-1, 1], "y": [-1, 1], "rotation": [-1, 1] } }
+  },
+  "widgets": [
+    { "type": "camera", "capability": "camera", "label": "Camera", "order": 0 },
+    { "type": "drive", "capability": "drive.mecanum", "label": "Drive", "order": 1, "command": { "kind": "drive" } },
+    { "type": "telemetry", "capability": "sensor.ultrasonic", "label": "Distance ahead", "order": 2 },
+    { "type": "battery", "capability": "battery", "label": "Battery", "order": 3 },
+    { "type": "latency", "label": "Latency", "order": 4 }
+  ],
+  "camera": { "transport": "whip", "resolution": "640x480" },
+  "limits": { "max_speed": 1, "max_turn": 1, "max_command_ms": 300, "heartbeat_ms": 1000 }
+}
