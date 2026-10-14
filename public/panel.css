@@ -3,6 +3,9 @@
 :root {
   --bg: #0d1117; --surface: #161b22; --raised: #1f2630; --line: #2d3540; --text: #e6edf3; --muted: #8b96a3;
   --accent: #3d8bfd; --accent-ink: #fff; --ok: #3fb950; --warn: #d29922; --danger: #e5484d; --danger-deep: #a3191e;
+  /* Filled controls with white text use the strong shades: white on --accent is 3.3:1 and on --danger 3.9:1, under
+     WCAG AA's 4.5:1; these are 5.2:1 and 5.0:1 (the network's readable accent fills). */
+  --fill-accent: var(--accent-strong, #2563eb); --on-fill-accent: var(--on-accent-strong, #fff); --fill-danger: #d0343a;
   --radius: 12px; --tap: 44px;
   color-scheme: dark;
 }
@@ -26,7 +29,7 @@ button, .button {
 }
 button:hover:not(:disabled), .button:hover { border-color: #46505d; }
 button:active:not(:disabled) { transform: scale(0.97); }
-button.primary, .button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+button.primary, .button.primary { background: var(--fill-accent); border-color: var(--fill-accent); color: var(--on-fill-accent); font-weight: 600; }
 button.quiet, .button.quiet { background: transparent; }
 button:disabled, input:disabled, select:disabled { opacity: 0.4; cursor: not-allowed; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -55,7 +58,7 @@ input[type="checkbox"] { width: 1.4rem; height: 1.4rem; min-height: 0; min-width
 .estop-dot { width: 0.7rem; height: 0.7rem; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 4px rgba(63, 185, 80, 0.18); flex: none; }
 .estop {
   min-height: 56px; min-width: 112px; padding: 0 1.1rem; border: 2px solid #ff8a8d; border-radius: 14px;
-  background: var(--danger); color: #fff; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase;
+  background: var(--fill-danger); color: #fff; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase;
   box-shadow: 0 4px 0 var(--danger-deep), 0 6px 16px rgba(229, 72, 77, 0.35);
 }
 .estop .icon { width: 1.5em; height: 1.5em; stroke-width: 2.4; }
@@ -125,7 +128,7 @@ main { padding: 1rem max(1rem, env(safe-area-inset-right)) calc(1.5rem + env(saf
 .axis .hold { min-height: 56px; user-select: none; -webkit-user-select: none; touch-action: none; }
 .axis .hold .icon { width: 1.6em; height: 1.6em; }
 .axis-name { color: var(--muted); font-size: 0.8rem; text-align: center; }
-.hold.held { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.hold.held { background: var(--fill-accent); border-color: var(--fill-accent); color: var(--on-fill-accent); }
 .drive-pad .stop { width: 100%; max-width: 22rem; min-height: 52px; font-weight: 600; }
 .hint { margin: 0.9rem 0 0; color: var(--muted); font-size: 0.8rem; text-align: center; }
 .pad-hint { display: none; }
@@ -210,7 +213,7 @@ main { padding: 1rem max(1rem, env(safe-area-inset-right)) calc(1.5rem + env(saf
 .steps { list-style: none; padding: 0; margin: 0 0 1rem; display: grid; gap: 0.75rem; counter-reset: step; }
 .steps > li { counter-increment: step; }
 .steps h2 { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; text-transform: none; letter-spacing: 0; font-size: 1rem; color: var(--text); }
-.steps h2::before { content: counter(step); display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-size: 0.85rem; }
+.steps h2::before { content: counter(step); display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 50%; background: var(--fill-accent); color: var(--on-fill-accent); font-size: 0.85rem; }
 .installer { margin: 0 0 0.75rem; overflow-x: auto; padding: 0.85rem; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; font-size: 0.85rem; }
 .copy[data-copied="true"] { border-color: var(--ok); color: var(--ok); }
 .code { font-family: ui-monospace, monospace; font-size: 1.75rem; letter-spacing: 0.15em; }
@@ -330,7 +333,7 @@ main { padding: 1rem max(1rem, env(safe-area-inset-right)) calc(1.5rem + env(saf
 .phone-safety { margin: 0 0.75rem; padding: 0.6rem 0.75rem; border-radius: 10px; background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--text); }
 .phone-preview { position: fixed; right: 0.75rem; top: 3rem; width: 26vw; max-width: 9rem; aspect-ratio: 9 / 16; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); background: #000; opacity: 0.85; }
 .phone-foot { display: flex; gap: 0.5rem; padding: 0.75rem; padding-bottom: max(0.75rem, env(safe-area-inset-bottom)); }
-.phone-stop { flex: 1; min-height: 56px; font-size: 1.15rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; background: var(--danger); border-color: var(--danger); color: #fff; }
+.phone-stop { flex: 1; min-height: 56px; font-size: 1.15rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; background: var(--fill-danger); border-color: var(--fill-danger); color: #fff; }
 .phone-stop.resume { background: var(--ok); border-color: var(--ok); color: #04130a; }
 
 /* Routines and webhooks (the owner's panel cards). */
