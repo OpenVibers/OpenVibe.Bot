@@ -102,7 +102,7 @@ const WHIP_BASE = 'https://whip.test/ingest';
         assert.deepStrictEqual(d.drivers, ['pca9685', 'picamera2']);
         assert.deepStrictEqual(d.capabilities, { camera: true });
         assert.strictEqual(d.agent_version, '0.3.1');
-        for (const bad of [{ device_kind: 'toaster' }, { drivers: 'pca9685' }, { drivers: [1] }, { agent_version: 'x'.repeat(41) }, { capabilities: [] }]) {
+        for (const bad of [{ device_kind: 'toaster' }, { drivers: 'pca9685' }, { drivers: [1] }, { drivers: [{ state: 'up' }] }, { agent_version: 'x'.repeat(41) }, { capabilities: [] }]) {
             const before = c.messages.filter((m) => m.type === 'error').length;
             c.send({ v: 1, seq: 2, ts: Date.now(), type: 'status', ...bad });
             await c.waitFor(() => c.messages.filter((m) => m.type === 'error').length > before);
@@ -113,6 +113,13 @@ const WHIP_BASE = 'https://whip.test/ingest';
         assert.strictEqual(after.kind, 'bridge');
         assert.deepStrictEqual(after.drivers, ['pca9685', 'picamera2']);
         assert.strictEqual(after.agent_version, '0.3.1');
+        // The Node's own status frame lists drivers as objects (OpenVibe.Node internal/protocol Status): the names stay.
+        const errors = c.messages.filter((m) => m.type === 'error').length;
+        c.send({ v: 1, seq: 3, ts: Date.now(), type: 'status', firmware: 'x', device_kind: 'bridge', drivers: [{ name: 'adeept', driver: 'adeept_adr036', state: 'up' }, { name: 'dryrun', state: 'down' }], faults: [] });
+        let named;
+        for (let i = 0; i < 40; i++) { named = await deviceRow(hello.device_id); if (named.drivers.length && named.drivers[0] === 'adeept_adr036') break; await t.wait(25); }
+        assert.deepStrictEqual(named.drivers, ['adeept_adr036', 'dryrun']);
+        assert.strictEqual(c.messages.filter((m) => m.type === 'error').length, errors, 'no bad_frame for the Node\'s own status');
         c.close();
     });
 
