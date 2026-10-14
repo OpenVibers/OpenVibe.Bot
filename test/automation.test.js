@@ -140,7 +140,7 @@ const world = require('../public/sim-world');
         assert.deepStrictEqual([row.state, row.attempts, row.last_status], ['pending', 1, 500]);
         assert.ok(Date.parse(row.due_at) > Date.now() + (BACKOFF_S[0] - 2) * 1000, 'retried after 30 s');
         for (let i = 0; i < BACKOFF_S.length; i++) {
-            await t.db.query('UPDATE robot_webhook_deliveries SET due_at = now() WHERE id = $1', [row.id]);
+            await t.db.query("UPDATE robot_webhook_deliveries SET due_at = now() - interval '1 minute' WHERE id = $1", [row.id]);   // now() keeps microseconds the sender's clock does not
             await sender.sendDue();
         }
         row = await t.db.maybe('SELECT * FROM robot_webhook_deliveries WHERE id = $1', [rows[0].id]);
