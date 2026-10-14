@@ -35,6 +35,7 @@
  * With BOT_PAIRING_AUTHORITY=network the pairing codes are Network's and POST /pair answers 410 bot.pairing_moved.
  */
 const express = require('express');
+const { parseSteps, stepHelp, AGENT_MAX_STEPS, AGENT_MAX_S } = require('../routines');
 const { http } = require('openvibe-contracts');
 const { fail, userSubject, isRobotId, json } = require('../util');
 const { getProfile, listProfiles, checkProfile } = require('../profiles');
@@ -48,6 +49,9 @@ const CAP = {
     connect: 'bot.device.connect',
     dispatch: 'bot.job.dispatch',
 };
+
+/** Services that act as a person's agent (plan T15/T17): they drive a robot only where its owner turned agent_control on. */
+const AGENT_SERVICES = new Set(['svc:actor']);
 
 function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, submissions = null, routines = null, webhooks = null }) {
     const r = express.Router();
@@ -345,12 +349,56 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
     r.post('/robots/:id/commands', commandControl, wrap(async (req, res) => {
         requireControlCap(req);
         const subject = actedFor(req);
+        // The owner's agent (OpenVibe.Actor) drives only a robot its owner opened to it, and only as that owner.
+        if (req.principal.kind === 'service' && AGENT_SERVICES.has(req.principal.sub)) {
+            const robot = await domain.robots.get(req.params.id);
+            if (!robot) fail(404, 'bot.robot_not_found', 'no such robot');
+            if (!robot.agent_control) fail(403, 'bot.agent_not_allowed', 'the owner has not let their agent drive this robot');
+            if (subject !== robot.owner_subject) fail(403, 'bot.agent_not_allowed', 'an agent drives a robot only for its owner');
+        }
         const principal = req.principal.kind === 'service' ? { ...req.principal, subject } : req.principal;
         const result = await hub.operatorCommand(req.params.id, principal, subject, {
             id: req.body?.id, kind: req.body?.kind, value: req.body?.value, ms: req.body?.ms,
         });
         if (result.result === 'refused') fail(commandRefusalStatus(result.code), result.code, result.reason || null);
         res.json({ robot_id: req.params.id, ...result });
+    }));
+
+    // ── Steps (the owner's agent): plain step lines, run now as the owner and answered when they end ──
+    // The owner themself, or an agent service (OpenVibe.Actor) acting for the owner of a robot with agent_control on.
+    // Every step passes the same gate as a person's command (server/routines.js runSteps).
+    async function agentRobot(req) {
+        const subject = req.principal.kind === 'service' ? actedFor(req) : me(req);
+        const robot = await domain.robots.get(req.params.id);
+        if (!robot) fail(404, 'bot.robot_not_found', 'no such robot');
+        if (req.principal.kind === 'service') {
+            if (!AGENT_SERVICES.has(req.principal.sub)) fail(403, 'bot.forbidden', 'steps are for the owner and their agent');
+            if (!robot.agent_control) fail(403, 'bot.agent_not_allowed', 'the owner has not let their agent drive this robot');
+        }
+        if (subject !== robot.owner_subject) fail(403, req.principal.kind === 'service' ? 'bot.agent_not_allowed' : 'bot.forbidden', 'steps run only for the robot\'s owner');
+        const profile = await getProfile(domain.db, robot.profile_id, robot.profile_version);
+        if (!profile) fail(409, 'bot.profile_missing', 'the robot\'s profile is gone');
+        return { robot, subject, profile: profile.profile };
+    }
+    r.get('/robots/:id/steps', wrap(async (req, res) => {
+        needAutomation();
+        requireRead(req);
+        const { robot, profile } = await agentRobot(req);
+        const st = await hub.robotState(robot.id);
+        const sensors = st.telemetry && st.telemetry.sensors && typeof st.telemetry.sensors === 'object' ? st.telemetry.sensors : {};
+        res.json({
+            robot_id: robot.id, name: robot.name, profile_id: robot.profile_id, online: st.online, estop: st.estop, battery: st.battery, sensors,
+            steps: stepHelp(profile), max_steps: AGENT_MAX_STEPS, max_seconds: AGENT_MAX_S,
+        });
+    }));
+    r.post('/robots/:id/steps', commandControl, wrap(async (req, res) => {
+        needAutomation();
+        requireControlCap(req);
+        const { robot, subject, profile } = await agentRobot(req);
+        const { steps } = parseSteps(req.body?.steps, profile);
+        const principal = req.principal.kind === 'service' ? { ...req.principal, subject } : req.principal;
+        const result = await routines.runSteps(robot, steps, { principal, subject });
+        res.json({ robot_id: robot.id, result, steps: steps.length });
     }));
 
     // ── Audit ─────────────────────────────────────────────────────────────────────────────────────
@@ -423,4 +471,4 @@ function auditPresent(a) {
     return { id: a.id, robot_id: a.robot_id, device_id: a.device_id, operator_subject: a.operator_subject, operator_kind: a.operator_kind, role: a.role, kind: a.kind, value: a.value, result: a.result, reason: a.reason, latency_ms: a.latency_ms, at: a.at };
 }
 
-module.exports = { v1Router, CAP };
+module.exports = { v1Router, CAP, AGENT_SERVICES };

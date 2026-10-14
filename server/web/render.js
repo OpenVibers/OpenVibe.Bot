@@ -19,6 +19,7 @@
  *   esc(value)
  */
 const { qrSvg } = require('./qr');
+const { stepHelp } = require('../routines');
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ESC[c]);
 /** A data-* attribute's JSON, escaped for a double-quoted attribute. */
@@ -253,22 +254,6 @@ function renderWidget(w, { profile = {}, allowed_commands = [], signaling_url = 
 const toggle = (name, on, title, note, disabled = false, was = false) => `${was ? `<input type="hidden" name="${esc(name)}_was" value="${on ? 'on' : 'off'}">` : ''}<input type="hidden" name="${esc(name)}" value="off">
 <label class="toggle"><input type="checkbox" name="${esc(name)}" value="on"${on ? ' checked' : ''}${disabled ? ' disabled' : ''}><span><b>${esc(title)}</b><small>${esc(note)}</small></span></label>`;
 
-/** The step words this robot takes (server/routines.js parseSteps), for the routine form's help line. */
-function stepHelp(profile) {
-    const c = profile.commands || {};
-    const words = [];
-    if (c.drive) words.push('forward 2', 'back 1', 'left 0.5', 'right 0.5', 'stop');
-    words.push('wait 1');
-    if (c.say) words.push('say Hello');
-    if (c.display && c.display.faces) words.push(`face ${c.display.faces[0]}`);
-    if (c.display && c.display.modes.includes('text')) words.push('show Hi');
-    if (c.ptz) words.push(...Object.keys(c.ptz.axes).map((a) => `${a} 0.5 1`));
-    for (const [name, a] of Object.entries((c.actuator && c.actuator.names) || {})) {
-        words.push(a.type === 'rgb' ? `${name} #ff8800` : a.type === 'tone' ? `${name} A4 0.3` : a.type === 'bool' ? `${name} on` : `${name} 0.5`);
-    }
-    for (const name of Object.keys((c.button && c.button.names) || {})) words.push(`press ${name}`);
-    return words;
-}
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 /** The owner's routines: what exists, Run and Remove, and the add form (plain markup, works without JavaScript). */
@@ -315,6 +300,15 @@ ${a.hooks.length ? `<ul class="people-list">${a.hooks.map(row).join('\n')}</ul>`
 <label class="field"><span>Endpoint (https)</span><input type="url" name="url" required maxlength="300" placeholder="https://example.com/robot-events"></label>
 <span class="days">${a.events.map((e) => `<label class="check"><input type="checkbox" name="events" value="${esc(e)}" checked> ${esc(e.replace(/^bot\./, ''))}</label>`).join(' ')}</span>
 <button type="submit">Add webhook</button>
+</form></section>`;
+}
+
+/** The owner's agent switch: their OpenVibe.Actor agent may drive the robot as them, through the same gate. */
+function agentForm(robot) {
+    return `<section class="setting-card" id="agent" aria-labelledby="agent-h"><h2 id="agent-h">Your agent</h2>
+<form class="embed-form" method="post" action="/robots/${esc(robot.id)}/agent">
+${toggle('agent_control', robot.agent_control, 'Let my OpenVibe.Actor agent drive this robot', 'Ask your agent on openvibe.actor to move it, speak or show something. It acts as you, through the same limits, cooldowns and e-stop, and every command it sends is on the record.')}
+<button type="submit">Save</button>
 </form></section>`;
 }
 
@@ -465,7 +459,7 @@ ${embed && role === 'watcher' && !signedIn ? `<p class="embed-sign-in" data-driv
 <div class="widgets">
 ${widgets.join('\n')}
 </div>
-${tryIt ? tryOutro(profile) : ''}${role === 'owner' && !embed && !tryIt ? `<div class="owner-settings">${localProfileForm(robot, profile, profileForm)}${automation ? routinesCard(robot, profile, automation) + webhooksCard(robot, automation) : ''}${listingForm(robot)}${embedForm(robot)}${streamingForm(robot, streaming)}${people ? peopleCard(robot, people) : ''}</div>` : ''}
+${tryIt ? tryOutro(profile) : ''}${role === 'owner' && !embed && !tryIt ? `<div class="owner-settings">${localProfileForm(robot, profile, profileForm)}${automation ? routinesCard(robot, profile, automation) + webhooksCard(robot, automation) : ''}${agentForm(robot)}${listingForm(robot)}${embedForm(robot)}${streamingForm(robot, streaming)}${people ? peopleCard(robot, people) : ''}</div>` : ''}
 </main>`;
     return page(tryIt ? 'Try the panel with a simulated rover' : robot.name, body, {
         scripts: panelScripts(profile, tryIt), bodyClass: embed ? 'embed-page' : 'panel-page',

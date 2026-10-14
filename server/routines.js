@@ -10,9 +10,12 @@
  *     wait <seconds>                say <text>           face <name>          show <text>          press <button>
  *     <actuator> <value> [seconds]  (number, #rrggbb or off, a note like A4 or off, on/off; held for the seconds)
  *     pan|tilt|zoom <value> [seconds]
+ *   stepHelp(profile) → one example line per step word this robot takes
  *   parseTrigger({ type, every, at, days }) → { type: 'manual' } | { type: 'schedule', every?|at+days } | { type: 'online' }
  *   nextRun(trigger, from) → Date | null
- *   createRoutines({ db, domain, hub, now, log }) → { list, get, create, remove, run, tick, onOnline, stop }
+ *   createRoutines({ db, domain, hub, now, log }) → { list, get, create, remove, run, runSteps, tick, onOnline, stop }
+ *     runSteps(robot, steps, { principal, subject }) runs steps now and resolves with how it ended (the owner's agent,
+ *     POST /api/v1/robots/:id/steps); at most AGENT_MAX_STEPS steps and AGENT_MAX_S seconds, nothing stored.
  *
  * A held step (a motion or a tone) is re-sent every HOLD_MS so the device's deadman never stops it early, and a zero
  * drive ends it. A refused or failed command stops the routine there (an e-stop, the robot going offline, a cooldown
@@ -26,6 +29,8 @@ const MAX_STEP_S = 60;
 const MAX_TOTAL_S = 600;
 const MIN_EVERY_MIN = 5;
 const TICK_MS = 30000;
+const AGENT_MAX_STEPS = 20;
+const AGENT_MAX_S = 30;
 
 const fail = (detail) => { throw new BotError(422, 'bot.invalid_routine', detail); };
 const num = (s, what, lo, hi) => {
@@ -127,6 +132,23 @@ function parseSteps(source, profile) {
 }
 
 const TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
+/** The step words this robot takes (server/routines.js parseSteps), for the routine form's help line and the agent's view. */
+function stepHelp(profile) {
+    const c = profile.commands || {};
+    const words = [];
+    if (c.drive) words.push('forward 2', 'back 1', 'left 0.5', 'right 0.5', 'stop');
+    words.push('wait 1');
+    if (c.say) words.push('say Hello');
+    if (c.display && c.display.faces) words.push(`face ${c.display.faces[0]}`);
+    if (c.display && c.display.modes.includes('text')) words.push('show Hi');
+    if (c.ptz) words.push(...Object.keys(c.ptz.axes).map((a) => `${a} 0.5 1`));
+    for (const [name, a] of Object.entries((c.actuator && c.actuator.names) || {})) {
+        words.push(a.type === 'rgb' ? `${name} #ff8800` : a.type === 'tone' ? `${name} A4 0.3` : a.type === 'bool' ? `${name} on` : `${name} 0.5`);
+    }
+    for (const name of Object.keys((c.button && c.button.names) || {})) words.push(`press ${name}`);
+    return words;
+}
+
 function parseTrigger(t = {}) {
     const type = String(t.type || 'manual');
     if (type === 'manual' || type === 'online') return { type };
@@ -193,12 +215,38 @@ function createRoutines({ db, domain, hub, now = () => Date.now(), log = console
         await db.query('UPDATE robot_routines SET last_result = $2, updated_at = $3 WHERE id = $1', [id, String(result).slice(0, 200), iso(now())]);
     }
 
-    /** Send one command as the owner; resolves true when the device ran it, else false with the reason kept. */
-    async function send(robot, step, value, ms) {
-        const principal = { kind: 'user', subject: robot.owner_subject, role: 'user', via: 'routine' };
-        const r = await hub.operatorCommand(robot.id, principal, robot.owner_subject, { id: prefixedId('rcmd', now()), kind: step.kind, value, ms });
+    const asOwner = (robot) => ({ principal: { kind: 'user', subject: robot.owner_subject, role: 'user', via: 'routine' }, subject: robot.owner_subject });
+
+    /** Send one command as `who` (the owner for a routine); resolves ok when the device ran it, else the reason. */
+    async function send(robot, step, value, ms, who) {
+        const r = await hub.operatorCommand(robot.id, who.principal, who.subject, { id: prefixedId('rcmd', now()), kind: step.kind, value, ms });
         if (r.result === 'ack') return { ok: true };
         return { ok: false, why: r.reason || r.code || r.result };
+    }
+
+    /** Run parsed steps in order through the gate; resolves 'done' or 'stopped: <why>'. */
+    async function execute(robot, steps, who, state) {
+        for (const step of steps) {
+            if (state.stop) return 'stopped: removed';
+            if (step.kind === 'wait') { await sleep(step.seconds * 1000); continue; }
+            if (!step.hold) {
+                const r = await send(robot, step, step.value, null, who);
+                if (!r.ok) return `stopped: ${r.why}`;
+                continue;
+            }
+            // Held: re-sent within the deadman window until the step's time is up, then released.
+            const end = now() + step.seconds * 1000;
+            let why = null;
+            while (now() < end && !state.stop) {
+                const r = await send(robot, step, step.value, Math.min(300, end - now() + HOLD_MS), who);
+                if (!r.ok) { why = r.why; break; }
+                await sleep(Math.min(HOLD_MS, Math.max(0, end - now())));
+            }
+            const release = step.kind === 'drive' ? {} : step.release;
+            if (release) await send(robot, step, release, null, who).catch(() => {});
+            if (why) return `stopped: ${why}`;
+        }
+        return state.stop ? 'stopped: removed' : 'done';
     }
 
     /** Run a routine now (in the background); false when one is already running on the robot. */
@@ -215,26 +263,7 @@ function createRoutines({ db, domain, hub, now = () => Date.now(), log = console
             const steps = typeof routine.steps === 'string' ? JSON.parse(routine.steps) : routine.steps;
             let result = 'done';
             try {
-                for (const step of steps) {
-                    if (state.stop) { result = 'stopped: removed'; break; }
-                    if (step.kind === 'wait') { await sleep(step.seconds * 1000); continue; }
-                    if (!step.hold) {
-                        const r = await send(robot, step, step.value, null);
-                        if (!r.ok) { result = `stopped: ${r.why}`; break; }
-                        continue;
-                    }
-                    // Held: re-sent within the deadman window until the step's time is up, then released.
-                    const end = now() + step.seconds * 1000;
-                    let ok = true;
-                    while (now() < end && !state.stop) {
-                        const r = await send(robot, step, step.value, Math.min(300, end - now() + HOLD_MS));
-                        if (!r.ok) { result = `stopped: ${r.why}`; ok = false; break; }
-                        await sleep(Math.min(HOLD_MS, Math.max(0, end - now())));
-                    }
-                    const release = step.kind === 'drive' ? {} : step.release;
-                    if (release) await send(robot, step, release, null).catch(() => {});
-                    if (!ok) break;
-                }
+                result = await execute(robot, steps, asOwner(robot), state);
             } catch (e) {
                 result = `stopped: ${e.message}`;
                 log.warn(`[Bot] routine ${id}: ${e.message}`);
@@ -245,6 +274,24 @@ function createRoutines({ db, domain, hub, now = () => Date.now(), log = console
         })();
         log.log && log.log(`[Bot] routine ${id} on ${robot.id} started (${reason})`);
         return true;
+    }
+
+    /**
+     * Run steps now as `who` and wait for the end (the owner's agent). 409 while a routine runs on the robot; the
+     * steps must fit AGENT_MAX_STEPS and AGENT_MAX_S, waits included.
+     */
+    async function runSteps(robot, steps, who) {
+        if (steps.length > AGENT_MAX_STEPS) throw new BotError(422, 'bot.invalid_routine', `at most ${AGENT_MAX_STEPS} steps at a time`);
+        const total = steps.reduce((n, s) => n + (s.seconds || 0), 0);
+        if (total > AGENT_MAX_S) throw new BotError(422, 'bot.invalid_routine', `at most ${AGENT_MAX_S} seconds at a time`);
+        if (running.has(robot.id)) throw new BotError(409, 'bot.routine_busy', 'a routine is already running on this robot');
+        const state = { routineId: null, stop: false };
+        running.set(robot.id, state);
+        try {
+            return await execute(robot, steps, who, state);
+        } catch (e) {
+            return `stopped: ${e.message}`;
+        } finally { running.delete(robot.id); }
     }
 
     /** The scheduler: each due, enabled scheduled routine runs (if its robot is free) and gets its next time. */
@@ -272,7 +319,7 @@ function createRoutines({ db, domain, hub, now = () => Date.now(), log = console
     }
     function stop() { if (timer) clearInterval(timer); timer = null; for (const s of running.values()) s.stop = true; }
 
-    return { list, get, create, remove, run, tick, onOnline, start, stop, isRunning: (robotId) => running.has(robotId), describeTrigger };
+    return { list, get, create, remove, run, runSteps, tick, onOnline, start, stop, isRunning: (robotId) => running.has(robotId), describeTrigger };
 }
 
-module.exports = { createRoutines, parseSteps, parseTrigger, nextRun, describeTrigger, HOLD_MS };
+module.exports = { createRoutines, parseSteps, parseTrigger, nextRun, describeTrigger, stepHelp, HOLD_MS, AGENT_MAX_STEPS, AGENT_MAX_S };

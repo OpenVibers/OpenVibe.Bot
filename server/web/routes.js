@@ -269,7 +269,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     const phoneUrl = (robotId, pairing) => `${config.baseUrl}/device/phone#robot=${encodeURIComponent(robotId)}&code=${encodeURIComponent(pairing.code)}`;
 
     // The embed flag is web-only: domain.present.robot (and so /api/v1) does not carry it.
-    const presentForPage = (row) => ({ ...domain.present.robot(row), embed_public: !!row.embed_public, listed: !!row.listed });
+    const presentForPage = (row) => ({ ...domain.present.robot(row), embed_public: !!row.embed_public, listed: !!row.listed, agent_control: !!row.agent_control });
 
     // The front page of openvibe.bot (server/web/home.js): public, indexable, with the OpenVibe Frame. Its two
     // actions differ by sign-in, so it is never stored by a shared cache.
@@ -480,6 +480,19 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         const { robot } = await ownRobot(req);
         await webhooks.remove(robot.id, req.params.hid);
         return res.redirect(303, `/panel/${robot.id}#webhooks`);
+    }));
+
+    r.post('/robots/:id/agent', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        const robot = await domain.robots.get(req.params.id);
+        if (!robot) throw new BotError(404, 'bot.robot_not_found', 'no such robot');
+        if (robot.owner_subject !== me.subject) throw new BotError(403, 'bot.forbidden', 'only the owner decides about their agent');
+        const sent = req.body && req.body.agent_control;
+        const value = Array.isArray(sent) ? sent[sent.length - 1] : sent;
+        if (value !== 'on' && value !== 'off') throw new BotError(422, 'bot.invalid_input', 'agent_control must be on or off');
+        await domain.robots.setAgentControl(robot.id, value === 'on');
+        res.redirect(303, `/panel/${robot.id}#agent`);
     }));
 
     r.post('/robots/:id/listing', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
