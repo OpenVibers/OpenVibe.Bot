@@ -37,7 +37,13 @@ const TABLES = [
 async function extraExport(db, subject) {
     const robots = await db.many(`SELECT id, name, profile_id, profile_version, access_policy, limits, created_at, updated_at FROM robots
         WHERE owner_subject = $1 ORDER BY created_at DESC`, [subject]);
-    return robots.length ? [{ name: 'robots.json', content: robots }] : [];
+    if (!robots.length) return [];
+    const ids = robots.map((r) => r.id);
+    const routines = await db.many('SELECT robot_id, name, source, trigger, enabled, created_at FROM robot_routines WHERE robot_id = ANY($1::text[]) ORDER BY created_at', [ids]);
+    const hooks = await db.many('SELECT robot_id, url, events, created_at FROM robot_webhooks WHERE robot_id = ANY($1::text[]) ORDER BY created_at', [ids]);
+    return [{ name: 'robots.json', content: robots },
+        ...(routines.length ? [{ name: 'robot-routines.json', content: routines }] : []),
+        ...(hooks.length ? [{ name: 'robot-webhooks.json', content: hooks }] : [])];
 }
 
 /** The account-data handle over Bot's domain (server/domain: robots.remove, devices.revoke). */

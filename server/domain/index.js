@@ -65,7 +65,7 @@ function noteToHz(note) {
 }
 
 
-function createDomain({ db, config, outbox, link = null, nodes = null, openre = null, now = () => Date.now(), log = console }) {
+function createDomain({ db, config, outbox, link = null, nodes = null, openre = null, webhooks = null, onEvent = null, now = () => Date.now(), log = console }) {
     // ── Presenters ────────────────────────────────────────────────────────────────────────────────
     const presentRobot = (r) => (r ? {
         id: r.id, name: r.name, profile_id: r.profile_id, profile_version: r.profile_version,
@@ -88,6 +88,11 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
 
     async function emit(t, event_type, subject, payload) {
         await outbox.emitIn(t, { ...ENVELOPE, event_type, subject, payload });
+        // The robot's webhooks get it in the same transaction (server/webhooks.js); listeners (the routines' "each time
+        // it comes online") hear of it once the transaction has had time to commit.
+        const robotId = subject && subject.type === 'robot' ? subject.id : null;
+        if (webhooks && robotId) await webhooks.enqueueIn(t, event_type, robotId, payload);
+        if (onEvent && robotId) { const tm = setTimeout(() => { try { onEvent(event_type, robotId, payload); } catch (e) { log.warn(`[Bot] event listener: ${e.message}`); } }, 300); if (tm.unref) tm.unref(); }
     }
 
     // ── Membership and roles ──────────────────────────────────────────────────────────────────────

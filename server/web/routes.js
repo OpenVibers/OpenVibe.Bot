@@ -124,7 +124,7 @@ const PANEL_CSP = ["default-src 'self'", `script-src 'self' ${PANEL_SCRIPT_SRC}`
 const embedCsp = (config) => ["default-src 'self'", `script-src 'self' ${PANEL_SCRIPT_SRC}`, `connect-src 'self' ${PANEL_CONNECT_SRC}`,
     `frame-ancestors ${frameAncestors(config)}`, "object-src 'none'", "base-uri 'self'"].join('; ');
 
-function createWebRoutes(config, { domain = null, sim = null, onvif = null, limits = null, identity = null, hub = null, log = console, submissions = null, releaseLastmod } = {}) {
+function createWebRoutes(config, { domain = null, sim = null, onvif = null, limits = null, identity = null, hub = null, log = console, submissions = null, routines = null, webhooks = null, releaseLastmod } = {}) {
     const r = express.Router();
     // The public front page is crawlable; sign-in, the API and every signed-in or per-robot page are not.
     r.get('/robots.txt', (req, res) => res.type('text/plain').send(['User-agent: *', 'Allow: /$', 'Disallow: /auth/', 'Disallow: /api/',
@@ -427,6 +427,61 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         res.type('html').send(renderPairingPage({ robot: domain.present.robot(robot), pairing, profile: await profileOf(robot), phoneUrl: phoneUrl(robot.id, pairing) }));
     }));
 
+    // ── Routines and webhooks (the owner's panel cards; the same rules as /api/v1) ──
+    async function ownRobot(req) {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        const robot = await domain.robots.get(req.params.id);
+        if (!robot) throw new BotError(404, 'bot.robot_not_found', 'no such robot');
+        if (robot.owner_subject !== me.subject) throw new BotError(403, 'bot.forbidden', 'only the owner manages routines and webhooks');
+        if (!routines || !webhooks) throw new BotError(503, 'bot.unavailable', 'automation is not available');
+        return { me, robot };
+    }
+    const many = (v) => (Array.isArray(v) ? v : v == null ? [] : [v]);
+    r.post('/robots/:id/routines', ...manage, express.urlencoded({ extended: false, limit: '16kb' }), page(async (req, res) => {
+        const { me, robot } = await ownRobot(req);
+        const b = req.body || {};
+        const kind = String(b.trigger || 'manual');
+        const trigger = kind === 'every' ? { type: 'schedule', every: b.every } : kind === 'daily' ? { type: 'schedule', at: b.at, days: many(b.days) } : { type: kind };
+        try {
+            await routines.create(robot, me, { name: b.name, source: b.steps, trigger }, await profileOf(robot));
+        } catch (e) {
+            if (e.status !== 422) throw e;
+            res.status(422);
+            return sendPanel(res, robot, await profileOf(robot), 'owner', 'page', true, { automation: { routineError: e.detail || e.message, values: { name: b.name, steps: b.steps, trigger: kind, every: b.every, at: b.at, days: many(b.days) } } });
+        }
+        return res.redirect(303, `/panel/${robot.id}#routines`);
+    }));
+    r.post('/robots/:id/routines/:rid/run', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
+        const { robot } = await ownRobot(req);
+        const routine = await routines.get(req.params.rid);
+        if (!routine || routine.robot_id !== robot.id) throw new BotError(404, 'bot.routine_not_found', 'no such routine');
+        await routines.run(routine.id, { reason: 'owner' });
+        return res.redirect(303, `/panel/${robot.id}#routines`);
+    }));
+    r.post('/robots/:id/routines/:rid/remove', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
+        const { robot } = await ownRobot(req);
+        await routines.remove(robot.id, req.params.rid);
+        return res.redirect(303, `/panel/${robot.id}#routines`);
+    }));
+    r.post('/robots/:id/webhooks', ...manage, express.urlencoded({ extended: false, limit: '4kb' }), page(async (req, res) => {
+        const { me, robot } = await ownRobot(req);
+        let made;
+        try { made = await webhooks.create(robot, me, { url: req.body.url, events: many(req.body.events) }); } catch (e) {
+            if (![409, 422].includes(e.status)) throw e;
+            res.status(e.status);
+            return sendPanel(res, robot, await profileOf(robot), 'owner', 'page', true, { automation: { webhookError: e.detail || e.message } });
+        }
+        // The secret is shown on this page alone (never in a URL), so the answer is the panel itself.
+        res.status(201);
+        return sendPanel(res, robot, await profileOf(robot), 'owner', 'page', true, { automation: { webhookSecret: made.secret } });
+    }));
+    r.post('/robots/:id/webhooks/:hid/remove', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
+        const { robot } = await ownRobot(req);
+        await webhooks.remove(robot.id, req.params.hid);
+        return res.redirect(303, `/panel/${robot.id}#webhooks`);
+    }));
+
     r.post('/robots/:id/listing', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
         const me = requireUser(req);
         if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
@@ -549,9 +604,16 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         // The owner's People card: every member but the owner, with Network's name for each. A Network that
         // does not answer leaves the subject id and a note (see renderPanel) instead of failing the panel.
         const people = role === 'owner' && mode === 'page' ? await peopleFor(robot) : null;
+        // The owner's routines and webhooks (server/routines.js, server/webhooks.js), with each hook's last delivery.
+        let automation = null;
+        if (role === 'owner' && mode === 'page' && routines && webhooks) {
+            const hooks = await webhooks.list(robot.id);
+            for (const h of hooks) { const d = (await webhooks.recent(h.id))[0]; h.last = d ? `${d.state}${d.last_status ? ` (${d.last_status})` : ''}` : null; }
+            automation = { routines: await routines.list(robot.id), hooks, events: webhooks.EVENTS, describe: (t) => routines.describeTrigger(typeof t === 'string' ? JSON.parse(t) : t), ...(profileForm.automation || {}) };
+        }
         res.type('html').send(renderPanel({
             robot: presentForPage(robot), profile, role, mode, signedIn, streaming, people, signaling_url,
-            profileForm,
+            profileForm, automation,
             allowed_commands: role === 'watcher' ? [] : domain.control.allowedFor(robot, role, profile),
             // A held control is re-sent well inside the device's deadline, so it never stops between two frames.
             holdResendMs: Math.max(50, Math.min(HOLD_RESEND_MS, Math.floor(maxCommandMs / 2))),

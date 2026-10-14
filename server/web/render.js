@@ -253,6 +253,71 @@ function renderWidget(w, { profile = {}, allowed_commands = [], signaling_url = 
 const toggle = (name, on, title, note, disabled = false, was = false) => `${was ? `<input type="hidden" name="${esc(name)}_was" value="${on ? 'on' : 'off'}">` : ''}<input type="hidden" name="${esc(name)}" value="off">
 <label class="toggle"><input type="checkbox" name="${esc(name)}" value="on"${on ? ' checked' : ''}${disabled ? ' disabled' : ''}><span><b>${esc(title)}</b><small>${esc(note)}</small></span></label>`;
 
+/** The step words this robot takes (server/routines.js parseSteps), for the routine form's help line. */
+function stepHelp(profile) {
+    const c = profile.commands || {};
+    const words = [];
+    if (c.drive) words.push('forward 2', 'back 1', 'left 0.5', 'right 0.5', 'stop');
+    words.push('wait 1');
+    if (c.say) words.push('say Hello');
+    if (c.display && c.display.faces) words.push(`face ${c.display.faces[0]}`);
+    if (c.display && c.display.modes.includes('text')) words.push('show Hi');
+    if (c.ptz) words.push(...Object.keys(c.ptz.axes).map((a) => `${a} 0.5 1`));
+    for (const [name, a] of Object.entries((c.actuator && c.actuator.names) || {})) {
+        words.push(a.type === 'rgb' ? `${name} #ff8800` : a.type === 'tone' ? `${name} A4 0.3` : a.type === 'bool' ? `${name} on` : `${name} 0.5`);
+    }
+    for (const name of Object.keys((c.button && c.button.names) || {})) words.push(`press ${name}`);
+    return words;
+}
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/** The owner's routines: what exists, Run and Remove, and the add form (plain markup, works without JavaScript). */
+function routinesCard(robot, profile, a) {
+    const help = stepHelp(profile);
+    const v = a.values || {};
+    const row = (r) => {
+        const last = r.last_result ? `${r.last_result === 'running' ? 'running now' : `last: ${r.last_result}`}${r.last_run_at ? ` (${new Date(r.last_run_at).toISOString().slice(0, 16).replace('T', ' ')} UTC)` : ''}` : 'not run yet';
+        return `<li class="person"><span class="who"><b>${esc(r.name)}</b><small>${esc(a.describe(r.trigger))}${r.enabled ? '' : ' · off'} · ${esc(last)}</small></span>`
+            + `<span class="routine-actions"><form method="post" action="/robots/${esc(robot.id)}/routines/${esc(r.id)}/run"><button type="submit">Run</button></form>`
+            + `<form method="post" action="/robots/${esc(robot.id)}/routines/${esc(r.id)}/remove"><button type="submit" class="quiet">Remove</button></form></span></li>`;
+    };
+    const t = v.trigger || 'manual';
+    return `<section class="setting-card" id="routines" aria-labelledby="routines-h"><h2 id="routines-h">Routines</h2>
+<p class="setting-note">Steps the robot runs by itself, through the same limits, cooldowns and e-stop as you. Run one now, on a schedule, or each time the robot comes online; anything the robot refuses stops it there.</p>
+${a.routineError ? `<p class="error" role="alert">${esc(a.routineError)}</p>` : ''}
+${a.routines.length ? `<ul class="people-list">${a.routines.map(row).join('\n')}</ul>` : ''}
+<details${a.routineError ? ' open' : ''}><summary>Add a routine</summary>
+<form class="routine-form" method="post" action="/robots/${esc(robot.id)}/routines">
+<label class="field"><span>Name</span><input name="name" maxlength="60" required value="${esc(v.name || '')}" placeholder="Patrol"></label>
+<label class="field"><span>Steps, one per line</span><textarea name="steps" rows="6" required spellcheck="false" placeholder="${esc(help.slice(0, 5).join('\n'))}">${esc(v.steps || '')}</textarea></label>
+<p class="setting-note">This robot takes: ${help.map((w) => `<code>${esc(w)}</code>`).join(' ')} (seconds after a motion; a line starting with # is a note).</p>
+<fieldset class="trigger"><legend>When</legend>
+<label class="check"><input type="radio" name="trigger" value="manual"${t === 'manual' ? ' checked' : ''}> When I run it</label>
+<label class="check"><input type="radio" name="trigger" value="every"${t === 'every' ? ' checked' : ''}> Every <input type="number" name="every" min="5" max="10080" step="1" value="${esc(v.every || '60')}" aria-label="Minutes"> minutes</label>
+<label class="check"><input type="radio" name="trigger" value="daily"${t === 'daily' ? ' checked' : ''}> At <input type="time" name="at" value="${esc(v.at || '09:00')}" aria-label="Time (UTC)"> UTC on</label>
+<span class="days">${DAYS.map((d, i) => `<label class="check"><input type="checkbox" name="days" value="${i}"${!v.days || v.days.includes(String(i)) ? ' checked' : ''}> ${d}</label>`).join(' ')}</span>
+<label class="check"><input type="radio" name="trigger" value="online"${t === 'online' ? ' checked' : ''}> Each time it comes online</label>
+</fieldset>
+<button type="submit" class="primary">Save routine</button>
+</form></details></section>`;
+}
+
+/** The owner's webhooks: where the robot's events go, the add form, and a new hook's secret once. */
+function webhooksCard(robot, a) {
+    const row = (h) => `<li class="person"><span class="who"><b>${esc(h.url)}</b><small>${esc((h.events || []).map((e) => e.replace(/^bot\./, '')).join(', '))}${h.last ? ` · last delivery: ${esc(h.last)}` : ''}</small></span>`
+        + `<form method="post" action="/robots/${esc(robot.id)}/webhooks/${esc(h.id)}/remove"><button type="submit" class="quiet">Remove</button></form></li>`;
+    return `<section class="setting-card" id="webhooks" aria-labelledby="webhooks-h"><h2 id="webhooks-h">Webhooks</h2>
+<p class="setting-note">Bot posts this robot's events to your https endpoint, signed like OpenVibe.Events deliveries (<code>X-OpenVibe-Signature-V2</code>, with the hook's own secret), and retries for about three hours.</p>
+${a.webhookSecret ? `<p class="secret-once" role="status">The new hook's secret, shown this once: <code>${esc(a.webhookSecret)}</code></p>` : ''}
+${a.webhookError ? `<p class="error" role="alert">${esc(a.webhookError)}</p>` : ''}
+${a.hooks.length ? `<ul class="people-list">${a.hooks.map(row).join('\n')}</ul>` : ''}
+<form class="webhook-form" method="post" action="/robots/${esc(robot.id)}/webhooks">
+<label class="field"><span>Endpoint (https)</span><input type="url" name="url" required maxlength="300" placeholder="https://example.com/robot-events"></label>
+<span class="days">${a.events.map((e) => `<label class="check"><input type="checkbox" name="events" value="${esc(e)}" checked> ${esc(e.replace(/^bot\./, ''))}</label>`).join(' ')}</span>
+<button type="submit">Add webhook</button>
+</form></section>`;
+}
+
 /** The owner's directory switch: list the robot on /robots with a public page (/r/:id), watchable by anyone. */
 function listingForm(robot) {
     return `<section class="setting-card" aria-labelledby="listing-h"><h2 id="listing-h">Directory</h2>
@@ -373,7 +438,7 @@ function turnStrip(robot, role) {
     return `<div class="turn" data-turn hidden><span class="turn-state" data-turn-state></span><span class="turn-meta" data-turn-meta></span><form method="post" action="/robots/${esc(robot.id)}/queue/leave" data-turn-leave><button type="submit" class="quiet">Leave the queue</button></form></div>`;
 }
 
-function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs = 150, mode = 'page', signedIn = true, streaming = null, people = null, signaling_url = null, profileForm = {}, tryIt = false }) {
+function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs = 150, mode = 'page', signedIn = true, streaming = null, people = null, signaling_url = null, profileForm = {}, tryIt = false, automation = null }) {
     const embed = mode === 'embed';
     const latched = !!(robot.estop && robot.estop.latched);
     const widgets = (profile.widgets || []).map((w, i) => ({ w, i }))
@@ -400,7 +465,7 @@ ${embed && role === 'watcher' && !signedIn ? `<p class="embed-sign-in" data-driv
 <div class="widgets">
 ${widgets.join('\n')}
 </div>
-${tryIt ? tryOutro(profile) : ''}${role === 'owner' && !embed && !tryIt ? `<div class="owner-settings">${localProfileForm(robot, profile, profileForm)}${listingForm(robot)}${embedForm(robot)}${streamingForm(robot, streaming)}${people ? peopleCard(robot, people) : ''}</div>` : ''}
+${tryIt ? tryOutro(profile) : ''}${role === 'owner' && !embed && !tryIt ? `<div class="owner-settings">${localProfileForm(robot, profile, profileForm)}${automation ? routinesCard(robot, profile, automation) + webhooksCard(robot, automation) : ''}${listingForm(robot)}${embedForm(robot)}${streamingForm(robot, streaming)}${people ? peopleCard(robot, people) : ''}</div>` : ''}
 </main>`;
     return page(tryIt ? 'Try the panel with a simulated rover' : robot.name, body, {
         scripts: panelScripts(profile, tryIt), bodyClass: embed ? 'embed-page' : 'panel-page',

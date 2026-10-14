@@ -332,3 +332,14 @@ main { padding: 1rem max(1rem, env(safe-area-inset-right)) calc(1.5rem + env(saf
 .phone-foot { display: flex; gap: 0.5rem; padding: 0.75rem; padding-bottom: max(0.75rem, env(safe-area-inset-bottom)); }
 .phone-stop { flex: 1; min-height: 56px; font-size: 1.15rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; background: var(--danger); border-color: var(--danger); color: #fff; }
 .phone-stop.resume { background: var(--ok); border-color: var(--ok); color: #04130a; }
+
+/* Routines and webhooks (the owner's panel cards). */
+.routine-actions { display: inline-flex; gap: 0.4rem; }
+.routine-form, .webhook-form { display: grid; gap: 0.6rem; margin-top: 0.6rem; }
+.routine-form textarea { width: 100%; box-sizing: border-box; font: 0.85rem/1.5 ui-monospace, monospace; padding: 0.6rem; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+.routine-form .trigger { border: 1px solid var(--line); border-radius: 10px; padding: 0.6rem 0.8rem; display: grid; gap: 0.35rem; }
+.routine-form .trigger input[type="number"] { width: 5.5rem; min-height: 36px; }
+.routine-form .trigger input[type="time"] { min-height: 36px; }
+.days { display: flex; flex-wrap: wrap; gap: 0.3rem 0.8rem; }
+.secret-once { padding: 0.6rem 0.8rem; border-radius: 10px; background: color-mix(in srgb, var(--ok) 14%, transparent); overflow-wrap: anywhere; }
+.setting-note code { font-size: 0.8em; }
