@@ -14,7 +14,7 @@ const { boot, check, done } = require('./helpers/app');
     let seq = 0;
     const frame = (type, fields) => ({ v: 1, seq: ++seq, ts: Date.now(), type, ...fields });
     const poll = async (fn, ms = 8000) => { const end = Date.now() + ms; while (Date.now() < end) { const v = await fn(); if (v) return v; await t.wait(30); } return null; };
-    const COMPUTER = { terminal: { level: 'trusted', timeout_s: 30 }, files: { level: 'trusted', roots: ['/home/alex'] }, screen: { level: 'trusted', tool: 'grim' }, probe: { lan_only: true } };
+    const COMPUTER = { terminal: { level: 'trusted', timeout_s: 30 }, files: { level: 'trusted', roots: ['/home/alex'] }, screen: { level: 'trusted', tool: 'grim' }, probe: { lan_only: true }, input: { level: 'trusted', tool: 'xdotool', scroll: true } };
     const seen = [];
 
     /** A Network-paired machine of `owner` whose fake Node answers computer commands like the plugin would. */
@@ -32,6 +32,7 @@ const { boot, check, done } = require('./helpers/app');
             if (m.kind === 'exec') c.send(frame('ack', { id: m.id, latency_ms: 5, data: { exit_code: 0, stdout: m.value.argv.includes('big') ? 'x'.repeat(200 * 1024) : 'hi\n', stderr: '', truncated: false, timed_out: false, duration_ms: 4 } }));
             else if (m.kind === 'fs') c.send(frame('ack', { id: m.id, data: { path: m.value.path, entries: [], total: 0, truncated: false } }));
             else if (m.kind === 'probe') c.send(frame('ack', { id: m.id, data: { status: 200, body: '{"up":true}', ms: 3 } }));
+            else if (m.kind === 'input') c.send(frame('ack', { id: m.id, data: { done: true, action: m.value.action } }));
             else c.send(frame('nack', { id: m.id, fault_code: 'not_allowed', message: 'this machine allows observing only' }));
         });
         await poll(() => t.hub.computerOf(deviceId) !== null || !computer);
@@ -64,12 +65,25 @@ const { boot, check, done } = require('./helpers/app');
         assert.deepStrictEqual([nack.status, nack.json.result, nack.json.reason], [200, 'nack', 'this machine allows observing only']);
     });
 
+    await check('mouse and keyboard reach the machine as they were asked; a key is a key, never a command line', async () => {
+        const typed = await cmd(mine.deviceId, { kind: 'input', value: { action: 'type', text: 'hunter2 is my password' } }, { user: alex });
+        assert.deepStrictEqual([typed.status, typed.json.result, typed.json.data], [200, 'ack', { done: true, action: 'type' }]);
+        const click = await cmd(mine.deviceId, { kind: 'input', value: { action: 'click', x: 640, y: 360, width: 1280, height: 720 } }, { user: alex });
+        assert.strictEqual(click.json.result, 'ack');
+        assert.deepStrictEqual(seen.filter((m) => m.kind === 'input').map((m) => m.value.action), ['type', 'click']);
+        const shell = await cmd(mine.deviceId, { kind: 'input', value: { action: 'key', keys: 'ctrl+s; rm -rf ~' } }, { user: alex });
+        assert.deepStrictEqual([shell.status, shell.json.code], [422, 'bot.invalid_input']);
+    });
+
     await check('the audit keeps what was asked in short, never stdin, arguments or content', async () => {
         const rows = await t.db.many('SELECT * FROM command_audit WHERE robot_id = $1 ORDER BY id', [mine.deviceId]);
         assert.ok(rows.length >= 3);
         const exec = rows.find((r) => r.kind === 'exec');
         assert.deepStrictEqual(exec.value, { program: 'echo', args: 1 });
         assert.ok(!JSON.stringify(rows).includes('secret input'));
+        const typed = rows.find((r) => r.kind === 'input' && r.value.action === 'type');
+        assert.deepStrictEqual(typed.value, { action: 'type', chars: 22 }, 'typed text: its length, never the text');
+        assert.ok(!JSON.stringify(rows).includes('hunter2'));
     });
 
     await check('nobody else reaches it; a bad value and a missing plugin are refused', async () => {
@@ -112,7 +126,7 @@ const { boot, check, done } = require('./helpers/app');
         const form = (p, user, body, headers = {}) => fetch(t.base + p, { method: 'POST', redirect: 'manual', body, headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...cookie(user), ...headers } });
         const html = await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text();
         assert.match(html, /Computer: Trusted/);
-        assert.match(html, /terminal, files, screen/);
+        assert.match(html, /terminal, files, screen, mouse and keyboard/);
         assert.match(html, /Let my agent use this computer/);
         assert.strictEqual((await form(`/machines/${mine.deviceId}/agent-computer`, alex, 'on=1', { Origin: 'https://evil.test' })).status, 403);
         assert.strictEqual((await form(`/machines/${mine.deviceId}/agent-computer`, bob, 'on=1')).status, 404);

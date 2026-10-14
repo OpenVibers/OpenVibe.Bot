@@ -362,7 +362,7 @@ const COMPUTER_CALL = `curl -X POST https://openvibe.bot/api/v1/machines/dev_…
 function renderComputersPage({ config }) {
     const content = `
 <h1>Your computer for your agents</h1>
-<p class="muted">The OpenVibe Node's <b>computer</b> plugin lets your agents use your own computer: its terminal, its files and its screen. It is off unless you install it, it never runs as root, and you decide what it may do on the computer itself. Nothing on OpenVibe can raise that level.</p>
+<p class="muted">The OpenVibe Node's <b>computer</b> plugin lets your agents use your own computer: its terminal, its files, its screen and (when you allow it) its mouse and keyboard. It is off unless you install it, it never runs as root, and you decide what it may do on the computer itself. Nothing on OpenVibe can raise that level.</p>
 
 <section class="card" aria-labelledby="install-h"><h2 id="install-h">Install it</h2>
 <p>On ${inLink('/machines', 'Your machines')}, choose <b>Add a machine</b> and run the second command it shows on the computer, from your own account (the installer uses sudo itself):</p>
@@ -372,8 +372,8 @@ ${code(COMPUTER_INSTALL)}
 <section class="card" aria-labelledby="levels-h"><h2 id="levels-h">Levels, set on the computer</h2>
 <ul>
 <li><b>observe</b> (the default): take a screenshot; list, inspect and read files inside its folders.</li>
-<li><b>ask</b>: also run programs and write files there, each only after you approve it on the computer.</li>
-<li><b>trusted</b>: run programs and write files inside its folders without asking.</li>
+<li><b>ask</b>: also run programs, write files there and use the mouse and keyboard, each only after you approve it on the computer (the approval says exactly what: "click at 640, 360", "type 12 characters", "press ctrl+s").</li>
+<li><b>trusted</b>: run programs, write files inside its folders and use the mouse and keyboard without asking.</li>
 <li><b>full</b>: as trusted, anywhere your account can reach.</li>
 </ul>
 <p>A program is always a program and its arguments, never a shell line. It runs for at most the time you set (30 seconds by default), at most two at once, and its output is cut at 64 KB. A path is checked after links are followed, so a link out of a folder is outside it.</p></section>
@@ -394,11 +394,12 @@ ${code(COMPUTER_CALL)}
 <li><code>exec</code>: <code>argv</code>, <code>cwd</code>, <code>timeout_s</code>, <code>stdin</code> → <code>exit_code</code>, <code>stdout</code>, <code>stderr</code>, <code>truncated</code>, <code>timed_out</code>.</li>
 <li><code>fs</code>: <code>op</code> list, stat, read (<code>offset</code>, <code>length</code>), write (<code>content_b64</code>, <code>mode</code> create, overwrite or append) or mkdir, and an absolute <code>path</code>.</li>
 <li><code>screen</code>: <code>max_width</code> → a JPEG in <code>content_b64</code>.</li>
+<li><code>input</code>: <code>action</code> (<code>move</code>, <code>click</code>, <code>double_click</code>, <code>right_click</code> at <code>x</code>, <code>y</code>; <code>scroll</code> by <code>dy</code>; <code>type</code> a <code>text</code>; <code>key</code> one key or chord such as <code>ctrl+s</code>), with <code>width</code> and <code>height</code> of the screenshot the coordinates come from; the computer scales them to its real screen. It acts, so your level decides: never at observe, approved one by one at ask. xdotool on Linux (X11), cliclick on macOS. The audit keeps the action and the number of characters typed, never the text.</li>
 <li><code>probe</code>: <code>target</code> (<code>http(s)://…</code> or <code>tcp://host:port</code> on the computer's own network) → the status and body of one GET, or whether the port is open. It is read-only and runs at every level.</li>
 </ul>
 <p class="muted"><code>GET /api/v1/machines</code> lists your machines with their level. A machine whose plugin is off answers <code>409 bot.computer_off</code>; a refusal on the computer answers <code>result: "nack"</code> with the reason. The audit keeps the program name or the file and path, never its content.</p></section>
 `;
-    return docsPage({ config, path: '/docs/computers', title: 'Your computer for your agents', description: 'Let your agents use your own computer through the OpenVibe Node: its terminal, files and screen, at the level you set on the computer, with approvals there and a kill switch.', content });
+    return docsPage({ config, path: '/docs/computers', title: 'Your computer for your agents', description: 'Let your agents use your own computer through the OpenVibe Node: its terminal, files, screen, mouse and keyboard, at the level you set on the computer, with approvals there and a kill switch.', content });
 }
 
 module.exports = { renderDocsIndex, renderDriversPage, renderProfilesPage, renderAutomationPage, renderComputersPage, validationResult };
