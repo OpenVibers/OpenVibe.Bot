@@ -208,6 +208,11 @@ function loadConfig(env = process.env) {
         media: {
             whipBase: trim(env.BOT_WHIP_BASE || ''),
         },
+        // Community robot profiles (server/submissions.js): the Ed25519 key an approval signs a profile with. Unset means
+        // submissions are taken and reviewed but none can be approved (the review says why).
+        profiles: {
+            signingKey: env.BOT_PROFILE_SIGNING_KEY || '',
+        },
         // Server-side ONVIF cameras (driver `onvif`, server/onvif): the hosts Bot may connect to, keyed by
         // robot id (one camera per robot), plus the timeout each request gets. Credentials are secret
         // references only (username_ref/password_ref), resolved when the request is built; the config never

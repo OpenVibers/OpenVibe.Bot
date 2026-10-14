@@ -28,6 +28,10 @@ const TABLES = [
     { table: 'robot_operators', subject: 'added_by', file: null, erase: anonymize },
     { table: 'live_conversions', subject: 'owner_subject', file: null },
     { table: 'run_jobs', subject: 'subject', value: (usr) => [usr, `user:${usr}`], file: 'run-jobs.json', columns: ['id', 'class', 'state', 'wall_ms', 'exit_reason', 'created_at', 'finished_at'], erase: { keep: 'usage seconds reported to Billing' } },
+    // Community robot profiles: the person's own submissions are exported; on deletion the ones still waiting, refused or
+    // withdrawn go (extraErase) and an approved one stays in the catalogue, authorless (robots may use it).
+    { table: 'profile_submissions', subject: 'submitter_subject', file: 'robot-submissions.json', columns: ['profile_id', 'profile_version', 'profile', 'driver_url', 'guide_url', 'license', 'notes', 'status', 'review_note', 'created_at'], order: 'created_at', erase: { keep: 'approved profiles stay in the catalogue, authorless (extraErase)' } },
+    { table: 'profile_submissions', subject: 'reviewed_by', file: null, erase: anonymize },
 ];
 
 async function extraExport(db, subject) {
@@ -39,6 +43,9 @@ async function extraExport(db, subject) {
 /** The account-data handle over Bot's domain (server/domain: robots.remove, devices.revoke). */
 function create({ domain, log = console } = {}) {
     async function extraErase(t, subjects, counts) {
+        // A submission that never reached the catalogue is the person's alone; an approved one stays, without its author.
+        counts.add(counts.erased, 'profile_submissions', await t.exec("DELETE FROM profile_submissions WHERE submitter_subject = ANY($1::text[]) AND status <> 'approved'", [subjects]));
+        await t.exec("UPDATE profile_submissions SET submitter_subject = NULL WHERE submitter_subject = ANY($1::text[])", [subjects]);
         const robots = await t.many('SELECT id FROM robots WHERE owner_subject = ANY($1::text[])', [subjects]);
         const ids = robots.map((r) => r.id);
         if (ids.length) {

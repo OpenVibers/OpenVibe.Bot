@@ -40,7 +40,8 @@ const { renderPanel, renderEmbedRefused, renderDrivePage, renderPairingPage, ren
 const { renderDocsIndex, renderDriversPage, renderProfilesPage } = require('./docs');
 const { checkProfile } = require('../profiles');
 const { renderHome, HOME_CSP } = require('./home');
-const { renderDirectory, renderModels, renderModel, renderRobotPage, renderAddRobot, modelOf } = require('./directory');
+const { renderDirectory, renderModels, renderModel, renderRobotPage, renderAddRobot, renderSubmit, renderSubmissions, modelOf } = require('./directory');
+const { LICENSES } = require('../submissions');
 
 const PUBLIC = path.join(__dirname, '..', '..', 'public');
 const HOLD_RESEND_MS = 150;
@@ -123,11 +124,11 @@ const PANEL_CSP = ["default-src 'self'", `script-src 'self' ${PANEL_SCRIPT_SRC}`
 const embedCsp = (config) => ["default-src 'self'", `script-src 'self' ${PANEL_SCRIPT_SRC}`, `connect-src 'self' ${PANEL_CONNECT_SRC}`,
     `frame-ancestors ${frameAncestors(config)}`, "object-src 'none'", "base-uri 'self'"].join('; ');
 
-function createWebRoutes(config, { domain = null, sim = null, onvif = null, limits = null, identity = null, hub = null, log = console, releaseLastmod } = {}) {
+function createWebRoutes(config, { domain = null, sim = null, onvif = null, limits = null, identity = null, hub = null, log = console, submissions = null, releaseLastmod } = {}) {
     const r = express.Router();
     // The public front page is crawlable; sign-in, the API and every signed-in or per-robot page are not.
     r.get('/robots.txt', (req, res) => res.type('text/plain').send(['User-agent: *', 'Allow: /$', 'Disallow: /auth/', 'Disallow: /api/',
-        'Disallow: /robots/new', 'Disallow: /pair/', 'Disallow: /panel/', 'Disallow: /install', `Sitemap: ${config.baseUrl}/sitemap.xml`, ''].join('\n')));
+        'Disallow: /robots/new', 'Disallow: /robots/submit', 'Disallow: /robots/submissions', 'Disallow: /pair/', 'Disallow: /panel/', 'Disallow: /install', `Sitemap: ${config.baseUrl}/sitemap.xml`, ''].join('\n')));
     // `curl -fsSL` follows the redirect. The target is config only (checked at boot): no query parameter steers it.
     r.get('/install', (req, res) => res.redirect(302, config.installer.sourceUrl));
     // The sitemap lists every public GET page (openvibe-shared/seo); robots.txt already names it.
@@ -280,7 +281,13 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     });
 
     // ── The directory (plan T15 "a robot directory (/robots)"): public pages inside the OpenVibe Frame. ──
-    const catalogue = async () => (await listProfiles(domain.db)).map((row) => modelOf(row.profile));
+    // Every catalogue profile as a model; a community one carries its approved submission (who, driver, guide, key).
+    const catalogue = async () => {
+        const approved = submissions ? await submissions.community() : [];
+        const names = approved.length ? await namesOf(approved.map((s) => s.submitter_subject).filter(Boolean)) : new Map();
+        const by = new Map(approved.map((s) => [s.profile_id, { by: names.get(s.submitter_subject) || null, driver_url: s.driver_url, guide_url: s.guide_url, license: s.license, key_id: s.key_id }]));
+        return (await listProfiles(domain.db)).map((row) => modelOf(row.profile, by.get(row.profile.id) || null));
+    };
     const namesOf = async (subjects) => {
         if (!identity || !subjects.length) return new Map();
         try { return await identity.names([...new Set(subjects)]); } catch (e) { log.warn(`[Bot] directory names: ${e.message}`); return new Map(); }
@@ -334,6 +341,57 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         res.type('html').send(renderAddRobot({ config, models, values, error: extra.error || null }));
     }
     r.get('/robots/new', page(async (req, res) => { requireUser(req); return addPage(req, res); }));
+
+    // ── Community robots (server/submissions.js): submit a profile, see where it stands; admins review. ──
+    const submitLimit = limits ? [(req, res, next) => { if (req.viewer && !req.principal) req.principal = req.viewer; next(); }, limits('bot.profile.submit', { minute: 20, hour: 60 })] : [];
+    const isReviewer = (me) => !!(me && me.role === 'admin');
+    r.get('/robots/submit', page(async (req, res) => {
+        requireUser(req);
+        res.setHeader('Content-Security-Policy', HOME_CSP);
+        res.type('html').send(renderSubmit({ config, licenses: LICENSES }));
+    }));
+    r.post('/robots/submit', ...submitLimit, express.urlencoded({ extended: false, limit: '48kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        if (!submissions) throw new BotError(503, 'bot.unavailable', 'submissions are not available');
+        const b = req.body || {};
+        const values = { profile: String(b.profile || ''), driver_url: String(b.driver_url || ''), guide_url: String(b.guide_url || ''), license: String(b.license || ''), notes: String(b.notes || '') };
+        let profile;
+        try { profile = JSON.parse(values.profile); } catch (e) {
+            res.status(422).setHeader('Content-Security-Policy', HOME_CSP);
+            return res.type('html').send(renderSubmit({ config, licenses: LICENSES, values, error: `The profile is not valid JSON: ${e.message}` }));
+        }
+        try {
+            await submissions.submit(me, { profile, driver_url: values.driver_url, guide_url: values.guide_url, license: values.license, notes: values.notes });
+        } catch (e) {
+            if (!e.status || e.status >= 500 || e.status === 401) throw e;
+            res.status(e.status).setHeader('Content-Security-Policy', HOME_CSP);
+            return res.type('html').send(renderSubmit({ config, licenses: LICENSES, values, error: e.detail || e.code }));
+        }
+        return res.redirect(303, '/robots/submissions');
+    }));
+    r.get('/robots/submissions', page(async (req, res) => {
+        const me = requireUser(req);
+        if (!submissions) throw new BotError(503, 'bot.unavailable', 'submissions are not available');
+        res.setHeader('Content-Security-Policy', HOME_CSP);
+        const pending = isReviewer(me) ? await submissions.pending() : null;
+        const names = pending && pending.length ? await namesOf(pending.map((s) => s.submitter_subject).filter(Boolean)) : new Map();
+        res.type('html').send(renderSubmissions({ config, mine: await submissions.mine(me.subject), pending, names, signing: submissions.signingKey() }));
+    }));
+    r.post('/robots/submissions/:id/review', ...manage, express.urlencoded({ extended: false, limit: '4kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        if (!submissions) throw new BotError(503, 'bot.unavailable', 'submissions are not available');
+        await submissions.review(req.params.id, me, { decision: String(req.body.decision || ''), note: req.body.note });
+        return res.redirect(303, '/robots/submissions');
+    }));
+    r.post('/robots/submissions/:id/withdraw', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        if (!submissions) throw new BotError(503, 'bot.unavailable', 'submissions are not available');
+        await submissions.withdraw(req.params.id, me);
+        return res.redirect(303, '/robots/submissions');
+    }));
 
     r.post('/robots', ...manage, express.urlencoded({ extended: false, limit: '8kb' }), page(async (req, res) => {
         const me = requireUser(req);
