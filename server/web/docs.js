@@ -12,6 +12,7 @@
  *   renderDriversPage({ config })                     GET /docs/drivers
  *   renderProfilesPage({ config, source, result })    GET /docs/profiles, POST /docs/profiles/validate
  *   renderAutomationPage({ config })                  GET /docs/automation (routines, webhooks, the agent switch)
+ *   renderComputersPage({ config })                   GET /docs/computers (the Node's computer plugin for your agents)
  *   formatProblems(problems) / validationResult(result)
  */
 const { esc } = require('./render');
@@ -30,7 +31,7 @@ const out = (href, text) => `<a href="${esc(href)}" rel="noopener">${esc(text)}<
 /** A link on this site. */
 const inLink = (href, text) => `<a href="${esc(href)}">${esc(text)}</a>`;
 
-const PAGES = [['/docs', 'Overview'], ['/docs/drivers', 'Write a driver'], ['/docs/profiles', 'Robot profiles'], ['/docs/automation', 'Routines and webhooks']];
+const PAGES = [['/docs', 'Overview'], ['/docs/drivers', 'Write a driver'], ['/docs/profiles', 'Robot profiles'], ['/docs/automation', 'Routines and webhooks'], ['/docs/computers', 'Your computer']];
 
 /** The Build pages inside the OpenVibe Frame: a sidebar of the three pages beside the content, plain markup. */
 function docsPage({ config, path, title, description, content }) {
@@ -62,6 +63,8 @@ function renderDocsIndex({ config }) {
 <p>${inLink('/docs/profiles', 'Robot profiles')} lists the fields, shows a full example, and has a validator for a profile you paste.</p></section>
 <section class="card"><h2>Automate a robot</h2>
 <p>${inLink('/docs/automation', 'Routines, webhooks and your agent')}: steps on a schedule, signed event deliveries to your server, and letting your OpenVibe.Actor agent drive.</p></section>
+<section class="card"><h2>Your computer for your agents</h2>
+<p>${inLink('/docs/computers', 'Your computer')}: the Node's computer plugin, its levels, approvals on the computer, and the API.</p></section>
 <section class="card"><h2>Robots</h2>
 <p>Add a robot and drive it from any browser. The <b>Simulated rover</b> runs inside Bot with no hardware, so you can see your profile's panel before anything is wired up.</p>
 <p>${inLink('/robots', 'Your robots')} · ${inLink('/install', 'Install a device')}</p></section>
@@ -342,4 +345,58 @@ ${code(STEPS_CALL)}
     return docsPage({ config, path: '/docs/automation', title: 'Routines, webhooks and your agent', description: 'Make a robot run steps on a schedule, send its events to your server signed, and let your OpenVibe.Actor agent drive it, all through the same gate.', content });
 }
 
-module.exports = { renderDocsIndex, renderDriversPage, renderProfilesPage, renderAutomationPage, validationResult };
+
+// ── GET /docs/computers ────────────────────────────────────────────────────────────────────────────
+
+const COMPUTER_INSTALL = `curl -fsSL https://openvibe.bot/install | sh -s -- \\
+  --network https://openvibe.network --pairing pair_… --code ABCD-1234 --computer ask`;
+const COMPUTER_APPROVE = `openvibe-node approvals          # what waits: id, kind, what it would do
+openvibe-node approve cmd_01J…   # let it run
+openvibe-node deny cmd_01J…      # refuse it
+openvibe-node stop               # the kill switch: observe only until resume`;
+const COMPUTER_CALL = `curl -X POST https://openvibe.bot/api/v1/machines/dev_…/commands \\
+  -H "Authorization: Bearer $OPENVIBE_TOKEN" -H "Content-Type: application/json" \\
+  -d '{"kind": "exec", "value": {"argv": ["git", "status", "--short"], "cwd": "/home/you/site"}}'
+# → {"machine_id": "dev_…", "result": "ack", "data": {"exit_code": 0, "stdout": " M index.html\\n", …}}`;
+
+function renderComputersPage({ config }) {
+    const content = `
+<h1>Your computer for your agents</h1>
+<p class="muted">The OpenVibe Node's <b>computer</b> plugin lets your agents use your own computer: its terminal, its files and its screen. It is off unless you install it, it never runs as root, and you decide what it may do on the computer itself. Nothing on OpenVibe can raise that level.</p>
+
+<section class="card" aria-labelledby="install-h"><h2 id="install-h">Install it</h2>
+<p>On ${inLink('/machines', 'Your machines')}, choose <b>Add a machine</b> and run the second command it shows on the computer, from your own account (the installer uses sudo itself):</p>
+${code(COMPUTER_INSTALL)}
+<p>The Node then runs as you, never as root, and its only folder is your home folder. Linux for now; elsewhere, run the Node in your own session with the plugin in its config (${out(`${BLOB}/docs/computer.md`, 'computer.md')}).</p></section>
+
+<section class="card" aria-labelledby="levels-h"><h2 id="levels-h">Levels, set on the computer</h2>
+<ul>
+<li><b>observe</b> (the default): take a screenshot; list, inspect and read files inside its folders.</li>
+<li><b>ask</b>: also run programs and write files there, each only after you approve it on the computer.</li>
+<li><b>trusted</b>: run programs and write files inside its folders without asking.</li>
+<li><b>full</b>: as trusted, anywhere your account can reach.</li>
+</ul>
+<p>A program is always a program and its arguments, never a shell line. It runs for at most the time you set (30 seconds by default), at most two at once, and its output is cut at 64 KB. A path is checked after links are followed, so a link out of a folder is outside it.</p></section>
+
+<section class="card" aria-labelledby="approve-h"><h2 id="approve-h">Approving on the computer</h2>
+<p>At level <b>ask</b>, a request waits up to two minutes for your answer, with a desktop notification when the Node runs in your session:</p>
+${code(COMPUTER_APPROVE)}
+<p>The local stop drops the computer to observe at once: what runs is killed, what waits is denied, and nothing runs or changes until you resume.</p></section>
+
+<section class="card" aria-labelledby="agent-c-h"><h2 id="agent-c-h">Your agent</h2>
+<p>On ${inLink('/machines', 'Your machines')}, <b>Let my agent use this computer</b> is off until you turn it on. With it on, a task you give ${out('https://openvibe.actor', 'OpenVibe.Actor')}, such as "what changed in ~/site today?", can list and read files, run programs and write files there, as you and at your level. The ${out('https://openvibe.actor/console', 'Console')} shows what waits for you. Turning the switch off stops it at once.</p></section>
+
+<section class="card" aria-labelledby="api-c-h"><h2 id="api-c-h">The API</h2>
+<p>Your own token reaches your own computers. The answer comes back in <code>data</code>:</p>
+${code(COMPUTER_CALL)}
+<ul>
+<li><code>exec</code>: <code>argv</code>, <code>cwd</code>, <code>timeout_s</code>, <code>stdin</code> → <code>exit_code</code>, <code>stdout</code>, <code>stderr</code>, <code>truncated</code>, <code>timed_out</code>.</li>
+<li><code>fs</code>: <code>op</code> list, stat, read (<code>offset</code>, <code>length</code>), write (<code>content_b64</code>, <code>mode</code> create, overwrite or append) or mkdir, and an absolute <code>path</code>.</li>
+<li><code>screen</code>: <code>max_width</code> → a JPEG in <code>content_b64</code>.</li>
+</ul>
+<p class="muted"><code>GET /api/v1/machines</code> lists your machines with their level. A machine whose plugin is off answers <code>409 bot.computer_off</code>; a refusal on the computer answers <code>result: "nack"</code> with the reason. The audit keeps the program name or the file and path, never its content.</p></section>
+`;
+    return docsPage({ config, path: '/docs/computers', title: 'Your computer for your agents', description: 'Let your agents use your own computer through the OpenVibe Node: its terminal, files and screen, at the level you set on the computer, with approvals there and a kill switch.', content });
+}
+
+module.exports = { renderDocsIndex, renderDriversPage, renderProfilesPage, renderAutomationPage, renderComputersPage, validationResult };

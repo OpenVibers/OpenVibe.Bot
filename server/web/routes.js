@@ -37,7 +37,7 @@ const { frameAncestors } = require('../config');
 const { BotError } = require('../util');
 const kits = require('../kits');
 const { renderPanel, renderEmbedRefused, renderDrivePage, renderPairingPage, renderPhonePage, renderMachinesPage } = require('./render');
-const { renderDocsIndex, renderDriversPage, renderProfilesPage, renderAutomationPage } = require('./docs');
+const { renderDocsIndex, renderDriversPage, renderProfilesPage, renderAutomationPage, renderComputersPage } = require('./docs');
 const { checkProfile } = require('../profiles');
 const { renderHome, HOME_CSP } = require('./home');
 const { renderDirectory, renderModels, renderModel, renderRobotPage, renderAddRobot, renderSubmit, renderSubmissions, modelOf } = require('./directory');
@@ -51,7 +51,7 @@ const TRY_PROFILE = loadProfiles().get('sim.rover');
 const SITE_TAGLINE = 'An open control panel for robots';
 // Every public GET page, for the sitemap. The interactive pages (/robots, /pair/, /panel/) need a session and
 // are Disallowed in robots.txt; the API and sign-in are not pages.
-const PUBLIC_PAGES = ['/', '/try', '/robots', '/models', '/install', '/docs', '/docs/drivers', '/docs/profiles', '/docs/automation', '/terms', '/privacy', '/dmca'];
+const PUBLIC_PAGES = ['/', '/try', '/robots', '/models', '/install', '/docs', '/docs/drivers', '/docs/profiles', '/docs/automation', '/docs/computers', '/terms', '/privacy', '/dmca'];
 // The public pages an AI crawler can read, for /llms.txt and /llms-full.txt (llmstxt.org). Same pages as the
 // sitemap minus /install (a 302 to the installer script, not a page); no signed-in or per-robot page, nothing
 // under the API or /internal. `note` is the one-line llms.txt entry, `text` the page's full text in llms-full.txt,
@@ -99,6 +99,11 @@ const LLMS_PAGES = [
         path: '/docs/automation', title: 'Routines, webhooks and your agent',
         note: 'Steps on a schedule, signed webhooks for a robot\'s events, and the switch that lets your OpenVibe.Actor agent drive.',
         text: 'How a robot on OpenVibe.Bot moves without anyone at the controls, through the same gate as a person (limits, cooldowns, e-stop, audit). Steps are plain lines checked against the robot\'s profile: forward, back, left and right for seconds at a speed, stop, wait, say, face, show, an actuator or camera axis with a value and a hold time, and press for a button; held steps are re-sent inside the deadman window and a refused step stops the rest with its reason. Routines run steps as the owner on demand, every N minutes (at least 5), daily at a UTC time on chosen weekdays, or each time the robot comes online; one runs at a time; 60 steps, 60 seconds a step, 10 minutes in all. Webhooks send a robot\'s bot.robot.online, bot.robot.offline, bot.estop.set, bot.estop.cleared and bot.command.refused events to up to five https addresses, each with its own whsec_ secret shown once, signed like OpenVibe.Events deliveries (X-OpenVibe-Timestamp, X-OpenVibe-Signature-V2, checked with verifyDeliveryV2 from openvibe-sdk/events), to public addresses only, retried after 30 seconds, 2, 10, 30 and 120 minutes. The Your agent switch, off until the owner turns it on, lets the owner\'s OpenVibe.Actor agent see their robots and run steps on that one as the owner, never for anyone else; a steps call on Bot\'s API runs up to 20 steps and 30 seconds and answers done, or stopped with the reason.',
+    },
+    {
+        path: '/docs/computers', title: 'Your computer for your agents',
+        note: 'The Node\'s computer plugin: levels set on the computer, approvals there, the agent switch and the API.',
+        text: 'How to let your agents use your own computer through the OpenVibe Node\'s computer plugin. Installed with --computer, it runs as your own account, never root, and its only folder is your home. The level is set on the computer only: observe (screenshots, listing and reading files), ask (programs and writes each approved on the computer with openvibe-node approve), trusted (inside its folders without asking) or full. Programs are argv, never a shell line, time-limited and output-capped. The local stop drops it to observe. The switch Let my agent use this computer on openvibe.bot/machines lets your OpenVibe.Actor agent use it as you. Bot\'s machine commands take exec, fs and screen, and the computer\'s answer comes back in data.',
     },
     {
         path: '/terms', title: 'Terms of Service',
@@ -256,6 +261,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     r.get('/docs/drivers', frameCsp, (req, res) => res.type('html').send(renderDriversPage({ config })));
     r.get('/docs/profiles', frameCsp, (req, res) => res.type('html').send(renderProfilesPage({ config })));
     r.get('/docs/automation', frameCsp, (req, res) => res.type('html').send(renderAutomationPage({ config })));
+    r.get('/docs/computers', frameCsp, (req, res) => res.type('html').send(renderComputersPage({ config })));
     r.post('/docs/profiles/validate', frameCsp, ...validateLimit, express.urlencoded({ extended: false, limit: '32kb' }), (req, res, next) => {
         try {
             if (!sameOrigin(req)) return res.status(403).type('text/plain').send('cross-site form posts are refused\n');
