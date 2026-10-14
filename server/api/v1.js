@@ -48,6 +48,7 @@ const CAP = {
     control: 'bot.robot.control',
     connect: 'bot.device.connect',
     dispatch: 'bot.job.dispatch',
+    computer: 'bot.computer.control',
 };
 
 /** Services that act as a person's agent (plan T15/T17): they drive a robot only where its owner turned agent_control on. */
@@ -364,6 +365,68 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         res.json({ robot_id: req.params.id, ...result });
     }));
 
+    // ── A person's own computer (the Node's computer plugin, plan T14/T17) ─────────────────────────────
+    // The machine's owner, or their agent (an agent service with bot.computer.control, acting for that owner) where the
+    // owner turned "Let my agent use this computer" on. What may happen there is the owner's level on the machine.
+    async function computerMachine(req, { agentNeedsOptIn = true } = {}) {
+        const subject = actedFor(req);
+        if (req.principal.kind === 'service') {
+            if (!AGENT_SERVICES.has(req.principal.sub)) fail(403, 'bot.forbidden', 'a machine is used by its owner and their agent only');
+            if (!apiAuth.granted(req.principal, CAP.computer)) fail(403, 'capability.denied', `${CAP.computer} not granted`);
+        }
+        const device = await domain.devices.get(String(req.params.id || '').slice(0, 64));
+        const ownerSubject = device && !device.revoked_at ? await domain.devices.ownerOf(device) : null;
+        if (!ownerSubject || ownerSubject !== subject) fail(404, 'bot.device_not_found', 'no such machine of yours');
+        if (agentNeedsOptIn && req.principal.kind === 'service' && !device.agent_computer) fail(403, 'bot.agent_not_allowed', 'the owner has not let their agent use this computer');
+        return { device, subject };
+    }
+    const machineOut = (device) => {
+        const st = hub.deviceState(device.id);
+        const offered = hub.computerOf(device.id);
+        const sensors = st.telemetry && st.telemetry.sensors && typeof st.telemetry.sensors === 'object' ? st.telemetry.sensors : {};
+        const pick = (cap) => (offered && offered[cap] && typeof offered[cap] === 'object' ? offered[cap] : null);
+        return {
+            id: device.id, name: device.name || null, online: !!st.online, agent_computer: !!device.agent_computer,
+            computer: offered ? {
+                level: typeof sensors.computer_level === 'string' ? sensors.computer_level : ((pick('files') || pick('terminal') || pick('screen') || {}).level || null),
+                terminal: pick('terminal'), files: pick('files'), screen: pick('screen'),
+                waiting: Number.isInteger(sensors.computer_waiting) ? sensors.computer_waiting : null,
+            } : null,
+        };
+    };
+    // The person's machines (theirs or their robots'); an agent sees only those whose owner let it use them.
+    r.get('/machines', wrap(async (req, res) => {
+        const subject = actedFor(req, req.query.owner);
+        if (req.principal.kind === 'service') {
+            if (!AGENT_SERVICES.has(req.principal.sub)) fail(403, 'bot.forbidden', 'machines are listed for their owner and their agent');
+            if (!apiAuth.granted(req.principal, CAP.computer)) fail(403, 'capability.denied', `${CAP.computer} not granted`);
+        }
+        const rows = await domain.machines.list(subject);
+        const mine = req.principal.kind === 'service' ? rows.filter((d) => d.agent_computer) : rows;
+        res.json({ machines: mine.map(machineOut) });
+    }));
+    r.get('/machines/:id/computer', wrap(async (req, res) => {
+        const { device } = await computerMachine(req);
+        res.json({ machine: machineOut(device) });
+    }));
+    // One exec, fs or screen command, answered with the machine's answer in `data` (bot.command-result@1). A repeated
+    // id answers its first result without data; an `ask`-level machine answers once its owner approves it there.
+    r.post('/machines/:id/commands', commandControl, wrap(async (req, res) => {
+        const { device, subject } = await computerMachine(req);
+        const principal = req.principal.kind === 'service' ? { ...req.principal, subject } : req.principal;
+        const result = await hub.machineCommand(device.id, principal, subject, { id: req.body?.id, kind: req.body?.kind, value: req.body?.value, ms: req.body?.ms });
+        if (result.result === 'refused') fail(commandRefusalStatus(result.code), result.code, result.reason || null);
+        res.json({ machine_id: device.id, ...result });
+    }));
+    // The owner turns their agent's use of the machine on or off (never the agent itself).
+    r.post('/machines/:id/agent-computer', manage, wrap(async (req, res) => {
+        if (req.principal.kind !== 'user') fail(403, 'bot.forbidden', 'only the machine\'s owner turns this on or off');
+        const { device } = await computerMachine(req, { agentNeedsOptIn: false });
+        if (typeof req.body?.on !== 'boolean') fail(422, 'bot.invalid_input', 'on is true or false');
+        const updated = await domain.machines.setAgentComputer(device.id, req.body.on);
+        res.json({ machine: machineOut(updated) });
+    }));
+
     // ── Steps (the owner's agent): plain step lines, run now as the owner and answered when they end ──
     // The owner themself, or an agent service (OpenVibe.Actor) acting for the owner of a robot with agent_control on.
     // Every step passes the same gate as a person's command (server/routines.js runSteps).
@@ -463,7 +526,7 @@ function commandRefusalStatus(code) {
     if (code === 'bot.robot_not_found') return 404;
     if (code === 'bot.not_an_operator' || code === 'bot.read_only' || code === 'bot.forbidden' || code === 'bot.not_your_turn') return 403;
     if (code === 'bot.cooldown' || code === 'bot.turn_budget') return 429;
-    if (code === 'bot.device_offline' || code === 'bot.estop_latched' || code === 'bot.command_pending') return 409;
+    if (code === 'bot.device_offline' || code === 'bot.estop_latched' || code === 'bot.command_pending' || code === 'bot.computer_off') return 409;
     return 422;   // unknown_command, command_not_allowed, unknown_actuator, invalid_input, text_too_long
 }
 
