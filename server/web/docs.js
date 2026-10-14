@@ -11,6 +11,7 @@
  *   renderDocsIndex({ config })                       GET /docs
  *   renderDriversPage({ config })                     GET /docs/drivers
  *   renderProfilesPage({ config, source, result })    GET /docs/profiles, POST /docs/profiles/validate
+ *   renderAutomationPage({ config })                  GET /docs/automation (routines, webhooks, the agent switch)
  *   formatProblems(problems) / validationResult(result)
  */
 const { esc } = require('./render');
@@ -29,7 +30,7 @@ const out = (href, text) => `<a href="${esc(href)}" rel="noopener">${esc(text)}<
 /** A link on this site. */
 const inLink = (href, text) => `<a href="${esc(href)}">${esc(text)}</a>`;
 
-const PAGES = [['/docs', 'Overview'], ['/docs/drivers', 'Write a driver'], ['/docs/profiles', 'Robot profiles']];
+const PAGES = [['/docs', 'Overview'], ['/docs/drivers', 'Write a driver'], ['/docs/profiles', 'Robot profiles'], ['/docs/automation', 'Routines and webhooks']];
 
 /** The Build pages inside the OpenVibe Frame: a sidebar of the three pages beside the content, plain markup. */
 function docsPage({ config, path, title, description, content }) {
@@ -59,6 +60,8 @@ function renderDocsIndex({ config }) {
 <section class="card"><h2>Robot profiles</h2>
 <p>A profile (<code>bot.robot-profile@1</code>) says what the robot can do, which commands its driver accepts, and which widgets the panel shows. The panel is a function of the profile: a new robot needs a profile, not code.</p>
 <p>${inLink('/docs/profiles', 'Robot profiles')} lists the fields, shows a full example, and has a validator for a profile you paste.</p></section>
+<section class="card"><h2>Automate a robot</h2>
+<p>${inLink('/docs/automation', 'Routines, webhooks and your agent')}: steps on a schedule, signed event deliveries to your server, and letting your OpenVibe.Actor agent drive.</p></section>
 <section class="card"><h2>Robots</h2>
 <p>Add a robot and drive it from any browser. The <b>Simulated rover</b> runs inside Bot with no hardware, so you can see your profile's panel before anything is wired up.</p>
 <p>${inLink('/robots', 'Your robots')} · ${inLink('/install', 'Install a device')}</p></section>
@@ -281,4 +284,62 @@ ${validationResult(result)}
     return docsPage({ config, path: '/docs/profiles', title: 'Robot profiles', description: 'The bot.robot-profile@1 format that turns a driver\'s capabilities into a panel, a full example, and a validator for your own profile.', content });
 }
 
-module.exports = { renderDocsIndex, renderDriversPage, renderProfilesPage, validationResult };
+// ── GET /docs/automation ──────────────────────────────────────────────────────────────────────────
+
+const WEBHOOK_VERIFY = `const { verifyDeliveryV2 } = require('openvibe-sdk/events');
+
+// Express, with the raw body: the signature covers the exact bytes Bot sent.
+app.post('/robot-events', express.text({ type: 'application/json' }), (req, res) => {
+    if (!verifyDeliveryV2(req.body, req.headers, process.env.ROBOT_WEBHOOK_SECRET)) return res.status(401).end();
+    const event = JSON.parse(req.body);   // { id, type, robot_id, occurred_at, data }
+    if (event.type === 'bot.estop.set') console.log('robot', event.robot_id, 'stopped');
+    res.status(204).end();
+});`;
+
+const STEPS_CALL = `curl -X POST https://openvibe.bot/api/v1/robots/rob_…/steps \\
+  -H "Authorization: Bearer $OPENVIBE_TOKEN" -H "Content-Type: application/json" \\
+  -d '{"steps": "forward 1\\nleft 0.5\\nheadlights #00ff00\\nstop"}'
+# → {"robot_id": "rob_…", "result": "done", "steps": 4}`;
+
+function renderAutomationPage({ config }) {
+    const content = `
+<h1>Routines, webhooks and your agent</h1>
+<p class="muted">A robot can move without anyone holding the controls, tell your own server what happened to it, and take orders from your OpenVibe.Actor agent. Every one of these goes through the same gate as a person at the panel: the robot's limits, cooldowns and e-stop apply, and the audit records each command.</p>
+
+<section class="card" aria-labelledby="steps-h"><h2 id="steps-h">Steps</h2>
+<p>Routines and the agent both speak in steps, one per line, checked against the robot's own profile. A robot takes only what it has:</p>
+<ul>
+<li><code>forward 2</code>, <code>back 1 0.4</code>, <code>left 0.5</code>, <code>right 0.5</code>: drive for that many seconds, at an optional speed (0–1); <code>stop</code>.</li>
+<li><code>wait 1</code>: pause.</li>
+<li><code>say Hello</code>, <code>face happy</code>, <code>show Hi</code>: speech, a face or text on its display.</li>
+<li><code>headlights #ff8800</code>, <code>horn A4 0.3</code>, <code>lights off</code>, <code>pan 0.5 1</code>: an actuator or a camera axis by its name in the profile, with a value and how long to hold it.</li>
+<li><code>press horn</code>: one of its buttons.</li>
+</ul>
+<p>A held step (a motion or a tone) is re-sent inside the device's deadman window and released at its end. A refused step (the e-stop, the robot going offline, a cooldown) stops the rest, with the reason.</p></section>
+
+<section class="card" aria-labelledby="routines-h"><h2 id="routines-h">Routines</h2>
+<p>On a robot's panel, under <b>Routines</b>, the owner names a routine, writes its steps and picks when it runs:</p>
+<ul>
+<li>when the owner presses Run;</li>
+<li>every N minutes (at least 5);</li>
+<li>daily at a UTC time, on chosen weekdays;</li>
+<li>each time the robot comes online.</li>
+</ul>
+<p>A routine runs as the owner. One routine runs on a robot at a time; removing a running routine stops it. Limits: 60 steps, 60 seconds a step, 10 minutes in all. The same list is <code>GET|POST /api/v1/robots/:id/routines</code>, <code>POST …/routines/:rid/run</code> and <code>DELETE …/routines/:rid</code>, for the owner or a service with <code>bot.robot.manage</code>.</p></section>
+
+<section class="card" aria-labelledby="hooks-h"><h2 id="hooks-h">Webhooks</h2>
+<p>Under <b>Webhooks</b>, the owner adds up to five https addresses, each for some of the robot's events: <code>bot.robot.online</code>, <code>bot.robot.offline</code>, <code>bot.estop.set</code>, <code>bot.estop.cleared</code>, <code>bot.command.refused</code>. Each hook has its own secret (<code>whsec_…</code>), shown once when it is made.</p>
+<p>Bot posts <code>{ id, type, robot_id, occurred_at, data }</code>, signed the way OpenVibe.Events signs a delivery (<code>X-OpenVibe-Timestamp</code>, <code>X-OpenVibe-Signature-V2</code>), only to public addresses, never following a redirect. Anything but a 2xx is retried after 30 seconds, then 2, 10, 30 and 120 minutes. Check the signature before trusting a delivery:</p>
+${code(WEBHOOK_VERIFY)}
+<p class="muted">The API is <code>GET|POST /api/v1/robots/:id/webhooks</code> (the POST answers the secret) and <code>DELETE …/webhooks/:hid</code>.</p></section>
+
+<section class="card" aria-labelledby="agent-h"><h2 id="agent-h">Your agent</h2>
+<p>On the panel, <b>Your agent</b> has one switch: <b>Let my OpenVibe.Actor agent drive this robot</b>. It is off until the owner turns it on. With it on, a task you give ${out('https://openvibe.actor', 'OpenVibe.Actor')}, such as "drive my rover forward for a second and turn its lights green", can see your robots (online, e-stop, battery, sensors) and run steps on this one, as you. It never acts for anyone else, and turning the switch off stops it at once.</p>
+<p>Your own token runs steps directly, and answers when they end:</p>
+${code(STEPS_CALL)}
+<p class="muted"><code>GET /api/v1/robots/:id/steps</code> answers the robot's state and the step words it takes. A call takes at most 20 steps and 30 seconds; the agent's calls are refused with <code>403 bot.agent_not_allowed</code> while the switch is off.</p></section>
+`;
+    return docsPage({ config, path: '/docs/automation', title: 'Routines, webhooks and your agent', description: 'Make a robot run steps on a schedule, send its events to your server signed, and let your OpenVibe.Actor agent drive it, all through the same gate.', content });
+}
+
+module.exports = { renderDocsIndex, renderDriversPage, renderProfilesPage, renderAutomationPage, validationResult };

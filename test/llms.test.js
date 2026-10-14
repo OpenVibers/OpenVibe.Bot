@@ -7,9 +7,9 @@ const { boot, check, done } = require('./helpers/app');
 
 // The public pages, in the order the files list them; BASE_URL is fixed by the test harness.
 const BASE = 'http://bot.test';
-const PATHS = ['/', '/docs', '/docs/drivers', '/docs/profiles', '/terms', '/privacy', '/dmca'];
+const PATHS = ['/', '/docs', '/docs/drivers', '/docs/profiles', '/docs/automation', '/terms', '/privacy', '/dmca'];
 const TITLES = ['OpenVibe.Bot — drive your robot from any browser', 'Build for OpenVibe.Bot', 'Write a driver',
-    'Robot profiles', 'Terms of Service', 'Privacy Policy', 'DMCA & Copyright'];
+    'Robot profiles', 'Routines, webhooks and your agent', 'Terms of Service', 'Privacy Policy', 'DMCA & Copyright'];
 
 (async () => {
     const t = await boot({ openre: false });
