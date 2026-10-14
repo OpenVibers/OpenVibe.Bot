@@ -76,6 +76,20 @@ const { HOME_CSP: SITE_CSP } = require('../server/web/home');
         assert.ok(html.includes('id="navbar-mount"'), 'inside the OpenVibe Frame');
     });
 
+    await check('GET /docs/automation: steps, routines, signed webhooks with a verification sample, and the agent switch', async () => {
+        const r = await get('/docs/automation');
+        assert.strictEqual(r.status, 200);
+        assert.strictEqual(r.headers.get('content-security-policy'), SITE_CSP);
+        const html = await r.text();
+        assert.match(html, /<h1>Routines, webhooks and your agent<\/h1>/);
+        for (const word of ['forward 2', 'every N minutes', 'bot.estop.set', 'whsec_', 'X-OpenVibe-Signature-V2', 'verifyDeliveryV2', 'Let my OpenVibe.Actor agent drive this robot', '/api/v1/robots/rob_…/steps', 'bot.agent_not_allowed']) {
+            assert.ok(html.includes(word), word);
+        }
+        assert.ok(html.includes('href="/docs/automation" aria-current="page"'), 'in the build nav');
+        assert.match(await (await get('/docs')).text(), /href="\/docs\/automation"/, 'the index links it');
+        assert.ok(html.includes('id="navbar-mount"'), 'inside the OpenVibe Frame');
+    });
+
     await check('POST /docs/profiles/validate: the shipped sim.rover profile is valid', async () => {
         const r = await form(JSON.stringify(sim));
         assert.strictEqual(r.status, 200);
