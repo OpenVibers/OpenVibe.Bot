@@ -231,18 +231,8 @@ ${groups.map(([title, ms]) => `<p class="dir-group">${esc(title)}</p><div class=
 }
 
 // ── GET /robots/submit, /robots/submissions ────────────────────────────────────────────────────────
-const TEMPLATE = {
-    id: 'community.my-robot', version: 1, name: 'My robot', vendor: 'Me', kind: 'onboard',
-    description: 'What it is, what it drives, and what it needs.',
-    capabilities: ['drive.differential', 'battery'],
-    mapping: { driver: 'plugin', plugin: 'my_robot' },
-    commands: { drive: { axes: { throttle: [-1, 1], steer: [-1, 1] } } },
-    widgets: [
-        { type: 'drive', capability: 'drive.differential', label: 'Drive', order: 1, command: { kind: 'drive' } },
-        { type: 'battery', capability: 'battery', label: 'Battery', order: 2 },
-    ],
-    limits: { max_speed: 0.6, max_turn: 0.6, max_command_ms: 300, heartbeat_ms: 1000 },
-};
+// The profile the submit form starts with (a JSON file: its robot capability names are not Network capabilities).
+const TEMPLATE = require('./community-template.json');
 const STATUS_WORDS = { pending: 'Waiting for review', approved: 'Approved', rejected: 'Not approved', withdrawn: 'Withdrawn' };
 
 function renderSubmit({ config, licenses = [], values = {}, error = null }) {
