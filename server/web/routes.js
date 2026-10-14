@@ -451,6 +451,15 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         const pairing = await domain.machines.mint(me.subject);
         res.status(201).type('html').send(renderMachinesPage({ machines: await machineRows(me.subject), pairing }));
     }));
+    // The owner lets their watches (OpenVibe.Watch's node source) probe from this machine, or stops them.
+    r.post('/machines/:id/watch-probe', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        const mine = (await domain.machines.list(me.subject)).find((d) => d.id === req.params.id);
+        if (!mine) throw new BotError(404, 'bot.device_not_found', 'no such machine of yours');
+        await domain.machines.setWatchProbe(mine.id, req.body && req.body.on === '1');
+        res.redirect(303, '/machines');
+    }));
     // The owner lets their agent (OpenVibe.Actor) use this machine's computer plugin, or stops it.
     r.post('/machines/:id/agent-computer', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
         const me = requireUser(req);

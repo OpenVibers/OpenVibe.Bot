@@ -594,7 +594,7 @@ function renderMachinesPage({ machines = [], pairing = null }) {
         const c = (m.capabilities && typeof m.capabilities === 'object' ? m.capabilities : {}).computer;
         if (!c || typeof c !== 'object') return null;
         const level = m.computer_level || ((c.files || c.terminal || c.screen || {}).level) || null;
-        return { level: LEVELS[level] ? level : null, terminal: !!c.terminal, files: !!c.files, screen: !!c.screen };
+        return { level: LEVELS[level] ? level : null, terminal: !!c.terminal, files: !!c.files, screen: !!c.screen, probe: !!c.probe };
     };
     const computerRow = (m) => {
         const c = computerOf(m);
@@ -604,7 +604,10 @@ function renderMachinesPage({ machines = [], pairing = null }) {
             ? ` <span class="pill warn">${m.computer_waiting} waiting for you on the machine</span>` : '';
         return `<div class="machine-computer"><span class="pill">Computer: ${esc(c.level ? LEVELS[c.level] : 'on')}</span><span class="muted">${esc(can)}</span>${waiting}`
             + `<form method="post" action="/machines/${esc(m.id)}/agent-computer"><input type="hidden" name="on" value="${m.agent_computer ? '0' : '1'}">`
-            + `<button type="submit" class="button quiet" aria-pressed="${m.agent_computer ? 'true' : 'false'}">${m.agent_computer ? 'Stop my agent using this computer' : 'Let my agent use this computer'}</button></form></div>`;
+            + `<button type="submit" class="button quiet" aria-pressed="${m.agent_computer ? 'true' : 'false'}">${m.agent_computer ? 'Stop my agent using this computer' : 'Let my agent use this computer'}</button></form>`
+            + (c.probe ? `<form method="post" action="/machines/${esc(m.id)}/watch-probe"><input type="hidden" name="on" value="${m.watch_probe ? '0' : '1'}">`
+                + `<button type="submit" class="button quiet" aria-pressed="${m.watch_probe ? 'true' : 'false'}">${m.watch_probe ? 'Stop my watches checking from here' : 'Let my watches check things from this computer'}</button></form>` : '')
+            + '</div>';
     };
     const list = machines.length
         ? `<ul class="robots">${machines.map((m) => `<li class="robot-card"><span class="robot-name">${icon('plug')}<span>${esc(m.name || m.id)}</span></span>`

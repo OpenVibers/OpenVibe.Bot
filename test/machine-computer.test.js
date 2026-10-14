@@ -14,7 +14,7 @@ const { boot, check, done } = require('./helpers/app');
     let seq = 0;
     const frame = (type, fields) => ({ v: 1, seq: ++seq, ts: Date.now(), type, ...fields });
     const poll = async (fn, ms = 8000) => { const end = Date.now() + ms; while (Date.now() < end) { const v = await fn(); if (v) return v; await t.wait(30); } return null; };
-    const COMPUTER = { terminal: { level: 'trusted', timeout_s: 30 }, files: { level: 'trusted', roots: ['/home/alex'] }, screen: { level: 'trusted', tool: 'grim' } };
+    const COMPUTER = { terminal: { level: 'trusted', timeout_s: 30 }, files: { level: 'trusted', roots: ['/home/alex'] }, screen: { level: 'trusted', tool: 'grim' }, probe: { lan_only: true } };
     const seen = [];
 
     /** A Network-paired machine of `owner` whose fake Node answers computer commands like the plugin would. */
@@ -31,6 +31,7 @@ const { boot, check, done } = require('./helpers/app');
             seen.push(m);
             if (m.kind === 'exec') c.send(frame('ack', { id: m.id, latency_ms: 5, data: { exit_code: 0, stdout: m.value.argv.includes('big') ? 'x'.repeat(200 * 1024) : 'hi\n', stderr: '', truncated: false, timed_out: false, duration_ms: 4 } }));
             else if (m.kind === 'fs') c.send(frame('ack', { id: m.id, data: { path: m.value.path, entries: [], total: 0, truncated: false } }));
+            else if (m.kind === 'probe') c.send(frame('ack', { id: m.id, data: { status: 200, body: '{"up":true}', ms: 3 } }));
             else c.send(frame('nack', { id: m.id, fault_code: 'not_allowed', message: 'this machine allows observing only' }));
         });
         await poll(() => t.hub.computerOf(deviceId) !== null || !computer);
@@ -120,6 +121,30 @@ const { boot, check, done } = require('./helpers/app');
         assert.match(await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text(), /Stop my agent using this computer/);
         await form(`/machines/${mine.deviceId}/agent-computer`, alex, 'on=0');
         assert.strictEqual((await t.db.maybe('SELECT agent_computer FROM devices WHERE id = $1', [mine.deviceId])).agent_computer, false);
+    });
+
+    await check('Watch sends only probes, only where the owner let their watches use the computer', async () => {
+        const watch = t.network.signService({ sub: 'svc:watch', cap: ['bot.computer.control'] });
+        const asWatch = { token: watch, headers: { 'X-OV-Subject': alex.subject } };
+        const probe = { kind: 'probe', value: { target: 'http://192.168.1.20/status' } };
+        const before = await cmd(mine.deviceId, probe, asWatch);
+        assert.deepStrictEqual([before.status, before.json.code], [403, 'bot.agent_not_allowed']);
+        assert.match(before.json.detail || before.text, /watches/);
+        assert.deepStrictEqual((await t.call('GET', '/api/v1/machines', asWatch)).json.machines, []);
+        assert.strictEqual((await t.call('POST', `/api/v1/machines/${mine.deviceId}/watch-probe`, { ...asWatch, body: { on: true } })).status, 403, 'Watch never turns itself on');
+        const on = await t.call('POST', `/api/v1/machines/${mine.deviceId}/watch-probe`, { user: alex, body: { on: true } });
+        assert.deepStrictEqual([on.status, on.json.machine.watch_probe, !!on.json.machine.computer.probe], [200, true, true]);
+        const ok = await cmd(mine.deviceId, probe, asWatch);
+        assert.deepStrictEqual([ok.status, ok.json.result, ok.json.data.status], [200, 'ack', 200]);
+        const exec = await cmd(mine.deviceId, { kind: 'exec', value: { argv: ['id'] } }, asWatch);
+        assert.deepStrictEqual([exec.status, exec.json.code], [403, 'bot.forbidden'], 'Watch may send probes only');
+        assert.deepStrictEqual((await t.call('GET', '/api/v1/machines', asWatch)).json.machines.map((m) => m.id), [mine.deviceId]);
+        const audit = await t.db.maybe("SELECT value FROM command_audit WHERE robot_id = $1 AND kind = 'probe' ORDER BY id DESC LIMIT 1", [mine.deviceId]);
+        assert.deepStrictEqual(audit.value, { scheme: 'http', host: '192.168.1.20' }, 'the audit keeps the host, not the path');
+        const actorToo = await cmd(mine.deviceId, probe, { token: t.network.signService({ sub: 'svc:actor', cap: ['bot.computer.control'] }), headers: { 'X-OV-Subject': alex.subject } });
+        assert.strictEqual(actorToo.status, 403, 'the watches switch does not open the computer to the agent');
+        await t.call('POST', `/api/v1/machines/${mine.deviceId}/watch-probe`, { user: alex, body: { on: false } });
+        assert.strictEqual((await cmd(mine.deviceId, probe, asWatch)).status, 403, 'off again');
     });
 
     await check('a robot\'s operators never send computer kinds', async () => {
