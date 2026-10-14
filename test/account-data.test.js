@@ -58,6 +58,10 @@ async function startNetworkStub() {
             const add = await t.call('POST', `/api/v1/robots/${theirs.id}/operators`, { user: bob, body: { subject: alex.subject, role: 'operator' } });
             assert.ok(add.status < 300, add.text);
             const at = new Date().toISOString();
+            // A machine of hers that runs her jobs and serves no robot (plan T14/T16), and one of bob's.
+            await db.exec(`INSERT INTO devices (id, robot_ids, name, kind, capabilities, credential_hash, owner_subject, created_at, updated_at) VALUES
+                ('dev_01JZ0000000000000000000MA1', '[]'::jsonb, 'Alex desktop', 'server', '{}'::jsonb, NULL, $1, $3, $3),
+                ('dev_01JZ0000000000000000000MB1', '[]'::jsonb, 'Bob laptop', 'server', '{}'::jsonb, NULL, $2, $3, $3)`, [alex.subject, bob.subject, at]);
             await db.exec(`INSERT INTO command_audit (robot_id, operator_subject, operator_kind, role, kind, result, at) VALUES
                 ($1, $2, 'user', 'operator', 'drive', 'ack', $4), ($3, $5, 'user', 'operator', 'drive', 'ack', $4)`, [theirs.id, alex.subject, mine.id, at, bob.subject]);
         });
@@ -69,6 +73,7 @@ async function startNetworkStub() {
             assert.strictEqual(part.auth, 'Bearer tok_bot');
             const files = Object.fromEntries(part.body.files.map((f) => [f.name, f.content]));
             assert.deepStrictEqual(files['robots.json'].map((x) => x.name), ['Alex rover']);
+            assert.deepStrictEqual(files['machines.json'].map((x) => x.name), ['Alex desktop']);
             assert.ok(files['operating.json'].some((o) => o.robot_id === theirs.id));
             assert.ok(!JSON.stringify(part.body).includes(bob.subject));
             assert.ok(!/credential|publish_key/i.test(JSON.stringify(part.body)), 'no device secret');
@@ -90,7 +95,13 @@ async function startNetworkStub() {
             const conf = stub.calls.filter((c) => c.url === '/internal/account-deletions/del_01JZ0000000000000000000DE1/confirmations');
             assert.strictEqual(conf.length, 1);
             // robot_operators: her owner row on her own robot and her operator role on bob's.
-            assert.deepStrictEqual([conf[0].body.erased.robots, conf[0].body.erased.robot_operators, conf[0].body.retained.devices], [1, 2, 1]);
+            // retained devices: the one that served her robot, and her worker machine.
+            assert.deepStrictEqual([conf[0].body.erased.robots, conf[0].body.erased.robot_operators, conf[0].body.retained.devices], [1, 2, 2]);
+            const machine = await db.maybe("SELECT revoked_at, name, owner_subject FROM devices WHERE id = 'dev_01JZ0000000000000000000MA1'");
+            assert.ok(machine.revoked_at, 'her worker machine is revoked');
+            assert.deepStrictEqual([machine.name, machine.owner_subject], [null, null], 'and keeps no name or owner');
+            const bobs = await db.maybe("SELECT revoked_at, owner_subject FROM devices WHERE id = 'dev_01JZ0000000000000000000MB1'");
+            assert.deepStrictEqual([bobs.revoked_at, bobs.owner_subject], [null, bob.subject], 'bob\'s machine is untouched');
             assert.strictEqual((await deliver(event)).json.outcome, 'unchanged');
             assert.strictEqual(stub.calls.filter((c) => c.url.includes('/confirmations')).length, 1);
         });

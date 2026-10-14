@@ -11,6 +11,8 @@
  *                       row stays, revoked, without its name.
  *   elsewhere           their operator role and queue place on other people's robots go; their id leaves other
  *                       robots' command history (operator_subject), e-stop marks, pairing codes and invitations.
+ *   their machines      the worker machines they added (no robot, plan T14/T16) are exported, then revoked and kept
+ *                       without a name or an owner (run jobs reference them).
  *   kept                run jobs they started: usage seconds reported to Billing, counted as retained.
  *
  * Nothing exported is a secret: device credentials and publish keys are stored as hashes and never exported.
@@ -32,6 +34,9 @@ const TABLES = [
     // withdrawn go (extraErase) and an approved one stays in the catalogue, authorless (robots may use it).
     { table: 'profile_submissions', subject: 'submitter_subject', file: 'robot-submissions.json', columns: ['profile_id', 'profile_version', 'profile', 'driver_url', 'guide_url', 'license', 'notes', 'status', 'review_note', 'created_at'], order: 'created_at', erase: { keep: 'approved profiles stay in the catalogue, authorless (extraErase)' } },
     { table: 'profile_submissions', subject: 'reviewed_by', file: null, erase: anonymize },
+    // Their own machines that run their jobs (plan T14/T16): exported here; revoked and made nameless and ownerless in
+    // extraErase (run jobs reference the device rows and are billing records).
+    { table: 'devices', subject: 'owner_subject', file: 'machines.json', columns: ['id', 'name', 'kind', 'agent_version', 'created_at', 'last_seen', 'revoked_at'], order: 'created_at', erase: { keep: 'revoked and made ownerless in extraErase' } },
 ];
 
 async function extraExport(db, subject) {
@@ -49,6 +54,11 @@ async function extraExport(db, subject) {
 /** The account-data handle over Bot's domain (server/domain: robots.remove, devices.revoke). */
 function create({ domain, log = console } = {}) {
     async function extraErase(t, subjects, counts) {
+        // Their worker machines: revoked (the link closes as the device is next seen), then the row keeps no name or owner.
+        const machines = await t.many('SELECT id FROM devices WHERE owner_subject = ANY($1::text[]) AND revoked_at IS NULL', [subjects]);
+        for (const d of machines) await domain.devices.revoke(d.id);
+        // (The table map's `devices` entry already counts them as retained.)
+        await t.exec('UPDATE devices SET owner_subject = NULL, name = NULL WHERE owner_subject = ANY($1::text[])', [subjects]);
         // A submission that never reached the catalogue is the person's alone; an approved one stays, without its author.
         counts.add(counts.erased, 'profile_submissions', await t.exec("DELETE FROM profile_submissions WHERE submitter_subject = ANY($1::text[]) AND status <> 'approved'", [subjects]));
         await t.exec("UPDATE profile_submissions SET submitter_subject = NULL WHERE submitter_subject = ANY($1::text[])", [subjects]);
