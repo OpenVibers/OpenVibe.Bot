@@ -594,12 +594,12 @@ function renderMachinesPage({ machines = [], pairing = null }) {
         const c = (m.capabilities && typeof m.capabilities === 'object' ? m.capabilities : {}).computer;
         if (!c || typeof c !== 'object') return null;
         const level = m.computer_level || ((c.files || c.terminal || c.screen || {}).level) || null;
-        return { level: LEVELS[level] ? level : null, terminal: !!c.terminal, files: !!c.files, screen: !!c.screen, probe: !!c.probe };
+        return { level: LEVELS[level] ? level : null, terminal: !!c.terminal, files: !!c.files, screen: !!c.screen, probe: !!c.probe, input: !!c.input };
     };
     const computerRow = (m) => {
         const c = computerOf(m);
         if (!c) return '';
-        const can = [c.terminal && 'terminal', c.files && 'files', c.screen && 'screen'].filter(Boolean).join(', ');
+        const can = [c.terminal && 'terminal', c.files && 'files', c.screen && 'screen', c.input && 'mouse and keyboard'].filter(Boolean).join(', ');
         const waiting = Number.isInteger(m.computer_waiting) && m.computer_waiting > 0
             ? ` <span class="pill warn">${m.computer_waiting} waiting for you on the machine</span>` : '';
         return `<div class="machine-computer"><span class="pill">Computer: ${esc(c.level ? LEVELS[c.level] : 'on')}</span><span class="muted">${esc(can)}</span>${waiting}`
