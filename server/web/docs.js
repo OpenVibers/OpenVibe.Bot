@@ -384,7 +384,8 @@ ${code(COMPUTER_APPROVE)}
 <p>The local stop drops the computer to observe at once: what runs is killed, what waits is denied, and nothing runs or changes until you resume.</p></section>
 
 <section class="card" aria-labelledby="agent-c-h"><h2 id="agent-c-h">Your agent</h2>
-<p>On ${inLink('/machines', 'Your machines')}, <b>Let my agent use this computer</b> is off until you turn it on. With it on, a task you give ${out('https://openvibe.actor', 'OpenVibe.Actor')}, such as "what changed in ~/site today?", can list and read files, run programs and write files there, as you and at your level. The ${out('https://openvibe.actor/console', 'Console')} shows what waits for you. Turning the switch off stops it at once.</p></section>
+<p>On ${inLink('/machines', 'Your machines')}, <b>Let my agent use this computer</b> is off until you turn it on. With it on, a task you give ${out('https://openvibe.actor', 'OpenVibe.Actor')}, such as "what changed in ~/site today?", can list and read files, run programs and write files there, as you and at your level. The ${out('https://openvibe.actor/console', 'Console')} shows what waits for you. Turning the switch off stops it at once.</p>
+<p><b>Let my watches check things from this computer</b> is a separate switch. It lets ${out('https://openvibe.watch', 'OpenVibe.Watch')} probe your own network from the computer for your watches, for example "tell me when my NAS stops answering". It allows only probes: one GET or one TCP connect, to private addresses only.</p></section>
 
 <section class="card" aria-labelledby="api-c-h"><h2 id="api-c-h">The API</h2>
 <p>Your own token reaches your own computers. The answer comes back in <code>data</code>:</p>
@@ -393,6 +394,7 @@ ${code(COMPUTER_CALL)}
 <li><code>exec</code>: <code>argv</code>, <code>cwd</code>, <code>timeout_s</code>, <code>stdin</code> → <code>exit_code</code>, <code>stdout</code>, <code>stderr</code>, <code>truncated</code>, <code>timed_out</code>.</li>
 <li><code>fs</code>: <code>op</code> list, stat, read (<code>offset</code>, <code>length</code>), write (<code>content_b64</code>, <code>mode</code> create, overwrite or append) or mkdir, and an absolute <code>path</code>.</li>
 <li><code>screen</code>: <code>max_width</code> → a JPEG in <code>content_b64</code>.</li>
+<li><code>probe</code>: <code>target</code> (<code>http(s)://…</code> or <code>tcp://host:port</code> on the computer's own network) → the status and body of one GET, or whether the port is open. It is read-only and runs at every level.</li>
 </ul>
 <p class="muted"><code>GET /api/v1/machines</code> lists your machines with their level. A machine whose plugin is off answers <code>409 bot.computer_off</code>; a refusal on the computer answers <code>result: "nack"</code> with the reason. The audit keeps the program name or the file and path, never its content.</p></section>
 `;

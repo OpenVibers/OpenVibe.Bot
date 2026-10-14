@@ -39,7 +39,7 @@ const WATCH_MAX_PAYLOAD = 4 * 1024;   // a watcher only ever sends join/leave
 const DEVICE_MAX_PAYLOAD = 640 * 1024;
 // The Node's computer plugin (plan T14/T17): the kinds a person's machine takes, the capability each needs in its
 // status, and the reply window (the owner's approval on the machine plus the program's own run).
-const COMPUTER_CAP = { exec: 'terminal', fs: 'files', screen: 'screen' };
+const COMPUTER_CAP = { exec: 'terminal', fs: 'files', screen: 'screen', probe: 'probe' };
 const COMPUTER_KINDS = Object.keys(COMPUTER_CAP);
 const COMPUTER_DEFAULT_MS = 60000;
 const COMPUTER_MAX_MS = 600000;
@@ -47,6 +47,7 @@ const COMPUTER_MAX_MS = 600000;
 function computerSummary(kind, value) {
     if (kind === 'exec') return { program: String(value.argv[0]).slice(0, 120), args: value.argv.length - 1 };
     if (kind === 'fs') return { op: value.op, path: String(value.path).slice(0, 300), ...(typeof value.content_b64 === 'string' ? { bytes: Math.floor((value.content_b64.length * 3) / 4) } : {}) };
+    if (kind === 'probe') { try { const u = new URL(value.target); return { scheme: u.protocol.replace(':', ''), host: u.host }; } catch { return { scheme: null }; } }
     return { max_width: value.max_width || null };
 }
 

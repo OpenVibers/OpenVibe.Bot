@@ -53,6 +53,14 @@ const CAP = {
 
 /** Services that act as a person's agent (plan T15/T17): they drive a robot only where its owner turned agent_control on. */
 const AGENT_SERVICES = new Set(['svc:actor']);
+/**
+ * Services that use a person's machine, each only for the kinds it is allowed and only where the owner turned on its
+ * switch on openvibe.bot/machines: the agent (any computer kind) and Watch's node source (read-only probes).
+ */
+const MACHINE_SERVICES = {
+    'svc:actor': { kinds: null, flag: 'agent_computer', off: 'the owner has not let their agent use this computer' },
+    'svc:watch': { kinds: new Set(['probe']), flag: 'watch_probe', off: 'the owner has not let their watches check things from this computer' },
+};
 
 function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, submissions = null, routines = null, webhooks = null }) {
     const r = express.Router();
@@ -368,16 +376,18 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
     // ── A person's own computer (the Node's computer plugin, plan T14/T17) ─────────────────────────────
     // The machine's owner, or their agent (an agent service with bot.computer.control, acting for that owner) where the
     // owner turned "Let my agent use this computer" on. What may happen there is the owner's level on the machine.
-    async function computerMachine(req, { agentNeedsOptIn = true } = {}) {
+    async function computerMachine(req, { agentNeedsOptIn = true, kind = null } = {}) {
         const subject = actedFor(req);
+        const svc = req.principal.kind === 'service' ? MACHINE_SERVICES[req.principal.sub] : null;
         if (req.principal.kind === 'service') {
-            if (!AGENT_SERVICES.has(req.principal.sub)) fail(403, 'bot.forbidden', 'a machine is used by its owner and their agent only');
+            if (!svc) fail(403, 'bot.forbidden', 'a machine is used by its owner, their agent and their watches only');
             if (!apiAuth.granted(req.principal, CAP.computer)) fail(403, 'capability.denied', `${CAP.computer} not granted`);
+            if (kind != null && svc.kinds && !svc.kinds.has(String(kind))) fail(403, 'bot.forbidden', `${req.principal.sub} may send ${[...svc.kinds].join(', ')} only`);
         }
         const device = await domain.devices.get(String(req.params.id || '').slice(0, 64));
         const ownerSubject = device && !device.revoked_at ? await domain.devices.ownerOf(device) : null;
         if (!ownerSubject || ownerSubject !== subject) fail(404, 'bot.device_not_found', 'no such machine of yours');
-        if (agentNeedsOptIn && req.principal.kind === 'service' && !device.agent_computer) fail(403, 'bot.agent_not_allowed', 'the owner has not let their agent use this computer');
+        if (agentNeedsOptIn && svc && !device[svc.flag]) fail(403, 'bot.agent_not_allowed', svc.off);
         return { device, subject };
     }
     const machineOut = (device) => {
@@ -386,10 +396,10 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         const sensors = st.telemetry && st.telemetry.sensors && typeof st.telemetry.sensors === 'object' ? st.telemetry.sensors : {};
         const pick = (cap) => (offered && offered[cap] && typeof offered[cap] === 'object' ? offered[cap] : null);
         return {
-            id: device.id, name: device.name || null, online: !!st.online, agent_computer: !!device.agent_computer,
+            id: device.id, name: device.name || null, online: !!st.online, agent_computer: !!device.agent_computer, watch_probe: !!device.watch_probe,
             computer: offered ? {
                 level: typeof sensors.computer_level === 'string' ? sensors.computer_level : ((pick('files') || pick('terminal') || pick('screen') || {}).level || null),
-                terminal: pick('terminal'), files: pick('files'), screen: pick('screen'),
+                terminal: pick('terminal'), files: pick('files'), screen: pick('screen'), probe: pick('probe'),
                 waiting: Number.isInteger(sensors.computer_waiting) ? sensors.computer_waiting : null,
             } : null,
         };
@@ -397,12 +407,13 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
     // The person's machines (theirs or their robots'); an agent sees only those whose owner let it use them.
     r.get('/machines', wrap(async (req, res) => {
         const subject = actedFor(req, req.query.owner);
+        const svc = req.principal.kind === 'service' ? MACHINE_SERVICES[req.principal.sub] : null;
         if (req.principal.kind === 'service') {
-            if (!AGENT_SERVICES.has(req.principal.sub)) fail(403, 'bot.forbidden', 'machines are listed for their owner and their agent');
+            if (!svc) fail(403, 'bot.forbidden', 'machines are listed for their owner, their agent and their watches');
             if (!apiAuth.granted(req.principal, CAP.computer)) fail(403, 'capability.denied', `${CAP.computer} not granted`);
         }
         const rows = await domain.machines.list(subject);
-        const mine = req.principal.kind === 'service' ? rows.filter((d) => d.agent_computer) : rows;
+        const mine = svc ? rows.filter((d) => d[svc.flag]) : rows;
         res.json({ machines: mine.map(machineOut) });
     }));
     r.get('/machines/:id/computer', wrap(async (req, res) => {
@@ -412,11 +423,19 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
     // One exec, fs or screen command, answered with the machine's answer in `data` (bot.command-result@1). A repeated
     // id answers its first result without data; an `ask`-level machine answers once its owner approves it there.
     r.post('/machines/:id/commands', commandControl, wrap(async (req, res) => {
-        const { device, subject } = await computerMachine(req);
+        const { device, subject } = await computerMachine(req, { kind: req.body?.kind });
         const principal = req.principal.kind === 'service' ? { ...req.principal, subject } : req.principal;
         const result = await hub.machineCommand(device.id, principal, subject, { id: req.body?.id, kind: req.body?.kind, value: req.body?.value, ms: req.body?.ms });
         if (result.result === 'refused') fail(commandRefusalStatus(result.code), result.code, result.reason || null);
         res.json({ machine_id: device.id, ...result });
+    }));
+    // The owner lets their watches probe from the machine, or stops them (never Watch itself).
+    r.post('/machines/:id/watch-probe', manage, wrap(async (req, res) => {
+        if (req.principal.kind !== 'user') fail(403, 'bot.forbidden', 'only the machine\'s owner turns this on or off');
+        const { device } = await computerMachine(req, { agentNeedsOptIn: false });
+        if (typeof req.body?.on !== 'boolean') fail(422, 'bot.invalid_input', 'on is true or false');
+        const updated = await domain.machines.setWatchProbe(device.id, req.body.on);
+        res.json({ machine: machineOut(updated) });
     }));
     // The owner turns their agent's use of the machine on or off (never the agent itself).
     r.post('/machines/:id/agent-computer', manage, wrap(async (req, res) => {
@@ -534,4 +553,4 @@ function auditPresent(a) {
     return { id: a.id, robot_id: a.robot_id, device_id: a.device_id, operator_subject: a.operator_subject, operator_kind: a.operator_kind, role: a.role, kind: a.kind, value: a.value, result: a.result, reason: a.reason, latency_ms: a.latency_ms, at: a.at };
 }
 
-module.exports = { v1Router, CAP, AGENT_SERVICES };
+module.exports = { v1Router, CAP, AGENT_SERVICES, MACHINE_SERVICES };
