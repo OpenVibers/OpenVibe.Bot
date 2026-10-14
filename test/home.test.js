@@ -47,8 +47,8 @@ const { boot, check, done } = require('./helpers/app');
     });
 
     await check('the rest of the site keeps its own CSP', async () => {
-        const r = await get('/robots', alex);
-        assert.strictEqual(r.headers.get('content-security-policy'), "default-src 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'self'");
+        const r = await get('/pair/rob_nothing', alex);
+        assert.strictEqual(r.headers.get('content-security-policy'), "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; connect-src 'self' https://cloudflareinsights.com; frame-ancestors 'self'; object-src 'none'; base-uri 'self'");
     });
 
     await check('the vhost proxies / and /shared/ to the app; the legal pages are the app\'s, not the Sites files', async () => {

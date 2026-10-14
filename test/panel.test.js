@@ -148,10 +148,12 @@ const allowedFor = (profile, role) => [...(DEFAULT_ALLOW[role] || []).filter((k)
         assert.match(await (await get('/')).text(), /<h1>Drive your robot/);
         const robots = await (await get('/robots.txt')).text();
         assert.match(robots, /^Allow: \/\$$/m, 'the front page is crawlable');
-        for (const p of ['/auth/', '/api/', '/robots', '/pair/', '/panel/', '/install']) assert.ok(robots.includes(`Disallow: ${p}\n`), p);
+        for (const p of ['/auth/', '/api/', '/robots/new', '/pair/', '/panel/', '/install']) assert.ok(robots.includes(`Disallow: ${p}\n`), p);
+        assert.ok(!robots.includes('Disallow: /robots\n'), 'the directory is public');
         assert.match(robots, /^Sitemap: http:\/\/bot\.test\/sitemap\.xml$/m);
         assert.strictEqual((await get('/install')).status, 302);
-        for (const p of ['/robots', '/panel/rob_x', '/pair/rob_x']) {
+        assert.strictEqual((await get('/robots')).status, 200, 'the directory is public');
+        for (const p of ['/robots/new', '/panel/rob_x', '/pair/rob_x']) {
             const r = await get(p);
             assert.strictEqual(r.status, 302, p);
             assert.strictEqual(r.headers.get('location'), `/auth/login?next=${encodeURIComponent(p)}`);
@@ -185,7 +187,7 @@ const allowedFor = (profile, role) => [...(DEFAULT_ALLOW[role] || []).filter((k)
     await check('the panel\'s CSP opens exactly esm.sh and OpenRestream\'s signaling; the rest of the site keeps its own', async () => {
         const csp = (await get(`/panel/${simId}`, alex)).headers.get('content-security-policy');
         assert.strictEqual(csp,
-            "default-src 'self'; script-src 'self' https://esm.sh; connect-src 'self' wss://ingest.openre.stream; frame-ancestors 'self'; object-src 'none'; base-uri 'self'");
+            "default-src 'self'; script-src 'self' https://esm.sh https://static.cloudflareinsights.com; connect-src 'self' wss://ingest.openre.stream https://cloudflareinsights.com; frame-ancestors 'self'; object-src 'none'; base-uri 'self'");
         for (const p of ['/robots', `/pair/${simId}`]) {
             const other = (await get(p, alex)).headers.get('content-security-policy') || '';
             assert.ok(!other.includes('esm.sh') && !other.includes('ingest.openre.stream'), `${p} was widened`);
@@ -328,7 +330,7 @@ const allowedFor = (profile, role) => [...(DEFAULT_ALLOW[role] || []).filter((k)
     await check('a bad form answers 422 with the form; a cross-site post is refused', async () => {
         const bad = await post('/robots', alex, { name: '', profile_id: 'sim.rover' });
         assert.strictEqual(bad.status, 422);
-        assert.match(await bad.text(), /class="error"/);
+        assert.match(await bad.text(), /class="dir-error" role="alert"/);
         const unknown = await post('/robots', alex, { name: 'X', profile_id: 'nope' });
         assert.strictEqual(unknown.status, 422);
         const cross = await post('/robots', alex, { name: 'X', profile_id: 'sim.rover' }, { Origin: 'https://evil.test' });

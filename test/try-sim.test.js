@@ -53,7 +53,7 @@ const { loadProfiles } = require('../server/profiles');
         assert.ok(json, 'the profile rides along as data');
         assert.deepStrictEqual(JSON.parse(json[1]), loadProfiles().get('sim.rover'));
         assert.ok(html.includes('<link rel="canonical" href="https://openvibe.bot/try">') && html.includes('<meta name="description"'));
-        assert.ok(html.includes('href="/robots#add-robot"'), 'the way on to a real robot');
+        assert.ok(html.includes('href="/robots/new"'), 'the way on to a real robot');
         for (const s of scripts) {
             const js = await get(s);
             assert.strictEqual(js.status, 200, s);

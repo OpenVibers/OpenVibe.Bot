@@ -252,6 +252,15 @@ function renderWidget(w, { profile = {}, allowed_commands = [], signaling_url = 
 const toggle = (name, on, title, note, disabled = false, was = false) => `${was ? `<input type="hidden" name="${esc(name)}_was" value="${on ? 'on' : 'off'}">` : ''}<input type="hidden" name="${esc(name)}" value="off">
 <label class="toggle"><input type="checkbox" name="${esc(name)}" value="on"${on ? ' checked' : ''}${disabled ? ' disabled' : ''}><span><b>${esc(title)}</b><small>${esc(note)}</small></span></label>`;
 
+/** The owner's directory switch: list the robot on /robots with a public page (/r/:id), watchable by anyone. */
+function listingForm(robot) {
+    return `<section class="setting-card" aria-labelledby="listing-h"><h2 id="listing-h">Directory</h2>
+<form class="embed-form" method="post" action="/robots/${esc(robot.id)}/listing">
+${toggle('listed', robot.listed, 'List it in the robot directory', 'It gets a public page where anyone can watch it live (never drive it, unless your queue lets them take a turn). Listing also turns on watching where it is embedded.')}
+<button type="submit">Save</button>
+</form>${robot.listed ? `<p class="setting-note"><a href="/r/${esc(robot.id)}">Its public page</a></p>` : ''}</section>`;
+}
+
 /** The owner's embed switch: plain markup, works without JavaScript. On the panel it is a card; in the robots list, a compact row. */
 function embedForm(robot, { card = true } = {}) {
     const form = `<form class="embed-form${card ? '' : ' embed-inline'}" method="post" action="/robots/${esc(robot.id)}/embed" data-embed-form>
@@ -390,7 +399,7 @@ ${embed && role === 'watcher' && !signedIn ? `<p class="embed-sign-in" data-driv
 <div class="widgets">
 ${widgets.join('\n')}
 </div>
-${tryIt ? tryOutro(profile) : ''}${role === 'owner' && !embed && !tryIt ? `<div class="owner-settings">${localProfileForm(robot, profile, profileForm)}${embedForm(robot)}${streamingForm(robot, streaming)}${people ? peopleCard(robot, people) : ''}</div>` : ''}
+${tryIt ? tryOutro(profile) : ''}${role === 'owner' && !embed && !tryIt ? `<div class="owner-settings">${localProfileForm(robot, profile, profileForm)}${listingForm(robot)}${embedForm(robot)}${streamingForm(robot, streaming)}${people ? peopleCard(robot, people) : ''}</div>` : ''}
 </main>`;
     return page(tryIt ? 'Try the panel with a simulated rover' : robot.name, body, {
         scripts: panelScripts(profile, tryIt), bodyClass: embed ? 'embed-page' : 'panel-page',
@@ -416,7 +425,7 @@ function tryOutro(profile) {
     return `<section class="try-next card" aria-labelledby="try-next-h">
 <h2 id="try-next-h">Ready for a real one?</h2>
 <p>Add a robot, pair its computer with one pasted command, and this panel drives it. A Raspberry Pi rover, a Cozmo through a nearby computer, an ONVIF camera or a phone are all a few minutes away.</p>
-<p class="try-actions"><a class="button primary" href="/robots#add-robot">Add a robot</a> <a class="button quiet" href="/docs/profiles">How a profile draws this panel</a> <a class="button quiet" href="/docs/drivers">Write a driver</a></p>
+<p class="try-actions"><a class="button primary" href="/robots/new">Add a robot</a> <a class="button quiet" href="/models">See the models</a> <a class="button quiet" href="/docs/profiles">How a profile draws this panel</a> <a class="button quiet" href="/docs/drivers">Write a driver</a></p>
 </section>
 <script type="application/json" id="try-profile">${JSON.stringify(profile).replace(/</g, '\\u003c')}</script>`;
 }
@@ -458,7 +467,7 @@ function kitsSection(kits = [], profiles = []) {
         return `<li class="kit card"><div class="kit-head">${icon('robot', 'icon kit-icon')}<div><h3>${esc(k.name)}</h3>${k.vendor ? `<span class="pill">${esc(k.vendor)}</span>` : ''}</div></div>
 <p class="kit-desc">${esc(k.description || '')}</p>
 <details class="kit-parts"><summary>What you need <span class="muted">(${esc(need)} ${need === 1 ? 'part' : 'parts'})</span></summary><ul>${k.parts.map(part).join('')}</ul></details>
-<p class="kit-actions"><a class="button primary" href="/robots?profile=${encodeURIComponent(k.profile_id)}#add-robot">Add this robot</a> ${outLink(k.build_guide_url, 'Build guide', 'button quiet')}</p></li>`;
+<p class="kit-actions"><a class="button primary" href="/robots/new?profile=${encodeURIComponent(k.profile_id)}">Add this robot</a> ${outLink(k.build_guide_url, 'Build guide', 'button quiet')}</p></li>`;
     };
     return `<section class="kits" aria-labelledby="kits-h"><h2 id="kits-h">Get a robot</h2>
 <p class="muted">Curated kits with a ready-made profile: build one, pair it, and its panel already knows every motor and sensor.</p>

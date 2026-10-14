@@ -26,12 +26,12 @@ const DESCRIPTION = 'An open control panel for robots: pair a robot with one pas
 const HOME_CSP = [
     "default-src 'self'",
     // The Frame's theme-loader, navbar and footer are served from /shared; the inline boot is the shell's.
-    "script-src 'self' 'unsafe-inline' https://openvibe.network",
+    "script-src 'self' 'unsafe-inline' https://openvibe.network https://static.cloudflareinsights.com",
     "style-src 'self' 'unsafe-inline' https://openvibe.network https://fonts.googleapis.com https://cdnjs.cloudflare.com",
     "font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com",
     "img-src 'self' data: https:",
     // The navbar asks the Network for the session, menus and notifications (events: realtime and release notices).
-    "connect-src 'self' https://openvibe.network https://openvibe.events",
+    "connect-src 'self' https://openvibe.network https://openvibe.events https://cloudflareinsights.com",
     "frame-src 'self' https://openvibe.network",
     "frame-ancestors 'none'",
     "object-src 'none'",

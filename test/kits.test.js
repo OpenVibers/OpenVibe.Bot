@@ -100,18 +100,17 @@ const MINIMAL = {
         assert.strictEqual(missing.json.code, 'bot.kit_not_found');
     });
 
-    await check('the robots page offers "Get a robot": the kit, its parts, its guide and a start with its profile chosen', async () => {
+    await check('a kit\'s model page offers it: the parts, the kit\'s build guide, and a start with its profile chosen', async () => {
         const alex = t.network.newUser('alex');
-        const page = (q = '') => fetch(`${t.base}/robots${q}`, { redirect: 'manual', headers: { Cookie: `ov_token=${t.network.signUser(alex)}` } }).then((r) => r.text());
-        const html = await page();
-        assert.match(html, /<h2 id="kits-h">Get a robot<\/h2>/);
-        assert.match(html, /Adeept ADR036 4WD Smart Car Kit for Raspberry Pi/);
-        assert.match(html, /What you need/);
-        assert.match(html, /href="https:\/\/www\.adeept\.com\/learn\/detail-97\.html" target="_blank" rel="noopener">Build guide/);
-        assert.match(html, /href="\/robots\?profile=adeept\.adr036#add-robot">Add this robot/);
+        const page = (p) => fetch(`${t.base}${p}`, { redirect: 'manual', headers: { Cookie: `ov_token=${t.network.signUser(alex)}` } }).then((r) => r.text());
+        const html = await page('/models/adeept.adr036');
+        assert.match(html, /<h2>What you need<\/h2>/);
+        assert.match(html, /Adeept Robot HAT/);
+        assert.match(html, /href="https:\/\/www\.adeept\.com\/learn\/detail-97\.html" rel="noopener">The kit&#39;s build guide/);
+        assert.match(html, /href="\/robots\/new\?profile=adeept\.adr036">Add this robot/);
         assert.doesNotMatch(html, /\(O30\)/, 'no internal plan codes in public copy');
-        assert.match(await page('?profile=adeept.adr036'), /<option value="adeept\.adr036" selected>/, 'the kit start chooses its profile');
-        assert.doesNotMatch(await page('?profile=nope'), /<option value="nope"/);
+        assert.match(await page('/robots/new?profile=adeept.adr036'), /value="adeept\.adr036" checked/, 'the kit start chooses its profile');
+        assert.doesNotMatch(await page('/robots/new?profile=nope'), /value="nope"/);
     });
     await t.close();
 
