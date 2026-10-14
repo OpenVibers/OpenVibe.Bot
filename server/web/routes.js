@@ -427,7 +427,12 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     const machineRows = async (subject) => Promise.all((await domain.machines.list(subject)).map(async (d) => {
         const robotId = Array.isArray(d.robot_ids) ? d.robot_ids[0] : null;
         const robot = robotId ? await domain.robots.get(robotId) : null;
-        return { ...d, online: !!(hub && hub.isOnline(d.id)), robot: robot ? robot.name : null };
+        const sensors = hub ? ((hub.deviceState(d.id).telemetry || {}).sensors || {}) : {};
+        return {
+            ...d, online: !!(hub && hub.isOnline(d.id)), robot: robot ? robot.name : null,
+            computer_level: typeof sensors.computer_level === 'string' ? sensors.computer_level : null,
+            computer_waiting: Number.isInteger(sensors.computer_waiting) ? sensors.computer_waiting : null,
+        };
     }));
     r.get('/machines', frameCsp, page(async (req, res) => {
         const me = requireUser(req);
@@ -439,6 +444,15 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
         const pairing = await domain.machines.mint(me.subject);
         res.status(201).type('html').send(renderMachinesPage({ machines: await machineRows(me.subject), pairing }));
+    }));
+    // The owner lets their agent (OpenVibe.Actor) use this machine's computer plugin, or stops it.
+    r.post('/machines/:id/agent-computer', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        const mine = (await domain.machines.list(me.subject)).find((d) => d.id === req.params.id);
+        if (!mine) throw new BotError(404, 'bot.device_not_found', 'no such machine of yours');
+        await domain.machines.setAgentComputer(mine.id, req.body && req.body.on === '1');
+        res.redirect(303, '/machines');
     }));
     r.post('/machines/:id/remove', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
         const me = requireUser(req);

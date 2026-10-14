@@ -588,10 +588,29 @@ function renderMachinesPage({ machines = [], pairing = null }) {
         const w = (m.capabilities && typeof m.capabilities === 'object' ? m.capabilities : {}).worker || {};
         return Array.isArray(w.runtime_classes) ? w.runtime_classes : [];
     };
+    // The computer plugin (Node docs/computer.md): the level its owner set on the machine, and whether their agent may use it.
+    const LEVELS = { observe: 'Observe', ask: 'Ask first', trusted: 'Trusted', full: 'Full control' };
+    const computerOf = (m) => {
+        const c = (m.capabilities && typeof m.capabilities === 'object' ? m.capabilities : {}).computer;
+        if (!c || typeof c !== 'object') return null;
+        const level = m.computer_level || ((c.files || c.terminal || c.screen || {}).level) || null;
+        return { level: LEVELS[level] ? level : null, terminal: !!c.terminal, files: !!c.files, screen: !!c.screen };
+    };
+    const computerRow = (m) => {
+        const c = computerOf(m);
+        if (!c) return '';
+        const can = [c.terminal && 'terminal', c.files && 'files', c.screen && 'screen'].filter(Boolean).join(', ');
+        const waiting = Number.isInteger(m.computer_waiting) && m.computer_waiting > 0
+            ? ` <span class="pill warn">${m.computer_waiting} waiting for you on the machine</span>` : '';
+        return `<div class="machine-computer"><span class="pill">Computer: ${esc(c.level ? LEVELS[c.level] : 'on')}</span><span class="muted">${esc(can)}</span>${waiting}`
+            + `<form method="post" action="/machines/${esc(m.id)}/agent-computer"><input type="hidden" name="on" value="${m.agent_computer ? '0' : '1'}">`
+            + `<button type="submit" class="button quiet" aria-pressed="${m.agent_computer ? 'true' : 'false'}">${m.agent_computer ? 'Stop my agent using this computer' : 'Let my agent use this computer'}</button></form></div>`;
+    };
     const list = machines.length
         ? `<ul class="robots">${machines.map((m) => `<li class="robot-card"><span class="robot-name">${icon('plug')}<span>${esc(m.name || m.id)}</span></span>`
             + `<span class="robot-meta"><span class="pill">${m.online ? 'Online' : 'Offline'}</span>${classesOf(m).map((c) => ` <span class="pill">${esc(c)} jobs</span>`).join('')}`
             + `${m.agent_version ? ` <span class="pill">Node ${esc(m.agent_version)}</span>` : ''}${m.robot ? ` <span class="pill">Serves ${esc(m.robot)}</span>` : ''}</span>`
+            + computerRow(m)
             + `<span class="robot-actions"><form method="post" action="/machines/${esc(m.id)}/remove"><button type="submit" class="button quiet">Remove</button></form></span></li>`).join('')}</ul>`
         : `<div class="empty">${icon('plug', 'icon empty-icon')}<p class="empty-title">No machines yet.</p><p>Add your computer or a server you own. It runs the jobs you start, such as a coding task on openvibe.codes, and nobody else's.</p></div>`;
     const add = pairing
@@ -599,6 +618,9 @@ function renderMachinesPage({ machines = [], pairing = null }) {
 <pre class="installer"><code data-copy-source>${esc(pairing.installer)}</code></pre>
 <button type="button" class="copy" data-copy>${icon('copy')}<span data-copy-label>Copy the command</span></button>
 <p class="muted">Linux with systemd. It installs OpenVibe Node, turns its job worker on (jobs run as a separate user, in a sandbox, with the limits you set) and pairs the machine with your account. For coding jobs the machine also needs Node.js 22 or newer and git, and a coding agent: Claude Code, Codex, OpenCode, or a DeepSeek key.</p></li>
+<li class="card"><h2>Or let your agents use this computer</h2>
+<pre class="installer"><code>${esc(pairing.installer.replace(/ --worker$/, ' --computer ask'))}</code></pre>
+<p class="muted">Instead of running jobs, the machine's terminal, files and screen become usable by your agents, at the level you set on the machine: <code>ask</code> waits for <code>openvibe-node approve</code> there before anything runs or changes. The Node runs as your own account, never root. <a href="https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/computer.md">How it works</a>.</p></li>
 <li class="card"><h2>Or enter the pairing code</h2><p><strong class="code">${esc(pairing.code)}</strong></p>
 <p class="muted">Valid until <time datetime="${esc(pairing.expires_at)}">${esc(pairing.expires_at)}</time>. It works once.</p></li></ol>
 <p class="muted">Reload this page once the installer says it is paired: the machine shows up above.</p>`

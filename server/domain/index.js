@@ -663,6 +663,10 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
                  SELECT 1 FROM robots r WHERE r.owner_subject = $1 AND d.robot_ids @> jsonb_build_array(r.id))))
              ORDER BY d.created_at DESC`, [subject]);
     }
+    /** Let the owner's agent use this machine's computer plugin, or stop it (the owner check is the caller's). */
+    async function setAgentComputer(deviceId, value) {
+        return db.maybe('UPDATE devices SET agent_computer = $2, updated_at = $3 WHERE id = $1 AND revoked_at IS NULL RETURNING *', [deviceId, !!value, iso(now())]);
+    }
     /** Whose machine a device is: a worker machine's owner, else its (first) robot's owner; null when neither. */
     async function ownerOf(device) {
         if (!device) return null;
@@ -1080,7 +1084,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         members: { roleOf, add: addOperator, remove: removeOperator, list: listOperators },
         pairing: { create: createPairingCode, redeem, prune: prunePairingCodes, installerCommand, driverForProfile, whipUrl },
         devices: { byCredential, bindNode, issuePublishKey, revokeVideo, updateDeclared, revokeNode, ensureServerDevice, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, touchSeen, setOnline, ownerOf, onChange },
-        machines: { mint: mintMachine, list: listMachines, workerRef },
+        machines: { mint: mintMachine, list: listMachines, workerRef, setAgentComputer },
         streaming: { get: streaming, set: setStreaming },
         video: { live: liveVideo },
         estop: { set: setEstop, clear: clearEstop },

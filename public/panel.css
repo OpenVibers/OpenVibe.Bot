@@ -39,6 +39,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 input[type="checkbox"] { width: 1.4rem; height: 1.4rem; min-height: 0; min-width: 0; accent-color: var(--accent); }
 
 .pill { display: inline-flex; align-items: center; gap: 0.4rem; min-height: 1.75rem; padding: 0 0.65rem; border-radius: 999px; background: var(--raised); border: 1px solid var(--line); color: var(--muted); font-size: 0.85rem; white-space: nowrap; }
+.pill.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); }
 .dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--muted); flex: none; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 1rem; }
 .notice, .error { padding: 0.65rem 0.9rem; border-radius: 10px; background: rgba(210, 153, 34, 0.12); border: 1px solid rgba(210, 153, 34, 0.5); color: #f0d48a; }
@@ -194,7 +195,9 @@ main { padding: 1rem max(1rem, env(safe-area-inset-right)) calc(1.5rem + env(saf
 .robot-name .icon { color: var(--accent); }
 .robot-meta { display: flex; flex-wrap: wrap; gap: 0.4rem; }
 .robot-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-@media (min-width: 36rem) { .robot-card { grid-template-columns: minmax(0, 1fr) auto; align-items: center; } .robot-meta { grid-column: 1; grid-row: 2; } .robot-actions { grid-column: 2; grid-row: 1 / span 2; } }
+/* A machine's computer plugin (Node docs/computer.md): its level, what waits on it, and the agent switch, full width. */
+.machine-computer { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.6rem; padding-top: 0.6rem; border-top: 1px solid var(--line); }
+@media (min-width: 36rem) { .robot-card { grid-template-columns: minmax(0, 1fr) auto; align-items: center; } .robot-meta { grid-column: 1; grid-row: 2; } .robot-actions { grid-column: 2; grid-row: 1 / span 2; } .machine-computer { grid-column: 1 / -1; grid-row: 3; } .machine-computer form { margin-left: auto; } }
 .empty { text-align: center; padding: 2rem 1rem; margin-bottom: 1.5rem; border: 1px dashed var(--line); border-radius: var(--radius); color: var(--muted); }
 .empty-icon { width: 3rem; height: 3rem; stroke-width: 1.5; color: var(--accent); }
 .empty-title { margin: 0.5rem 0 0.25rem; font-size: 1.15rem; font-weight: 600; color: var(--text); }

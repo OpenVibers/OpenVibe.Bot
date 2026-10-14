@@ -23,7 +23,7 @@
  */
 const { WebSocketServer } = require('ws');
 const { createControlTickets, ticketFromProtocols, PROTOCOL: TICKET_PROTOCOL } = require('./control-tickets');
-const { capabilities, ids } = require('openvibe-contracts');
+const { capabilities, ids, validate } = require('openvibe-contracts');
 const { json, iso, prefixedId } = require('./util');
 const { userPrincipal, verifyService, verifyNode, isNodeToken, PRINCIPAL_SUB, decodePayload } = require('./api/auth');
 const { getProfile } = require('./profiles');
@@ -34,6 +34,21 @@ const ACCESS_COOKIE = 'ov_token';
 const DEVICE_KINDS = new Set(['onboard', 'bridge', 'server']);
 const MAX_AGENT_VERSION = 40;
 const WATCH_MAX_PAYLOAD = 4 * 1024;   // a watcher only ever sends join/leave
+// A machine's answer to a computer command (exec output, a file, a screen) is at most 512 KB of JSON in its ack
+// (OpenVibe.Node protocol.MaxAckData), so a device frame may be that large; ws closes a socket on a larger frame.
+const DEVICE_MAX_PAYLOAD = 640 * 1024;
+// The Node's computer plugin (plan T14/T17): the kinds a person's machine takes, the capability each needs in its
+// status, and the reply window (the owner's approval on the machine plus the program's own run).
+const COMPUTER_CAP = { exec: 'terminal', fs: 'files', screen: 'screen' };
+const COMPUTER_KINDS = Object.keys(COMPUTER_CAP);
+const COMPUTER_DEFAULT_MS = 60000;
+const COMPUTER_MAX_MS = 600000;
+/** What an audit row keeps of a computer command: never a file's content, stdin or arguments (they may hold secrets). */
+function computerSummary(kind, value) {
+    if (kind === 'exec') return { program: String(value.argv[0]).slice(0, 120), args: value.argv.length - 1 };
+    if (kind === 'fs') return { op: value.op, path: String(value.path).slice(0, 300), ...(typeof value.content_b64 === 'string' ? { bytes: Math.floor((value.content_b64.length * 3) / 4) } : {}) };
+    return { max_width: value.max_width || null };
+}
 
 function parseCookies(header) {
     const out = {};
@@ -83,7 +98,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
 
     // A browser device (a phone, public/phone-device.js) cannot set the upgrade's Authorization header: it offers its
     // credential as a subprotocol (`ov.device`, `ov.device.<credential>`) and gets `ov.device` back.
-    const deviceWss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024, perMessageDeflate: false,
+    const deviceWss = new WebSocketServer({ noServer: true, maxPayload: DEVICE_MAX_PAYLOAD, perMessageDeflate: false,
         handleProtocols: (protocols) => (protocols.has(DEVICE_PROTOCOL) ? DEVICE_PROTOCOL : false) });
     // A socket that offers a control ticket gets the ticket protocol back (a browser drops a socket whose offered
     // subprotocol is not answered); a plain one, none.
@@ -269,7 +284,13 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         const profileRow = robot ? await getProfile(domain.db, robot.profile_id, robot.profile_version) : null;
         const profile = profileRow ? profileRow.profile : null;
         const limits = robot ? domain.control.deviceLimits(robot, profile) : { max_command_ms: config.control.maxCommandMs, heartbeat_ms: config.device.heartbeatMs };
-        const allowed = robot ? domain.control.allowedFor(robot, 'owner', profile) : ['halt'];
+        // The computer kinds, for a machine that serves no robot or a device whose computer plugin is on: they reach it
+        // only through POST /machines/:id/commands (its owner, or their agent where they allowed it), never a robot's
+        // operators, and the machine's computer plugin applies its owner's level.
+        const declared = (conn.status && conn.status.capabilities) || json(conn.device.capabilities, {}) || {};
+        conn.computerAllowed = !robot || !!declared.computer;
+        const base = robot ? domain.control.allowedFor(robot, 'owner', profile) : ['halt'];
+        const allowed = conn.computerAllowed ? [...new Set([...base, ...COMPUTER_KINDS])] : base;
         sendFrame(conn, 'config', {
             heartbeat_ms: config.device.heartbeatMs, limits, allowed_commands: allowed,
             estop_latched: robot ? !!robot.estop_latched : false,
@@ -327,6 +348,8 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             case 'telemetry': return onTelemetry(conn, msg);
             case 'status':
                 conn.status = msg;
+                // A robot's machine that turns its computer plugin on is told it takes the computer kinds.
+                if (!conn.computerAllowed && msg.capabilities && msg.capabilities.computer) await sendConfig(conn);
                 for (const r of deviceRobotIds(conn.device)) broadcast(r);
                 return conn.device.node_principal ? persistDeclared(conn, msg) : undefined;
             case 'reauth': if (conn.node) return onReauth(conn, msg); return sendError(conn, 'bot.unknown_message', `unknown type ${msg.type}`);
@@ -380,9 +403,13 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         if (p.timer) clearTimeout(p.timer);
         const result = msg.type === 'ack' ? 'ack' : 'nack';
         const latency = now() - p.at;
+        // A computer command's answer goes to its caller once; the cache keeps the result only (a repeated id gets
+        // no data back), so 4096 cached results never hold 4096 screens.
         cacheResult(p.key, { result, reason: msg.fault_code || null });
         await domain.audit.record({ robotId: p.robotId, deviceId: p.deviceId, subject: p.subject, operatorKind: p.operatorKind, role: p.role, kind: p.kind, value: p.value, result, reason: msg.fault_code || null, latencyMs: latency });
-        sendFrame(p.conn, 'command_result', { id: p.opId, result, reason: msg.fault_code || null, latency_ms: latency });
+        const data = p.computer && result === 'ack' && msg.data && typeof msg.data === 'object' && !Array.isArray(msg.data) ? msg.data : null;
+        const message = p.computer && result === 'nack' && typeof msg.message === 'string' ? msg.message.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 300) : null;
+        sendFrame(p.conn, 'command_result', { id: p.opId, result, reason: message || msg.fault_code || null, latency_ms: latency, ...(data ? { data } : {}) });
     }
 
     // A device reports its own latch. It may latch a robot it is attached to; it never clears one — latched:false
@@ -569,6 +596,82 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             };
             onOperatorCommand(conn, msg).catch((e) => { if (!settled) { settled = true; reject(e); } });
         });
+    }
+
+    /** What a machine's computer plugin offers, from its last status: { terminal?, files?, screen? }, or null. */
+    function computerOf(deviceId) {
+        const c = deviceConns.get(deviceId);
+        const caps = c && c.status && c.status.capabilities && c.status.capabilities.computer;
+        return caps && typeof caps === 'object' && !Array.isArray(caps) ? caps : null;
+    }
+
+    /**
+     * One computer command (exec, fs, screen) to a person's machine, off POST /machines/:id/commands (api/v1.js has
+     * already checked the caller: the machine's owner, or their agent where the owner allowed it). Idempotent per
+     * subject and id like a robot command; audited under the machine's device id with a summary only. The machine's
+     * computer plugin applies its owner's level, and its answer comes back in `data`.
+     * → { id, result, code?, reason?, latency_ms?, data?, cached? }
+     */
+    function machineCommand(deviceId, principal, subject, msg) {
+        return new Promise((resolve, reject) => {
+            let settled = false;
+            const finish = (r) => { if (!settled) { settled = true; resolve(r); } };
+            const conn = {
+                ws: {
+                    readyState: OPEN,
+                    send(raw) {
+                        let frame; try { frame = JSON.parse(String(raw)); } catch { return; }
+                        if (frame.type !== 'command_result') return;
+                        const r = { id: frame.id != null ? String(frame.id) : null, result: frame.result };
+                        for (const k of ['code', 'reason', 'latency_ms', 'data']) if (frame[k] != null) r[k] = frame[k];
+                        if (frame.cached) r.cached = true;
+                        finish(r);
+                    },
+                },
+                seq: 0, principal, subject, robotId: null, role: 'owner',
+            };
+            sendMachineCommand(conn, deviceId, msg).catch((e) => { if (!settled) { settled = true; reject(e); } });
+        });
+    }
+
+    async function sendMachineCommand(conn, deviceId, msg) {
+        const subject = conn.subject;
+        const id = (msg.id != null ? String(msg.id) : prefixedId('op', now())).slice(0, 64);
+        const key = `${subject}|machine|${id}`;
+        const cached = results.get(key);
+        if (cached) return sendFrame(conn, 'command_result', { id, result: cached.result, reason: cached.reason, cached: true });
+        if (inflight.has(key)) return sendFrame(conn, 'command_result', { id, result: 'refused', code: 'bot.command_pending', reason: 'the same command id is still in flight' });
+        inflight.set(key, null);
+        try {
+            const kind = String(msg.kind || '');
+            const value = msg.value && typeof msg.value === 'object' && !Array.isArray(msg.value) ? msg.value : {};
+            const refuse = async (code, reason, summary = null) => {
+                await domain.audit.record({ robotId: deviceId, deviceId, subject, operatorKind: conn.principal.kind, role: 'owner', kind: COMPUTER_CAP[kind] ? kind : 'unknown', value: summary || {}, result: 'refused', reason: code });
+                return sendFrame(conn, 'command_result', { id, result: 'refused', code, reason });
+            };
+            if (!COMPUTER_CAP[kind]) return refuse('bot.invalid_input', `kind is ${COMPUTER_KINDS.join(', ')}`);
+            const check = validate('bot.command@1', { v: 1, seq: 0, ts: 0, type: 'command', id, kind, value });
+            if (!check.valid) return refuse('bot.invalid_input', `invalid ${kind}: ${(check.errors && check.errors[0] && (check.errors[0].message || JSON.stringify(check.errors[0]))) || 'bad value'}`.slice(0, 300));
+            const summary = computerSummary(kind, value);
+            const device = deviceConns.get(deviceId);
+            if (!device || !device.online) return refuse('bot.device_offline', 'the machine is offline', summary);
+            const offered = computerOf(deviceId);
+            if (!offered || !offered[COMPUTER_CAP[kind]]) return refuse('bot.computer_off', `this machine does not offer ${COMPUTER_CAP[kind]}: its computer plugin is off (openvibe-node, --computer)`, summary);
+            const requested = Number(msg.ms);
+            const windowMs = Number.isInteger(requested) && requested > 0 ? Math.min(Math.max(requested, 1000), COMPUTER_MAX_MS) : COMPUTER_DEFAULT_MS;
+            const deviceCmdId = prefixedId('cmd', now());
+            const deadlineMs = now() + windowMs;
+            const frame = { v: 1, type: 'command', seq: nextSeq(device), ts: now(), id: deviceCmdId, ref: id, kind, value, deadline_ms: deadlineMs, operator: { subject, role: 'owner' } };
+            if (!send(device.ws, frame)) return refuse('bot.device_offline', 'the machine is offline', summary);
+            const p = { id: deviceCmdId, opId: id, key, deviceId, conn, robotId: deviceId, subject, operatorKind: conn.principal.kind, role: 'owner', kind, value: summary, at: now(), timer: null, computer: true };
+            pendingCmds.set(deviceCmdId, p);
+            inflight.set(key, deviceCmdId);
+            p.timer = setTimeout(() => expireCommand(deviceCmdId), windowMs + 1500);
+            if (p.timer.unref) p.timer.unref();
+            return undefined;
+        } finally {
+            if (inflight.get(key) === null) inflight.delete(key);
+        }
     }
 
     async function onOperatorEstop(conn, latched) {
@@ -787,6 +890,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         /** A one-time ticket for the embedded panel's Drive (POST /panel/:id/ticket), or null. */
         issueControlTicket(principal, robotId) { return tickets.issue(principal, robotId); },
         isOnline, deviceState, sendToDevice, sendToRobotDevices, broadcast, closeDevice, robotState, refreshConfig, pushEstop, closeWatchers, dropSubject, operatorCommand,
+        machineCommand, computerOf,
         // Real devices only: a simulator is not a machine anyone runs.
         onlineCount() { let n = 0; for (const c of deviceConns.values()) if (c.online && !c.sim) n++; return n; },
         devices() { return [...deviceConns.values()].filter((c) => !c.sim).map((c) => ({ device_id: c.device.id, online: c.online })); },
