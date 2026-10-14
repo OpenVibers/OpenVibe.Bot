@@ -25,6 +25,7 @@ const CONNECT = {
     onboard: { label: 'On-board', text: 'The OpenVibe Node runs on the robot\'s own computer and drives its hardware.' },
     bridge: { label: 'Bridge', text: 'The OpenVibe Node runs on a computer or phone next to the robot and joins the robot\'s own link. Nothing on the robot changes.' },
     server: { label: 'Server-side', text: 'Nothing to install: Bot connects to the device itself.' },
+    phone: { label: 'Phone', text: 'The phone\'s browser is the device: scan a code, allow the camera, keep the page open. Nothing to install.' },
 };
 const MODELS = {
     'sim.rover': {
@@ -54,6 +55,12 @@ const MODELS = {
         setup: ['The community\'s Generic LOOI driver bridges to the desk robot over Bluetooth from a Windows PC.', 'Install the Node with --driver looi; the phone in LOOI keeps doing what it does.'],
         guide: { href: `${NODE_BLOB}/docs/hardware-looi.md`, label: 'LOOI driver contract' },
     },
+    'phone.camera': {
+        connect: 'phone', order: 1,
+        setup: ['Add the robot here and choose A phone; its pairing page shows a QR code.', 'Scan it with the phone, tap Start and allow the camera. The phone streams, speaks, shows a face and reports its battery and tilt.',
+            'Keep the page open (the screen stays on). Its Stop button holds the robot until it is released on the phone.'],
+        guide: { href: '/device/phone', label: 'The phone\'s page' },
+    },
     'camera.onvif': {
         connect: 'server', order: 5,
         setup: ['Any ONVIF pan-tilt-zoom camera: Bot moves it, with the same gate and limits as a robot.', 'Today an operator names the camera in Bot\'s configuration (its address and the names of its secrets).'],
@@ -70,6 +77,7 @@ const CAPABILITY_WORDS = {
     'lights.rgb': 'RGB lights', 'lights.backpack': 'Backpack lights', 'lights.cube': 'Cube lights', 'speaker.horn': 'Horn', 'speaker.say': 'Speaks',
     'display.text': 'Face and text', 'sensor.ultrasonic': 'Range finder', 'sensor.line': 'Line tracking', 'sensor.cliff': 'Cliff sensors',
     'sensor.pickup': 'Pick-up sensor', battery: 'Battery', ptz: 'Pan, tilt, zoom', camera: 'Live camera', relay: 'Your own buttons',
+    'lights.torch': 'Torch', 'sensor.tilt': 'Tilt sensor',
 };
 const POLICY_WORDS = { private: 'Only its owner and the people they add drive it.', invite: 'People the owner invites drive it.', queue: 'Anyone signed in can take a timed turn.' };
 
@@ -138,7 +146,7 @@ ${listed.length ? `<ul class="dir-grid">${listed.map(robotCard).join('')}</ul>`
 
 // ── GET /models ─────────────────────────────────────────────────────────────────────────────────────
 function renderModels({ config, models = [] }) {
-    const groups = ['browser', 'onboard', 'bridge', 'server'].map((k) => [k, sortModels(models).filter((m) => m.connect === k)]).filter(([, ms]) => ms.length);
+    const groups = ['browser', 'phone', 'onboard', 'bridge', 'server'].map((k) => [k, sortModels(models).filter((m) => m.connect === k)]).filter(([, ms]) => ms.length);
     const body = `<header class="dir-hero"><h1>Models</h1>
 <p class="muted">Every robot OpenVibe.Bot has a profile for. A profile lays out the panel, so each of these drives with the controls it really has.</p></header>
 ${groups.map(([k, ms]) => `<section class="dir-sec" aria-labelledby="g-${esc(k)}"><h2 id="g-${esc(k)}">${esc(CONNECT[k].label)}</h2><p class="muted">${esc(CONNECT[k].text)}</p>
@@ -190,7 +198,7 @@ function renderAddRobot({ config, models = [], values = {}, error = null }) {
     const chosen = values.profile_id || 'sim.rover';
     const option = (m) => `<label class="dir-choice"><input type="radio" name="profile_id" value="${esc(m.id)}"${m.id === chosen ? ' checked' : ''} required>`
         + `<span class="dir-choice-body"><span class="dir-card-head"><b>${esc(m.name)}</b>${badge(m.connect)}</span><span class="dir-card-text">${esc(CONNECT[m.connect].text)}</span></span></label>`;
-    const groups = [['browser', 'Try it with no hardware'], ['onboard', 'A robot with its own computer'], ['bridge', 'A robot you connect through a computer next to it'], ['server', 'A camera Bot connects to']]
+    const groups = [['browser', 'Try it with no hardware'], ['phone', 'A phone, from its browser'], ['onboard', 'A robot with its own computer'], ['bridge', 'A robot you connect through a computer next to it'], ['server', 'A camera Bot connects to']]
         .map(([k, title]) => [title, sortModels(models).filter((m) => m.connect === k)]).filter(([, ms]) => ms.length);
     const body = `<p class="dir-crumb">${link('/robots', 'Robots')}</p>
 <header class="dir-hero"><h1>Add a robot</h1><p class="muted">Name it, say what it is, and choose who may drive. A simulated rover drives the moment it is added; anything else gets a one-time pairing code and one command to paste on its computer.</p></header>

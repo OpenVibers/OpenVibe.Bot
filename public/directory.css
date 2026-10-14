@@ -40,7 +40,7 @@
 .dir-chips li { font-size: 12.5px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border, #1f2d47); color: var(--text-secondary, #96a7c2); margin: 0; }
 
 .dir-badge { flex: none; font-size: 11.5px; font-weight: 700; letter-spacing: .03em; padding: 2px 8px; border-radius: 999px; border: 1px solid currentColor; }
-.dir-browser { color: #a78bfa; } .dir-onboard { color: #22c55e; } .dir-bridge { color: #f59e0b; } .dir-server { color: #38bdf8; }
+.dir-browser { color: #a78bfa; } .dir-phone { color: #f472b6; } .dir-onboard { color: #22c55e; } .dir-bridge { color: #f59e0b; } .dir-server { color: #38bdf8; }
 .dir-pill { display: inline-block; font-size: 12.5px; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--border, #1f2d47); text-decoration: none; color: var(--text-primary, #e6edf7) !important; }
 .dir-pill.dir-quiet { color: var(--text-secondary, #96a7c2) !important; }
 .dir-state { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 650; color: var(--text-secondary, #96a7c2); }

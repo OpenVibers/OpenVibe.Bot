@@ -200,8 +200,33 @@ const looi = {
 };
 
 /** The contract a profile's commands must meet: its Node plugin, or the server driver. */
+/**
+ * The phone driver = public/phone-device.js onCommand: say {text}; display {face} (its FACES) or {text}; actuator
+ * torch (true/false) and chime ({hz} or null); halt. Anything else is nacked unsupported.
+ */
+const PHONE_FACES = ['happy', 'neutral', 'sad', 'surprised', 'sleepy', 'wink', 'love', 'angry'];
+const phone = {
+    name: 'phone (browser)',
+    accepts(kind, v) {
+        if (kind === 'halt') return halt(v);
+        if (!isObj(v)) return `${kind} takes an object`;
+        if (kind === 'say') return typeof v.text === 'string' && v.text && only(v, ['text']) ? null : 'say is {text}';
+        if (kind === 'display') {
+            if (only(v, ['face']) && PHONE_FACES.includes(v.face)) return null;
+            return only(v, ['text']) && typeof v.text === 'string' && v.text ? null : 'display is {face} or {text}';
+        }
+        if (kind === 'actuator') {
+            if (v.name === 'torch') return typeof v.value === 'boolean' ? null : 'torch is true or false';
+            if (v.name === 'chime') return v.value === null || (isObj(v.value) && only(v.value, ['hz']) && num(v.value.hz, 220, 1760)) ? null : 'chime is {hz} or null';
+            return `no actuator ${v.name}`;
+        }
+        return `kind ${kind} not supported`;
+    },
+};
+
 function contractFor(profile) {
     const m = profile.mapping || {};
+    if (m.driver === 'phone') return phone;
     if (m.plugin === 'adeept_adr036') return adeept(m.wheels);
     if (m.plugin === 'cozmo') return cozmo();
     if (m.plugin === 'relay') return relay;
@@ -209,4 +234,4 @@ function contractFor(profile) {
     return server[profile.id] || null;
 }
 
-module.exports = { adeept, cozmo, relay, looi, server, contractFor, COZMO_FACES };
+module.exports = { adeept, cozmo, relay, looi, phone, server, contractFor, COZMO_FACES, PHONE_FACES };

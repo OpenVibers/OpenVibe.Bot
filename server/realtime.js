@@ -45,6 +45,16 @@ function parseCookies(header) {
 }
 const bearer = (req) => { const h = String(req.headers.authorization || ''); return h.startsWith('Bearer ') ? h.slice(7).trim() : null; };
 const isSubject = (v) => typeof v === 'string' && ids.isSubjectId('user', v);
+const DEVICE_PROTOCOL = 'ov.device';
+const CREDENTIAL_RE = /^[A-Za-z0-9_-]{43}$/;   // a device credential (32 random bytes, base64url); never a node token
+/** A browser device's credential, offered as `ov.device.<credential>` beside `ov.device`; anything else → null. */
+function deviceCredentialFromProtocols(header) {
+    const offered = String(header || '').split(',').map((s) => s.trim()).filter(Boolean);
+    if (!offered.includes(DEVICE_PROTOCOL)) return null;
+    const named = offered.find((p) => p.startsWith(`${DEVICE_PROTOCOL}.`));
+    const value = named ? named.slice(DEVICE_PROTOCOL.length + 1) : '';
+    return CREDENTIAL_RE.test(value) ? value : null;
+}
 // The keys the Node's drivers report a sensor capability under (the Adeept and Cozmo plugins: distance_cm, line).
 const SENSOR_KEYS = { ultrasonic: ['distance_cm'], line: ['line'], cliff: ['cliff', 'picked_up'], pickup: ['picked_up', 'pickup'] };
 const finite = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
@@ -71,7 +81,10 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     const timers = [];
     let closed = false;
 
-    const deviceWss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024, perMessageDeflate: false });
+    // A browser device (a phone, public/phone-device.js) cannot set the upgrade's Authorization header: it offers its
+    // credential as a subprotocol (`ov.device`, `ov.device.<credential>`) and gets `ov.device` back.
+    const deviceWss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024, perMessageDeflate: false,
+        handleProtocols: (protocols) => (protocols.has(DEVICE_PROTOCOL) ? DEVICE_PROTOCOL : false) });
     // A socket that offers a control ticket gets the ticket protocol back (a browser drops a socket whose offered
     // subprotocol is not answered); a plain one, none.
     const controlWss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024, perMessageDeflate: false,
@@ -148,7 +161,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         ws.on('message', (raw) => onDeviceFrame(conn, raw));
         ws.on('close', () => { conn.backlog = null; dropDevice(conn); });
         ws.on('error', () => { /* the close event does the work */ });
-        const cred = bearer(req);   // the query string is never read
+        const cred = bearer(req) || deviceCredentialFromProtocols(req.headers['sec-websocket-protocol']);   // the query string is never read
         if (cred) {
             conn.backlog = [];
             try {
