@@ -69,7 +69,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     // ── Presenters ────────────────────────────────────────────────────────────────────────────────
     const presentRobot = (r) => (r ? {
         id: r.id, name: r.name, profile_id: r.profile_id, profile_version: r.profile_version,
-        access_policy: r.access_policy, limits: json(r.limits, {}),
+        access_policy: r.access_policy, limits: json(r.limits, {}), agent_control: !!r.agent_control,
         estop: { latched: !!r.estop_latched, by: r.estop_by || null, at: r.estop_at ? iso(new Date(r.estop_at).getTime()) : null },
         created_at: iso(new Date(r.created_at).getTime()), updated_at: iso(new Date(r.updated_at).getTime()),
     } : null);
@@ -254,6 +254,11 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
      * anyone (embed_public), since a directory entry nobody can watch is no entry; unlisting leaves embedding as it was.
      * The owner check is the caller's.
      */
+    /** Let the owner's OpenVibe.Actor agent drive the robot as the owner, or stop it (the owner check is the caller's). */
+    async function setAgentControl(id, value) {
+        await db.query('UPDATE robots SET agent_control = $2, updated_at = $3 WHERE id = $1', [id, !!value, iso(now())]);
+        return getRobot(id);
+    }
     async function setListed(id, value) {
         if (value) await db.query('UPDATE robots SET listed = true, listed_at = COALESCE(listed_at, $2), embed_public = true, updated_at = $2 WHERE id = $1', [id, iso(now())]);
         else await db.query('UPDATE robots SET listed = false, listed_at = NULL, updated_at = $2 WHERE id = $1', [id, iso(now())]);
@@ -1018,7 +1023,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     return {
         db, now, config, log, outbox, link,
         present: { robot: presentRobot, device: presentDevice, video: presentVideo },
-        robots: { create: createRobot, list: listRobots, get: getRobot, update: updateRobot, setEmbedPublic, setListed, listListed, remove: removeRobot,
+        robots: { create: createRobot, list: listRobots, get: getRobot, update: updateRobot, setEmbedPublic, setListed, listListed, setAgentControl, remove: removeRobot,
             localProfile, saveLocalProfile, useCatalogueProfile },
         members: { roleOf, add: addOperator, remove: removeOperator, list: listOperators },
         pairing: { create: createPairingCode, redeem, prune: prunePairingCodes, installerCommand, driverForProfile, whipUrl },
