@@ -580,6 +580,41 @@ ${first}
 }
 
 /**
+ * /machines (plan T14/T16): a person's own machines that run jobs for them, and the command that adds one. A machine
+ * here runs its owner's jobs only (Bot refuses anyone else's), connects out, and keeps its local limits and kill switch.
+ */
+function renderMachinesPage({ machines = [], pairing = null }) {
+    const classesOf = (m) => {
+        const w = (m.capabilities && typeof m.capabilities === 'object' ? m.capabilities : {}).worker || {};
+        return Array.isArray(w.runtime_classes) ? w.runtime_classes : [];
+    };
+    const list = machines.length
+        ? `<ul class="robots">${machines.map((m) => `<li class="robot-card"><span class="robot-name">${icon('plug')}<span>${esc(m.name || m.id)}</span></span>`
+            + `<span class="robot-meta"><span class="pill">${m.online ? 'Online' : 'Offline'}</span>${classesOf(m).map((c) => ` <span class="pill">${esc(c)} jobs</span>`).join('')}`
+            + `${m.agent_version ? ` <span class="pill">Node ${esc(m.agent_version)}</span>` : ''}${m.robot ? ` <span class="pill">Serves ${esc(m.robot)}</span>` : ''}</span>`
+            + `<span class="robot-actions"><form method="post" action="/machines/${esc(m.id)}/remove"><button type="submit" class="button quiet">Remove</button></form></span></li>`).join('')}</ul>`
+        : `<div class="empty">${icon('plug', 'icon empty-icon')}<p class="empty-title">No machines yet.</p><p>Add your computer or a server you own. It runs the jobs you start, such as a coding task on openvibe.codes, and nobody else's.</p></div>`;
+    const add = pairing
+        ? `<ol class="steps"><li class="card"><h2>Run this on the machine</h2>
+<pre class="installer"><code data-copy-source>${esc(pairing.installer)}</code></pre>
+<button type="button" class="copy" data-copy>${icon('copy')}<span data-copy-label>Copy the command</span></button>
+<p class="muted">Linux with systemd. It installs OpenVibe Node, turns its job worker on (jobs run as a separate user, in a sandbox, with the limits you set) and pairs the machine with your account. For coding jobs the machine also needs Node.js 22 or newer and git, and a coding agent: Claude Code, Codex, OpenCode, or a DeepSeek key.</p></li>
+<li class="card"><h2>Or enter the pairing code</h2><p><strong class="code">${esc(pairing.code)}</strong></p>
+<p class="muted">Valid until <time datetime="${esc(pairing.expires_at)}">${esc(pairing.expires_at)}</time>. It works once.</p></li></ol>
+<p class="muted">Reload this page once the installer says it is paired: the machine shows up above.</p>`
+        : `<form class="add-robot card" method="post" action="/machines"><h2>Add a machine</h2>
+<p class="muted">You get a one-line install command with a one-time code.</p><button type="submit" class="primary">Add a machine</button></form>`;
+    const body = `${topbar('<span class="crumb">Machines</span>')}
+<main class="page">
+<h1>Your machines</h1>
+<p class="muted">A machine here runs jobs for you and only you. It connects out to OpenVibe and needs no open ports. The limits in its own config and its local kill switch (<code>openvibe-node stop</code>) always win.</p>
+${list}
+${add}
+</main>`;
+    return page('Your machines', body, { scripts: pairing ? ['/panel/panel.js'] : [], description: 'Your own machines that run your jobs on OpenVibe.', canonical: '/machines' });
+}
+
+/**
  * /device/phone: the page that makes a phone the robot's device (public/phone-device.js). Its setup form pairs it (the
  * QR code fills in the robot and code); once running, the screen is the robot's face, with the link and camera state
  * above it and the phone's own Stop below.
@@ -613,4 +648,4 @@ function renderPhonePage() {
     return page('This phone is a robot', body, { scripts: ['/panel/phone-device.js'], bodyClass: 'phone-page', description: 'Turn a phone into a robot on OpenVibe.Bot from its browser: its camera, voice and face, with nothing to install.', canonical: '/device/phone' });
 }
 
-module.exports = { page, renderPanel, renderPhonePage, panelScripts, isSim, TRY_DESCRIPTION, renderEmbedRefused, renderDrivePage, renderWidget, renderRobotsPage, renderPairingPage, camerasOf, esc };
+module.exports = { page, renderPanel, renderPhonePage, renderMachinesPage, panelScripts, isSim, TRY_DESCRIPTION, renderEmbedRefused, renderDrivePage, renderWidget, renderRobotsPage, renderPairingPage, camerasOf, esc };

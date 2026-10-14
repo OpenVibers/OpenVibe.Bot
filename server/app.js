@@ -24,7 +24,8 @@ const { http } = require('openvibe-contracts');
 const { isLoopbackDirect } = require('openvibe-shared/metrics');
 const { loadConfig } = require('./config');
 const { openDb } = require('./db');
-const { createKeyProvider, createUserAuth, createNodePrincipals, createIdentity } = require('./network');
+const { createKeyProvider, createUserAuth, createNodePrincipals, createIdentity, createOfferReporter } = require('./network');
+const { createOfferPublisher } = require('./jobs/offers');
 const { createOpenRe } = require('./openre/client');
 const { createBotOutbox } = require('./events/outbox');
 const { createUsageRelay } = require('./jobs/metering');
@@ -89,6 +90,12 @@ function createApp(opts = {}) {
     // One jobs service for the device socket and the jobs API, so both see the same stdout rings.
     const jobs = createJobs({ db: () => domain.db, hub, usage, log, now });
     hub.bindJobs(jobs);
+    // The worker offers of the machines connected here, reported to Network for Run's placement (server/jobs/offers.js);
+    // started by server/index.js with the other jobs. Without Network credentials nothing is reported.
+    const offerReporter = opts.offerReporter !== undefined ? opts.offerReporter
+        : (config.oauth.clientSecret ? createOfferReporter(config, { fetchImpl }) : null);
+    const offers = createOfferPublisher({ db, hub, reporter: offerReporter, log, now });
+    domain.devices.onChange(() => offers.poke());
     const sim = opts.sim || createSimulator({ config, domain, hub, now, log });
     // Server-side ONVIF cameras (server/onvif): the same in-process attach as the simulator, but with a real
     // kind 'server' device row and an outbound ONVIF request per ptz command.
@@ -165,7 +172,7 @@ function createApp(opts = {}) {
         return res.status(500).type('text/plain').send('Something went wrong\n');
     });
 
-    Object.assign(app.locals, { config, db, valkey, domain, keys, outbox, usage, hub, jobs, sim, onvif, userAuth, metrics, submissions, routines, webhooks });
+    Object.assign(app.locals, { config, db, valkey, domain, keys, outbox, usage, hub, jobs, offers, sim, onvif, userAuth, metrics, submissions, routines, webhooks });
     return app;
 }
 

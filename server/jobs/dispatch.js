@@ -37,7 +37,14 @@ function advertisedClasses(capabilities) {
     return worker && Array.isArray(worker.runtime_classes) ? worker.runtime_classes.filter((c) => typeof c === 'string') : [];
 }
 const canonical = (v) => JSON.stringify(v, (k, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((key) => [key, x[key]])) : x));
-const liveDevice = (db, id) => db.maybe('SELECT id, capabilities FROM devices WHERE id = $1 AND revoked_at IS NULL', [id]);
+const liveDevice = (db, id) => db.maybe('SELECT id, capabilities, robot_ids, owner_subject FROM devices WHERE id = $1 AND revoked_at IS NULL', [id]);
+/** Whose machine it is: a worker machine's owner, else its robot's owner (every device here is a person's own). */
+async function ownerOfDevice(db, device) {
+    if (device.owner_subject) return device.owner_subject;
+    const robotId = json(device.robot_ids, [])[0];
+    const robot = robotId ? await db.maybe('SELECT owner_subject FROM robots WHERE id = $1', [robotId]) : null;
+    return robot ? robot.owner_subject : null;
+}
 
 /**
  * Validate `job` against platform.job@1, store it for device `nodeId` and send it if the device is connected
@@ -53,6 +60,12 @@ async function dispatch(db, nodeId, job, { link, project = null, subject = null,
     const device = await liveDevice(db, nodeId);
     if (!device) fail(404, 'bot.device_not_found', 'no such device, or it is revoked');
     if (!advertisedClasses(device.capabilities).includes(job.class)) fail(409, 'bot.class_unadvertised', `the device does not advertise the runtime class ${job.class}`);
+    // A person's machine runs only that person's own jobs (contracts 0.161.0, ADR-046): Run names the job's requester
+    // as `subject`, and anyone else's job, or a job for nobody, is refused here whatever the placer chose.
+    // `subject` is a subject reference (`user:usr_…`, how Run formats a person); a service's or nobody's job never runs.
+    const owner = await ownerOfDevice(db, device);
+    const person = typeof subject === 'string' && /^user:usr_/.test(subject) ? subject.slice('user:'.length) : null;
+    if (!owner || person !== owner) fail(403, 'bot.not_owner', "a person's machine runs only that person's own jobs");
     const { row, created } = await store.put(db, { job, nodeId, project, subject, provider, at: now() });
     if (!created && (row.node_id !== nodeId || canonical(row.job) !== canonical(job)
         || row.project_id !== project || row.subject !== subject || row.provider !== provider)) {

@@ -88,6 +88,36 @@ function createNodePrincipals(config, { fetchImpl = globalThis.fetch } = {}) {
 }
 
 /**
+ * Network's resource registry (plan T14, contracts 0.161.0): Bot reports the worker offers of the machines connected
+ * to it — each a user-owned offer naming its owner — as the complete set for source `bot`
+ * (POST /internal/resources/report, network.resource.report); an offer missing from a later report is marked down.
+ *   report(offers) → Network's answer { source, offers, marked_down }
+ * A failure throws 503 bot.network_unavailable.
+ */
+function createOfferReporter(config, { fetchImpl = globalThis.fetch } = {}) {
+    const tokens = serviceAuth.createTokenClient({
+        tokenUrl: `${config.network.internalUrl}/oauth/token`, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret,
+        audience: 'openvibe.network', scope: 'network.resource.report', fetchImpl,
+    });
+    async function report(offers) {
+        let res;
+        try {
+            res = await fetchImpl(`${config.network.internalUrl}/internal/resources/report`, {
+                method: 'POST', headers: { ...(await tokens.authHeaders()), Accept: 'application/json', 'Content-Type': 'application/json' },
+                body: JSON.stringify({ source: 'bot', offers }), signal: AbortSignal.timeout(8000),
+            });
+        } catch (e) {
+            throw new BotError(503, 'bot.network_unavailable', `Network did not answer the offers report: ${e.message}`);
+        }
+        if (res.status === 401) tokens.invalidate();
+        const out = await res.json().catch(() => null);
+        if (!res.ok || !out) throw new BotError(503, 'bot.network_unavailable', `Network answered ${res.status} for the offers report${out && out.error ? `: ${out.error}` : ''}`);
+        return out;
+    }
+    return { report };
+}
+
+/**
  * Network's identity resolution for people (usernames ↔ subjects), with Bot's own svc:bot token
  * (audience openvibe.network, identity.subject.resolve — Network grants Bot this).
  *   byUsername(name) → GET /internal/identity/resolve?username=<name> → { subject, username, display_name },
@@ -157,4 +187,4 @@ function createIdentity(config, { fetchImpl = globalThis.fetch, now = () => Date
     return { byUsername, names };
 }
 
-module.exports = { createKeyProvider, createUserAuth, createNodePrincipals, createIdentity };
+module.exports = { createKeyProvider, createUserAuth, createNodePrincipals, createIdentity, createOfferReporter };
