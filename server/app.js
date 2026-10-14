@@ -42,6 +42,9 @@ const { createSessionRoutes, viewerMiddleware } = require('./web/session');
 const { createWebRoutes } = require('./web/routes');
 const { HOME_CSP } = require('./web/home');
 const { createSubmissions } = require('./submissions');
+const { createRoutines } = require('./routines');
+const { createWebhooks } = require('./webhooks');
+const { createWebhookPoster } = require('./net/webhook-post');
 const { inputError } = require('./util');
 const { createBotReadiness, registerBotGauges } = require('./observability');
 
@@ -75,7 +78,12 @@ function createApp(opts = {}) {
     const nodes = opts.nodes || createNodePrincipals(config, { fetchImpl });
     const identity = opts.identity || createIdentity(config, { fetchImpl });
     const openre = opts.openre !== undefined ? opts.openre : createOpenRe(config, { fetchImpl });
-    const domain = createDomain({ db, config, outbox, link: hub, nodes, openre, now, log });
+    // Webhooks are made first: the domain writes their deliveries in the transaction that emits each event.
+    const webhooks = createWebhooks({ db, post: createWebhookPoster({ userAgent: 'OpenVibe.Bot' }), now, log, tickMs: config.automation.webhookTickMs });
+    let routines = null;
+    const domain = createDomain({ db, config, outbox, link: hub, nodes, openre, now, log, webhooks,
+        onEvent: (type, robotId) => { if (type === 'bot.robot.online' && routines) routines.onOnline(robotId).catch((e) => log.warn(`[Bot] online routines: ${e.message}`)); } });
+    routines = createRoutines({ db, domain, hub, now, log, tickMs: config.automation.routineTickMs });
     const submissions = createSubmissions({ db, config, now, log });
     hub.bindDomain(domain);
     // One jobs service for the device socket and the jobs API, so both see the same stdout rings.
@@ -129,7 +137,7 @@ function createApp(opts = {}) {
     release.mount(app, { registry: metrics.registry });
 
     const limits = createActorLimits({ config, valkey, now: opts.limitsNow || now, registry: metrics.registry, log });
-    app.use('/api/v1', express.json({ limit: '64kb' }), (req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); }, apiAuth.middleware, v1Router({ domain, apiAuth, limits, hub, jobs, config, submissions }));
+    app.use('/api/v1', express.json({ limit: '64kb' }), (req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); }, apiAuth.middleware, v1Router({ domain, apiAuth, limits, hub, jobs, config, submissions, routines, webhooks }));
     app.use('/auth', createSessionRoutes(config, userAuth, { fetchImpl }));
     // ── The legal pages: Terms, Privacy and DMCA on openvibe.bot itself (openvibe-shared/legal). ──
     // The document carries its own inline theme and OpenVibe Frame boot, which the strict site-wide CSP
@@ -138,7 +146,7 @@ function createApp(opts = {}) {
     { const legal = require('openvibe-shared/legal');
       app.get(legal.PATHS, (req, res, next) => { res.setHeader('Content-Security-Policy', HOME_CSP); next(); }, legal.handler({ id: 'bot', service: 'bot', host: 'openvibe.bot', name: 'OpenVibe.Bot', profile: 'games' })); }
     app.use(viewerMiddleware(userAuth));
-    app.use(createWebRoutes(config, { domain, sim, onvif, limits, identity, hub, log, submissions, releaseLastmod: release.full().released_at === release.full().booted_at ? undefined : release.full().released_at }));
+    app.use(createWebRoutes(config, { domain, sim, onvif, limits, identity, hub, log, submissions, routines, webhooks, releaseLastmod: release.full().released_at === release.full().booted_at ? undefined : release.full().released_at }));
 
     app.use((req, res) => {
         if (req.path.startsWith('/api/') || req.path.startsWith('/internal/')) return http.sendProblem(res, 404, 'not_found', { ctx: req.ov });
@@ -157,7 +165,7 @@ function createApp(opts = {}) {
         return res.status(500).type('text/plain').send('Something went wrong\n');
     });
 
-    Object.assign(app.locals, { config, db, valkey, domain, keys, outbox, usage, hub, jobs, sim, onvif, userAuth, metrics, submissions });
+    Object.assign(app.locals, { config, db, valkey, domain, keys, outbox, usage, hub, jobs, sim, onvif, userAuth, metrics, submissions, routines, webhooks });
     return app;
 }
 

@@ -213,6 +213,11 @@ function loadConfig(env = process.env) {
         profiles: {
             signingKey: env.BOT_PROFILE_SIGNING_KEY || '',
         },
+        // Routines' scheduler and the webhook sender (server/routines.js, server/webhooks.js); 0 stops a loop (tests).
+        automation: {
+            routineTickMs: int(env.BOT_ROUTINE_TICK_MS, 30000),
+            webhookTickMs: int(env.BOT_WEBHOOK_TICK_MS, 5000),
+        },
         // Server-side ONVIF cameras (driver `onvif`, server/onvif): the hosts Bot may connect to, keyed by
         // robot id (one camera per robot), plus the timeout each request gets. Credentials are secret
         // references only (username_ref/password_ref), resolved when the request is built; the config never

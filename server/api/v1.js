@@ -49,7 +49,7 @@ const CAP = {
     dispatch: 'bot.job.dispatch',
 };
 
-function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, submissions = null }) {
+function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, submissions = null, routines = null, webhooks = null }) {
     const r = express.Router();
     r.use(limits.reads('bot.read'));
     r.use('/resources', resourceIndex.router({ db: domain.db, apiAuth }));
@@ -199,6 +199,60 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
     r.post('/robots/:id/pairing-code', manage, wrap(async (req, res) => {
         await owner(req, req.params.id);
         res.status(201).json(await domain.pairing.create(req.params.id, me(req)));
+    }));
+
+    // ── Routines and webhooks (server/routines.js, server/webhooks.js): the owner's, or a service's with manage ──
+    const presentRoutine = (r) => ({
+        id: r.id, robot_id: r.robot_id, name: r.name, steps: r.source, trigger: typeof r.trigger === 'string' ? JSON.parse(r.trigger) : r.trigger,
+        enabled: r.enabled, next_run_at: r.next_run_at ? new Date(r.next_run_at).toISOString() : null,
+        last_run_at: r.last_run_at ? new Date(r.last_run_at).toISOString() : null, last_result: r.last_result || null,
+    });
+    const needAutomation = () => { if (!routines || !webhooks) fail(503, 'bot.unavailable', 'automation is not available'); };
+    r.get('/robots/:id/routines', wrap(async (req, res) => {
+        needAutomation();
+        await ownerOrRead(req, req.params.id);
+        res.json({ routines: (await routines.list(req.params.id)).map(presentRoutine) });
+    }));
+    r.post('/robots/:id/routines', manage, wrap(async (req, res) => {
+        needAutomation();
+        const robot = await owner(req, req.params.id);
+        const profile = await getProfile(domain.db, robot.profile_id, robot.profile_version);
+        const b = req.body || {};
+        const made = await routines.create(robot, { subject: req.principal.kind === 'service' ? actedFor(req) : me(req) },
+            { name: b.name, source: b.steps, trigger: b.trigger || { type: 'manual' }, enabled: b.enabled !== false }, profile && profile.profile);
+        res.status(201).json({ routine: presentRoutine(made) });
+    }));
+    r.post('/robots/:id/routines/:rid/run', manage, wrap(async (req, res) => {
+        needAutomation();
+        const robot = await owner(req, req.params.id);
+        const routine = await routines.get(req.params.rid);
+        if (!routine || routine.robot_id !== robot.id) fail(404, 'bot.routine_not_found', 'no such routine');
+        if (!await routines.run(routine.id, { reason: 'api' })) fail(409, 'bot.routine_busy', 'a routine is already running on this robot');
+        res.status(202).json({ routine: presentRoutine(await routines.get(routine.id)) });
+    }));
+    r.delete('/robots/:id/routines/:rid', manage, wrap(async (req, res) => {
+        needAutomation();
+        const robot = await owner(req, req.params.id);
+        if (!await routines.remove(robot.id, req.params.rid)) fail(404, 'bot.routine_not_found', 'no such routine');
+        res.status(204).end();
+    }));
+    r.get('/robots/:id/webhooks', wrap(async (req, res) => {
+        needAutomation();
+        await ownerOrRead(req, req.params.id);
+        res.json({ webhooks: await webhooks.list(req.params.id), events: webhooks.EVENTS });
+    }));
+    // The secret is in this answer only: a hook's later reads never carry it.
+    r.post('/robots/:id/webhooks', manage, wrap(async (req, res) => {
+        needAutomation();
+        const robot = await owner(req, req.params.id);
+        const made = await webhooks.create(robot, { subject: req.principal.kind === 'service' ? actedFor(req) : me(req) }, { url: req.body?.url, events: req.body?.events });
+        res.status(201).json({ webhook: made.hook, secret: made.secret });
+    }));
+    r.delete('/robots/:id/webhooks/:hid', manage, wrap(async (req, res) => {
+        needAutomation();
+        const robot = await owner(req, req.params.id);
+        if (!await webhooks.remove(robot.id, req.params.hid)) fail(404, 'bot.webhook_not_found', 'no such webhook');
+        res.status(204).end();
     }));
 
     // ── Operators ─────────────────────────────────────────────────────────────────────────────────
