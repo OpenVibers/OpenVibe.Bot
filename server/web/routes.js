@@ -36,7 +36,7 @@ const { getProfile, listProfiles, loadProfiles } = require('../profiles');
 const { frameAncestors } = require('../config');
 const { BotError } = require('../util');
 const kits = require('../kits');
-const { renderPanel, renderEmbedRefused, renderDrivePage, renderPairingPage } = require('./render');
+const { renderPanel, renderEmbedRefused, renderDrivePage, renderPairingPage, renderPhonePage } = require('./render');
 const { renderDocsIndex, renderDriversPage, renderProfilesPage } = require('./docs');
 const { checkProfile } = require('../profiles');
 const { renderHome, HOME_CSP } = require('./home');
@@ -171,6 +171,21 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     r.get('/panel/sim-world.js', asset('sim-world.js', 'application/javascript'));
     r.get('/panel/sim-view.js', asset('sim-view.js', 'application/javascript'));
     r.get('/panel/try-device.js', asset('try-device.js', 'application/javascript'));
+    r.get('/panel/phone-device.js', asset('phone-device.js', 'application/javascript'));
+
+    // /device/phone: a phone becomes the robot's device from its browser (plan T15). Public: the one-time pairing code
+    // is the credential, and a paired phone keeps its device credential in its own storage. Its CSP adds only the
+    // WHIP ingest the camera publishes to (BOT_WHIP_BASE's origin) and Cloudflare's beacon.
+    const whipOrigin = (() => { try { return config.media.whipBase ? new URL(config.media.whipBase).origin : ''; } catch { return ''; } })();
+    const PHONE_CSP = ["default-src 'self'", "script-src 'self' https://static.cloudflareinsights.com",
+        `connect-src 'self'${whipOrigin ? ` ${whipOrigin}` : ''} https://cloudflareinsights.com`, "media-src 'self' blob:",
+        "frame-ancestors 'none'", "object-src 'none'", "base-uri 'self'"].join('; ');
+    r.get('/device/phone', (req, res) => {
+        res.setHeader('Content-Security-Policy', PHONE_CSP);
+        res.setHeader('Permissions-Policy', 'camera=(self), microphone=(), geolocation=()');
+        res.setHeader('Cache-Control', 'public, max-age=300');
+        res.type('html').send(renderPhonePage());
+    });
     r.get('/directory.css', asset('directory.css', 'text/css'));
 
     // /try: the real panel driving a rover simulated in the visitor's own browser (public/try-device.js), so anyone
@@ -248,6 +263,9 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
             return res.type('html').send(renderProfilesPage({ config, source, result }));
         } catch (e) { return next(e); }
     });
+
+    // The phone's pairing link (the QR code): the robot and code ride in the fragment, which never reaches a server.
+    const phoneUrl = (robotId, pairing) => `${config.baseUrl}/device/phone#robot=${encodeURIComponent(robotId)}&code=${encodeURIComponent(pairing.code)}`;
 
     // The embed flag is web-only: domain.present.robot (and so /api/v1) does not carry it.
     const presentForPage = (row) => ({ ...domain.present.robot(row), embed_public: !!row.embed_public, listed: !!row.listed });
@@ -332,7 +350,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         // A simulated robot needs no machine: straight to its panel. Otherwise the code create minted is shown here.
         const profile = await profileOf(robot);
         if (await attachInProcess(robot, profile)) return res.redirect(303, `/panel/${robot.id}`);
-        return res.status(201).type('html').send(renderPairingPage({ robot: domain.present.robot(robot), pairing, profile }));
+        return res.status(201).type('html').send(renderPairingPage({ robot: domain.present.robot(robot), pairing, profile, phoneUrl: phoneUrl(robot.id, pairing) }));
     }));
 
     // A load replaces the robot's unused code, so only a navigation from this site (or a typed address) mints one.
@@ -348,7 +366,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         if (!robot) throw new BotError(404, 'bot.robot_not_found', 'no such robot');
         if (robot.owner_subject !== me.subject) throw new BotError(403, 'bot.forbidden', 'only the owner may pair a device');
         const pairing = await domain.pairing.create(robot.id, me.subject, undefined, robot);
-        res.type('html').send(renderPairingPage({ robot: domain.present.robot(robot), pairing, profile: await profileOf(robot) }));
+        res.type('html').send(renderPairingPage({ robot: domain.present.robot(robot), pairing, profile: await profileOf(robot), phoneUrl: phoneUrl(robot.id, pairing) }));
     }));
 
     r.post('/robots/:id/listing', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {

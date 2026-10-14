@@ -34,10 +34,10 @@ const DIR = path.join(__dirname);
 const CAPABILITIES = new Set([
     'drive.differential', 'drive.mecanum',
     'servo.pan_tilt', 'head', 'lift',
-    'lights.rgb', 'lights.backpack', 'lights.cube',
+    'lights.rgb', 'lights.backpack', 'lights.cube', 'lights.torch',
     'speaker.horn', 'speaker.say',
     'display.text',
-    'sensor.ultrasonic', 'sensor.line', 'sensor.cliff', 'sensor.pickup',
+    'sensor.ultrasonic', 'sensor.line', 'sensor.cliff', 'sensor.pickup', 'sensor.tilt',
     'battery', 'ptz', 'camera',
     // A robot that carries no hardware of its own: the owner's Node forwards the panel's commands to a
     // local script with the relay plugin (relay.generic, plan T15 R9).
@@ -49,7 +49,8 @@ const WIDGETS = new Set(['drive', 'pan-tilt', 'servo', 'lights', 'horn', 'speake
 
 /** Device drivers a mapping may name. `relay` is a Node plugin with no hardware map of its own. */
 // `looi`: the community's Generic LOOI driver, a Bluetooth bridge plugin (OpenVibe.Node docs/hardware-looi.md).
-const DRIVERS = new Set(['pca9685', 'ads7830', 'cozmo', 'looi', 'onvif', 'sim', 'relay']);
+// `phone`: a phone that is the device itself, from its browser (public/phone-device.js), no Node and nothing installed.
+const DRIVERS = new Set(['pca9685', 'ads7830', 'cozmo', 'looi', 'onvif', 'sim', 'relay', 'phone']);
 
 const ID_RE = /^[a-z][a-z0-9._-]{1,63}$/;
 const KINDS = new Set(['onboard', 'bridge', 'server']);

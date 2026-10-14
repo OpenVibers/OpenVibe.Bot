@@ -18,6 +18,7 @@
  *   camerasOf(profile)
  *   esc(value)
  */
+const { qrSvg } = require('./qr');
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ESC[c]);
 /** A data-* attribute's JSON, escaped for a double-quoted attribute. */
@@ -493,15 +494,23 @@ ${error ? `<p class="error" role="alert">${esc(error)}</p>` : ''}
     return page('Your robots', `${topbar()}\n<main class="page">\n<h1>Your robots</h1>\n${list}\n${form}\n${kitsSection(kits, profiles)}\n</main>`);
 }
 
-function renderPairingPage({ robot, pairing, profile = null }) {
+function renderPairingPage({ robot, pairing, profile = null, phoneUrl = null }) {
+    // A phone is the device itself: it pairs from its browser (the QR code opens /device/phone with the code).
+    const phone = !!(profile && profile.mapping && profile.mapping.driver === 'phone' && phoneUrl);
+    const first = phone
+        ? `<li class="card phone-pair"><h2>Scan this with the phone <span class="pill">${esc(profile.name)}</span></h2>
+<div class="qr-box">${qrSvg(phoneUrl, { label: `Opens the pairing page for ${robot.name} on the phone` })}</div>
+<p class="muted">It opens the robot's page on the phone with this code filled in. Tap Pair, allow the camera, and keep the page open: the phone is the robot now. No app to install.</p>
+<p class="muted">No camera app handy? Open <b>openvibe.bot/device/phone</b> on the phone and enter the robot and code by hand: <code>${esc(robot.id)}</code></p></li>`
+        : `<li class="card"><h2>Run this on the machine that serves the robot${profile ? ` <span class="pill">${esc(profile.name)}</span>` : ''}</h2>
+<pre class="installer"><code data-copy-source>${esc(pairing.installer)}</code></pre>
+<button type="button" class="copy" data-copy>${icon('copy')}<span data-copy-label>Copy the command</span></button></li>`;
     const body = `${topbar(`<span class="crumb">${esc(robot.name)}</span>`)}
 <main class="page pairing" data-pair-robot="${esc(robot.id)}">
 <h1>Pair ${esc(robot.name)}</h1>
 <p class="pair-status" data-pair-status data-state="waiting" role="status" aria-live="polite"><span class="dot"></span><span data-pair-text>Waiting for the device.</span> <a class="button primary" href="/panel/${esc(robot.id)}" data-pair-open hidden>Open the panel</a></p>
 <ol class="steps">
-<li class="card"><h2>Run this on the machine that serves the robot${profile ? ` <span class="pill">${esc(profile.name)}</span>` : ''}</h2>
-<pre class="installer"><code data-copy-source>${esc(pairing.installer)}</code></pre>
-<button type="button" class="copy" data-copy>${icon('copy')}<span data-copy-label>Copy the command</span></button></li>
+${first}
 <li class="card"><h2>Or enter the pairing code</h2>
 <p><strong class="code">${esc(pairing.code)}</strong></p>
 <p class="muted">Valid until <time datetime="${esc(pairing.expires_at)}">${esc(pairing.expires_at)}</time>. It works once.</p></li>
@@ -511,4 +520,38 @@ function renderPairingPage({ robot, pairing, profile = null }) {
     return page(`Pair ${robot.name}`, body, { scripts: ['/panel/panel.js'] });
 }
 
-module.exports = { page, renderPanel, panelScripts, isSim, TRY_DESCRIPTION, renderEmbedRefused, renderDrivePage, renderWidget, renderRobotsPage, renderPairingPage, camerasOf, esc };
+/**
+ * /device/phone: the page that makes a phone the robot's device (public/phone-device.js). Its setup form pairs it (the
+ * QR code fills in the robot and code); once running, the screen is the robot's face, with the link and camera state
+ * above it and the phone's own Stop below.
+ */
+function renderPhonePage() {
+    const body = `<main id="phone" class="phone" data-state="setup">
+<section class="phone-setup" data-setup>
+<p class="phone-brand">${icon('robot')}<span>OpenVibe<b>.Bot</b></span></p>
+<h1>Make this phone a robot</h1>
+<p class="muted">Pair it with a robot you added on openvibe.bot. Its camera streams to the robot's panel, it says what the driver types, shows a face, and reports its battery and tilt. Nothing to install: keep this page open.</p>
+<form class="phone-form" data-pair-form>
+<div data-pair-fields>
+<label class="field" data-robot-field><span class="field-label">Robot</span><input name="robot" autocomplete="off" spellcheck="false" placeholder="rob_…"></label>
+<label class="field"><span class="field-label">Pairing code</span><input name="code" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" placeholder="ABCD-EFGH"></label>
+</div>
+<p class="phone-paired" data-paired hidden>Paired as <b data-paired-name></b>. <button type="button" class="quiet" data-unpair-setup>Pair with another robot</button></p>
+<label class="check"><input type="checkbox" name="front"> Use the front camera</label>
+<button type="submit" class="primary">Start</button>
+<p class="error" data-error role="alert" hidden></p>
+</form>
+<p class="muted small">Get a code: on openvibe.bot, add a robot, choose <b>A phone</b>, and scan the code its pairing page shows.</p>
+</section>
+<section class="phone-run" data-run hidden>
+<header class="phone-bar"><span class="phone-pill" data-link-state data-state="connecting">Connecting…</span><span class="phone-pill" data-video-state data-state="off"></span><span class="phone-rtt" data-rtt></span></header>
+<div class="phone-face" data-face aria-live="polite"></div>
+<p class="phone-safety" data-safety role="status" hidden></p>
+<video class="phone-preview" data-preview muted playsinline autoplay hidden></video>
+<footer class="phone-foot"><button type="button" class="phone-stop" data-local-stop>Stop</button><button type="button" class="quiet" data-forget>Unpair</button></footer>
+</section>
+</main>`;
+    return page('This phone is a robot', body, { scripts: ['/panel/phone-device.js'], bodyClass: 'phone-page', description: 'Turn a phone into a robot on OpenVibe.Bot from its browser: its camera, voice and face, with nothing to install.', canonical: '/device/phone' });
+}
+
+module.exports = { page, renderPanel, renderPhonePage, panelScripts, isSim, TRY_DESCRIPTION, renderEmbedRefused, renderDrivePage, renderWidget, renderRobotsPage, renderPairingPage, camerasOf, esc };

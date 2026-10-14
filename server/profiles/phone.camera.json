@@ -1,0 +1,27 @@
+{
+  "id": "phone.camera",
+  "version": 1,
+  "name": "A phone",
+  "vendor": "Any",
+  "kind": "onboard",
+  "description": "Any phone as a robot's eyes, voice and face, from its browser with nothing to install: its camera streams to the panel, it says what you type, shows a face or text full-screen, turns its torch on, chimes, and reports its battery and how it is tilted.",
+  "capabilities": ["camera", "speaker.say", "speaker.horn", "display.text", "lights.torch", "battery", "sensor.tilt"],
+  "mapping": { "driver": "phone" },
+  "commands": {
+    "say": { "max_chars": 200 },
+    "display": { "modes": ["face", "text"], "faces": ["happy", "neutral", "sad", "surprised", "sleepy", "wink", "love", "angry"], "max_chars": 80 },
+    "actuator": { "names": { "torch": { "type": "bool" }, "chime": { "type": "tone", "hz": [220, 1760] } } }
+  },
+  "widgets": [
+    { "type": "camera", "capability": "camera", "label": "Camera", "order": 1 },
+    { "type": "speaker", "capability": "speaker.say", "label": "Say", "order": 2, "command": { "kind": "say" } },
+    { "type": "display", "capability": "display.text", "label": "Face", "order": 3, "command": { "kind": "display" } },
+    { "type": "lights", "capability": "lights.torch", "label": "Torch", "order": 4, "command": { "kind": "actuator", "names": ["torch"] } },
+    { "type": "horn", "capability": "speaker.horn", "label": "Chime", "order": 5, "command": { "kind": "actuator", "names": ["chime"] } },
+    { "type": "telemetry", "capability": "sensor.tilt", "label": "Tilt", "order": 6 },
+    { "type": "battery", "capability": "battery", "label": "Battery", "order": 7 },
+    { "type": "latency", "label": "Latency", "order": 8 }
+  ],
+  "camera": { "transport": "whip", "resolution": "1280x720" },
+  "limits": { "max_speed": 1, "max_turn": 1, "max_command_ms": 300, "heartbeat_ms": 1000 }
+}
