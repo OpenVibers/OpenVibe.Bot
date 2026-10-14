@@ -224,14 +224,18 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
      * `status` of a Network-paired device: device_kind, drivers, capabilities and agent_version are persisted
      * when they differ from the row. Any invalid one → bot.bad_frame and the row unchanged.
      */
-    async function persistDeclared(conn, msg) {
+    async function persistDeclared(conn, frame) {
         const d = conn.device;
+        // OpenVibe.Node's status lists its drivers as objects ({ name, driver, state, … }, internal/protocol Status)
+        // where its pairing request lists their names: the row keeps the names either way.
+        const driverName = (x) => (typeof x === 'string' ? x : (x && typeof x === 'object' && typeof (x.driver || x.name) === 'string' ? x.driver || x.name : null));
+        const msg = Array.isArray(frame.drivers) ? { ...frame, drivers: frame.drivers.map(driverName) } : frame;
         const has = (k) => msg[k] !== undefined;
         if ((has('device_kind') && !DEVICE_KINDS.has(msg.device_kind))
             || (has('drivers') && !(Array.isArray(msg.drivers) && msg.drivers.every((x) => typeof x === 'string')))
             || (has('capabilities') && !(msg.capabilities && typeof msg.capabilities === 'object' && !Array.isArray(msg.capabilities)))
             || (has('agent_version') && !(typeof msg.agent_version === 'string' && msg.agent_version.length <= MAX_AGENT_VERSION))) {
-            return sendError(conn, 'bot.bad_frame', `device_kind must be one of ${[...DEVICE_KINDS].join('|')}, drivers an array of strings, capabilities an object, agent_version a string of at most ${MAX_AGENT_VERSION}`);
+            return sendError(conn, 'bot.bad_frame', `device_kind must be one of ${[...DEVICE_KINDS].join('|')}, drivers an array of names or { name } objects, capabilities an object, agent_version a string of at most ${MAX_AGENT_VERSION}`);
         }
         const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
         const change = {};
