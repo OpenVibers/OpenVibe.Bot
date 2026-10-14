@@ -19,6 +19,8 @@ const {
 } = require('../util');
 const { getProfile, validateProfile, reservedKeyReason } = require('../profiles');
 const { ENVELOPE } = require('../events/outbox');
+/** A person's subject (the owner a worker machine's pairing names). */
+const USER_SUBJECT = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 
 const DEFAULT_ALLOW = {
     owner: ['drive', 'actuator', 'ptz', 'say', 'display', 'button', 'point', 'halt'],
@@ -69,6 +71,12 @@ function noteToHz(note) {
 
 
 function createDomain({ db, config, outbox, link = null, nodes = null, openre = null, webhooks = null, onEvent = null, now = () => Date.now(), log = console }) {
+    // Listeners told when a device appears, goes on or offline, changes what it advertises or is revoked (the worker
+    // offers Bot reports to Network follow these, server/jobs/offers.js).
+    const changeListeners = new Set();
+    const onChange = (fn) => { changeListeners.add(fn); return () => changeListeners.delete(fn); };
+    const changed = () => { for (const fn of changeListeners) { try { fn(); } catch { /* a listener never breaks the caller */ } } };
+    const workerRef = (subject) => `worker:${subject}`;
     // ── Presenters ────────────────────────────────────────────────────────────────────────────────
     const presentRobot = (r) => (r ? {
         id: r.id, name: r.name, profile_id: r.profile_id, profile_version: r.profile_version,
@@ -589,6 +597,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         if (!d) fail(404, 'bot.device_not_found', 'no such device');
         const at = iso(now());
         const updated = await db.maybe('UPDATE devices SET revoked_at = $2, credential_prev_hash = NULL, prev_valid_until = NULL, updated_at = $2 WHERE id = $1 RETURNING *', [id, at]);
+        changed();
         return updated;
     }
 
@@ -612,17 +621,55 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         if (!p || p.principal !== principalId) refuse('Network knows no such machine paired for Bot');
         if (p.status !== 'active') refuse(`the machine is ${p.status} on Network`);
         if (!p.paired_for || p.paired_for.service !== 'bot') refuse('the machine was not paired for Bot');
-        const robot = isRobotId(p.paired_for.ref) ? await getRobot(p.paired_for.ref) : null;
-        if (!robot || !p.owner || p.owner.kind !== 'user' || p.owner.subject !== robot.owner_subject) refuse("the machine was not paired for one of its owner's robots");
+        // A worker machine (plan T14/T16) runs its owner's own jobs and serves no robot: its pairing names the owner
+        // (ref `worker:<owner>`), and the device keeps that owner.
+        const worker = !!(p.owner && p.owner.kind === 'user' && USER_SUBJECT.test(String(p.owner.subject)) && p.paired_for.ref === workerRef(p.owner.subject));
+        const robot = !worker && isRobotId(p.paired_for.ref) ? await getRobot(p.paired_for.ref) : null;
+        if (!worker && (!robot || !p.owner || p.owner.kind !== 'user' || p.owner.subject !== robot.owner_subject)) refuse("the machine was not paired for one of its owner's robots");
         const at = iso(now());
         const name = typeof p.name === 'string' ? storable(p.name).trim().slice(0, 80) || null : null;
         // Two first connections at once: the unique index lets one insert win, and the other reads it.
         const inserted = await db.maybe(
-            `INSERT INTO devices (id, robot_ids, name, kind, agent_version, drivers, capabilities, credential_hash, node_principal, created_at, updated_at)
-             VALUES ($1, $2::jsonb, $3, 'onboard', NULL, '[]'::jsonb, '{}'::jsonb, NULL, $4, $5, $5)
+            `INSERT INTO devices (id, robot_ids, name, kind, agent_version, drivers, capabilities, credential_hash, node_principal, owner_subject, created_at, updated_at)
+             VALUES ($1, $2::jsonb, $3, $4, NULL, '[]'::jsonb, '{}'::jsonb, NULL, $5, $6, $7, $7)
              ON CONFLICT (node_principal) WHERE node_principal IS NOT NULL AND revoked_at IS NULL DO NOTHING RETURNING *`,
-            [prefixedId('dev', now()), JSON.stringify([robot.id]), name, principalId, at]);
+            [prefixedId('dev', now()), JSON.stringify(worker ? [] : [robot.id]), name, worker ? 'server' : 'onboard', principalId,
+                worker ? p.owner.subject : null, at]);
+        changed();
         return inserted || db.maybe('SELECT * FROM devices WHERE node_principal = $1 AND revoked_at IS NULL', [principalId]);
+    }
+
+    // ── Machines that run their owner's jobs (plan T14/T16) ────────────────────────────────────────
+    /**
+     * A one-time code for `ownerSubject` to add a machine that runs their own jobs (Network pairing, ref
+     * `worker:<owner>`; Network keeps one live code per ref, so a new code replaces an unused one). The installer
+     * command turns the Node's job worker on (`--worker`). → { code, expires_at, pairing_id, installer }
+     */
+    async function mintMachine(ownerSubject, installerUrl) {
+        if (!nodes) fail(503, 'bot.network_unavailable', 'Network pairing is not configured here');
+        const p = await nodes.pair({ subject: ownerSubject, ref: workerRef(ownerSubject) });
+        if (!p || typeof p.pairing_id !== 'string' || typeof p.code !== 'string') fail(503, 'bot.network_unavailable', 'Network answered no pairing code');
+        const url = installerUrl || config.installer.scriptUrl;
+        return {
+            code: p.code, expires_at: p.expires_at, pairing_id: p.pairing_id,
+            installer: `curl -fsSL ${url} | sh -s -- --network ${config.network.url} --pairing ${p.pairing_id} --code ${p.code} --worker`,
+        };
+    }
+    /** The person's live machines that run jobs: their worker machines, and their robots' machines that have a job worker. */
+    async function listMachines(subject) {
+        return db.many(
+            `SELECT d.* FROM devices d
+             WHERE d.revoked_at IS NULL AND (d.owner_subject = $1 OR (d.capabilities -> 'worker' IS NOT NULL AND EXISTS (
+                 SELECT 1 FROM robots r WHERE r.owner_subject = $1 AND d.robot_ids @> jsonb_build_array(r.id))))
+             ORDER BY d.created_at DESC`, [subject]);
+    }
+    /** Whose machine a device is: a worker machine's owner, else its (first) robot's owner; null when neither. */
+    async function ownerOf(device) {
+        if (!device) return null;
+        if (device.owner_subject) return device.owner_subject;
+        const robotId = json(device.robot_ids, [])[0];
+        const robot = robotId ? await getRobot(robotId) : null;
+        return robot ? robot.owner_subject : null;
     }
     /**
      * Issue (or re-issue) a device's WHIP publish key, a new ingest key of its robot's OpenRestream stream: the new
@@ -647,6 +694,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     }
     /** Persist what a Network-paired device declares (kind, drivers, capabilities, agent_version): only the given fields. */
     async function updateDeclared(id, { kind, drivers, capabilities, agent_version: agentVersion }) {
+        if (capabilities) changed();
         return db.maybe(
             `UPDATE devices SET kind = COALESCE($2, kind), drivers = COALESCE($3::jsonb, drivers), capabilities = COALESCE($4::jsonb, capabilities),
                 agent_version = CASE WHEN $5 THEN $6 ELSE agent_version END, updated_at = $7
@@ -663,6 +711,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     async function touchSeen(id) { await db.query('UPDATE devices SET last_seen = $2 WHERE id = $1', [id, iso(now())]); }
 
     async function setOnline(device, online) {
+        changed();
         const robotIds = json(device.robot_ids, []);
         const at = iso(now());
         await db.tx(async (t) => {
@@ -1030,7 +1079,8 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
             localProfile, saveLocalProfile, useCatalogueProfile },
         members: { roleOf, add: addOperator, remove: removeOperator, list: listOperators },
         pairing: { create: createPairingCode, redeem, prune: prunePairingCodes, installerCommand, driverForProfile, whipUrl },
-        devices: { byCredential, bindNode, issuePublishKey, revokeVideo, updateDeclared, revokeNode, ensureServerDevice, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, touchSeen, setOnline },
+        devices: { byCredential, bindNode, issuePublishKey, revokeVideo, updateDeclared, revokeNode, ensureServerDevice, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, touchSeen, setOnline, ownerOf, onChange },
+        machines: { mint: mintMachine, list: listMachines, workerRef },
         streaming: { get: streaming, set: setStreaming },
         video: { live: liveVideo },
         estop: { set: setEstop, clear: clearEstop },

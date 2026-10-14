@@ -5,7 +5,7 @@
   "runtime": "node 22, express 4, ws; PostgreSQL 18 via openvibe-sdk/db (pg, or embedded PGlite in tests); Valkey optional; no build step",
   "port": 4630,
   "domain": "openvibe.bot (www -> apex; /device and /control WebSockets; /install)",
-  "contracts": "openvibe-contracts v0.160.0",
+  "contracts": "openvibe-contracts v0.161.0",
   "sdk": "openvibe-sdk v0.44.0",
   "shared": "openvibe-shared v4.1.3",
   "packages": [
@@ -56,7 +56,8 @@
     "embed opt-in: robots.embed_public (migration 0005), set only by the owner with POST /robots/:id/embed, web-only (not in /api/v1); BOT_EMBED_ORIGINS is the validated frame-ancestors allow-list for the embeddable panel (default OpenVibe.Live)",
     "embeddable panel: GET /panel/:id/embed framed only by BOT_EMBED_ORIGINS (no cookie, never a sign-in redirect; a member keeps their role, anyone else watches an embed_public robot) and the anonymous read-only /watch socket carrying the public state (online, e-stop, latency, battery, the profile's readouts), capped per address and per robot",
     "streaming and recording toggles per robot, off by default and owner-only: media records live sessions to OpenVibe.Media (the OpenRestream stream's recording_mode vod/none) and live shows them on the owner's OpenVibe.Live channel (mirror_to_live), read at GET /api/v1/robots/:id/streaming and set at POST /api/v1/robots/:id/streaming; Bot stores no copy, each real change audits once",
-    "server-side ONVIF cameras (profile camera.onvif, driver onvif, server/onvif): an in-process device beside the simulator attaches a camera configured with BOT_ONVIF_CAMERAS (its URL plus username_ref/password_ref secret references, never in the profile or in clear), writes a real kind server device row, translates ptz commands to ONVIF ContinuousMove/Stop with the profile deadline as a deadman, and carries the camera's GetStatus readout in telemetry; every request goes only to the configured host, with a timeout and no redirects"
+    "server-side ONVIF cameras (profile camera.onvif, driver onvif, server/onvif): an in-process device beside the simulator attaches a camera configured with BOT_ONVIF_CAMERAS (its URL plus username_ref/password_ref secret references, never in the profile or in clear), writes a real kind server device row, translates ptz commands to ONVIF ContinuousMove/Stop with the profile deadline as a deadman, and carries the camera's GetStatus readout in telemetry; every request goes only to the configured host, with a timeout and no redirects",
+    "a person's own machines that run their jobs (/machines: add with a --worker command, list, remove); their worker offers reported to Network as user-owned offers naming the owner; jobs reach a machine only for its owner (plan T14/T16)"
   ],
   "updated": "2026-10-14"
 }

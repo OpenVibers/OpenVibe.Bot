@@ -33,7 +33,7 @@ async function main() {
     const valkey = createValkey({ url: config.valkey.url, prefix: config.valkey.prefix });
 
     const app = createApp({ config, db, valkey, registry });
-    const { domain, keys, outbox, usage, hub, sim, onvif, routines, webhooks } = app.locals;
+    const { domain, keys, outbox, usage, hub, offers, sim, onvif, routines, webhooks } = app.locals;
     keys.start().catch(() => { /* logged by the JWKS client */ });
 
     const timers = [];
@@ -46,6 +46,7 @@ async function main() {
         usage.start();
         routines.start();   // scheduled routines (server/routines.js)
         webhooks.start();   // robot webhook deliveries (server/webhooks.js)
+        offers.start();     // the worker offers of the machines connected here, to Network (server/jobs/offers.js)
     }
 
     const server = app.listen(config.port, config.host, () => {
@@ -82,6 +83,7 @@ async function main() {
             () => timers.forEach(clearInterval),
             () => routines.stop(),
             () => webhooks.stop(),
+            () => offers.stop(),
             () => keys.stop(),
             () => sim.stopAll(),
             () => onvif.stopAll(),

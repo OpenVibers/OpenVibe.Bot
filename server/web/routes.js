@@ -36,7 +36,7 @@ const { getProfile, listProfiles, loadProfiles } = require('../profiles');
 const { frameAncestors } = require('../config');
 const { BotError } = require('../util');
 const kits = require('../kits');
-const { renderPanel, renderEmbedRefused, renderDrivePage, renderPairingPage, renderPhonePage } = require('./render');
+const { renderPanel, renderEmbedRefused, renderDrivePage, renderPairingPage, renderPhonePage, renderMachinesPage } = require('./render');
 const { renderDocsIndex, renderDriversPage, renderProfilesPage, renderAutomationPage } = require('./docs');
 const { checkProfile } = require('../profiles');
 const { renderHome, HOME_CSP } = require('./home');
@@ -423,6 +423,34 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         const purpose = String(req.headers['sec-purpose'] || req.headers.purpose || req.headers['x-moz'] || '');
         return (site && site !== 'same-origin' && site !== 'none') || /prefetch|prerender/i.test(purpose);
     };
+    // ── The person's own machines that run their jobs (plan T14/T16) ──
+    const machineRows = async (subject) => Promise.all((await domain.machines.list(subject)).map(async (d) => {
+        const robotId = Array.isArray(d.robot_ids) ? d.robot_ids[0] : null;
+        const robot = robotId ? await domain.robots.get(robotId) : null;
+        return { ...d, online: !!(hub && hub.isOnline(d.id)), robot: robot ? robot.name : null };
+    }));
+    r.get('/machines', frameCsp, page(async (req, res) => {
+        const me = requireUser(req);
+        res.setHeader('Vary', 'Cookie');
+        res.type('html').send(renderMachinesPage({ machines: await machineRows(me.subject) }));
+    }));
+    r.post('/machines', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        const pairing = await domain.machines.mint(me.subject);
+        res.status(201).type('html').send(renderMachinesPage({ machines: await machineRows(me.subject), pairing }));
+    }));
+    r.post('/machines/:id/remove', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        const mine = (await domain.machines.list(me.subject)).find((d) => d.id === req.params.id);
+        if (!mine) throw new BotError(404, 'bot.device_not_found', 'no such machine of yours');
+        await domain.devices.revoke(mine.id);
+        if (mine.node_principal) await domain.devices.revokeNode(mine.node_principal).catch((e) => log.warn(`[Bot] machine ${mine.id} on Network: ${e.message}`));
+        if (hub) hub.closeDevice(mine.id, 'revoked');
+        res.redirect(303, '/machines');
+    }));
+
     r.get('/pair/:id', ...manage, page(async (req, res) => {
         const me = requireUser(req);
         if (crossSiteOrPrefetch(req)) return res.redirect(303, '/robots');
