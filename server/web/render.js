@@ -645,9 +645,19 @@ ${add}
  * /machines/:id/screen: the machine's screen, live, for its owner only (plan T14). The tile waits for the machine's
  * session (public/panel.js polls `stateUrl`) and plays it like a robot's camera; Stop ends it at once.
  */
-function renderMachineScreenPage({ machine, until = null, error = null }) {
+function renderMachineScreenPage({ machine, until = null, error = null, idle = false }) {
     const name = machine.name || machine.id;
     const stateUrl = `/machines/${encodeURIComponent(machine.id)}/screen.json`;
+    // Idle (nothing is shown, as from a link): a start button instead of waiting for a stream nobody started.
+    if (idle && !error) {
+        const body = `${topbar(`<a class="crumb" href="/machines">Machines</a><span class="crumb">${esc(name)}</span>`)}
+<main class="page">
+<h1>${esc(name)}: screen</h1>
+<p class="muted">Show this computer's screen here, live, to you only, for 10 minutes. Nothing is recorded, and the computer says on its desktop that its screen is live.</p>
+<form method="post" action="/machines/${esc(machine.id)}/screen"><button type="submit" class="primary">Show my screen</button></form>
+</main>`;
+        return page(`${name}: screen`, body, { description: 'Your machine\'s screen, live, for you only.', canonical: '/machines' });
+    }
     const ends = until ? `<p class="muted">Shown until <time datetime="${esc(until)}" data-local-time>${esc(until)}</time>, to you only. Nothing is recorded.</p>` : '';
     const body = `${topbar(`<a class="crumb" href="/machines">Machines</a><span class="crumb">${esc(name)}</span>`)}
 <main class="page">

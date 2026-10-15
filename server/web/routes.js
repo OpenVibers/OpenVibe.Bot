@@ -467,9 +467,11 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         const me = requireUser(req);
         const mine = await myMachine(req, me);
         const until = typeof req.query.until === 'string' && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,3})?Z$/.test(req.query.until) ? req.query.until : null;
+        // Opened from a link with nothing shown: offer to start it rather than wait for a stream nobody started.
+        const idle = !until && (await machineScreen.state(mine, me.subject)).state !== 'live';
         res.setHeader('Vary', 'Cookie');
         res.setHeader('Content-Security-Policy', PANEL_CSP);
-        res.type('html').send(renderMachineScreenPage({ machine: mine, until }));
+        res.type('html').send(renderMachineScreenPage({ machine: mine, until, idle }));
     }));
     r.get('/machines/:id/screen.json', page(async (req, res) => {
         const me = requireUser(req);

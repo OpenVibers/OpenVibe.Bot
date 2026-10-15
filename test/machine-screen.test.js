@@ -147,6 +147,13 @@ const { boot, check, done } = require('./helpers/app');
         assert.strictEqual((await fetch(`${t.base}/machines/${mine.deviceId}/screen.json`, { headers: cookie(bob) })).status, 404);
         assert.strictEqual((await form(`/machines/${mine.deviceId}/screen`, alex, { Origin: 'https://evil.test' })).status, 403, 'no cross-site post');
         const stopped = await form(`/machines/${mine.deviceId}/screen/stop`, alex);
+        await t.wait(600);   // telemetry samples are kept at most twice a second
+        mine.c.send(frame('telemetry', { sensors: { computer_level: 'observe', computer_screen_stream: 'off' } }));
+        const idle = await poll(async () => {
+            const html = await (await fetch(`${t.base}/machines/${mine.deviceId}/screen`, { headers: cookie(alex) })).text();
+            return !html.includes('data-screen-state') ? html : null;
+        });
+        assert.ok(idle && idle.includes(`action="/machines/${mine.deviceId}/screen"`), 'opened from a link with nothing shown, it offers to start');
         assert.deepStrictEqual([stopped.status, stopped.headers.get('location')], [303, '/machines']);
         assert.deepStrictEqual(seen.at(-1).value, { action: 'stop' });
     });
