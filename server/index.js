@@ -18,7 +18,8 @@ const { openDb, migrate } = require('./db');
 const { seedProfiles } = require('./profiles');
 const { createApp } = require('./app');
 const { createValkey } = require('openvibe-sdk/valkey');
-const { gracefulStop } = require('openvibe-sdk/service');
+const { gracefulStop, telemetry } = require('openvibe-sdk/service');
+const { createPgTelemetrySink, startTelemetryRetention } = require('openvibe-sdk/telemetry');
 const { startSubscriptions, TOPICS } = require('openvibe-sdk/account-data');
 const { createRegistry } = require('openvibe-shared/metrics');
 
@@ -54,6 +55,10 @@ async function main() {
         console.log(`[Bot] profiles from server/profiles; events relay ${outbox.enabled ? `→ ${config.events.url}` : 'off (outbox accumulates)'}; usage relay ${usage.enabled ? `→ ${config.billing.url}` : 'off (readings wait)'}; heartbeat ${config.device.heartbeatMs} ms, offline after ${config.device.heartbeatMs * config.device.offlineMisses + config.device.offlineGraceMs} ms`);
     });
     server.keepAliveTimeout = 65_000;
+    // Request telemetry (openvibe-sdk/service, plan T1): one aggregated sample per route template, method and status
+    // class each 15 s, stored in this service's telemetry_samples table; rows older than 30 days go daily.
+    telemetry.init({ service: 'bot', sink: createPgTelemetrySink({ db: db, log: console }), skipPrefixes: ['/shared'] });
+    const telemetryRetention = startTelemetryRetention({ db: db, log: console });
     server.on('upgrade', (req, socket, head) => hub.handleUpgrade(req, socket, head));
     // The robots whose profile's driver is `sim` get their in-process device back (server/sim); the ones whose
     // driver is `onvif` get their configured camera attached server-side (server/onvif).
@@ -95,6 +100,7 @@ async function main() {
             () => { if (subscriptions) subscriptions.stop(); },
         ],
         close: [
+            async () => { if (telemetryRetention) await telemetryRetention.stop(); await telemetry.stop(); },
             () => db.close().catch(() => {}),
             () => valkey && valkey.close().catch(() => {}),
         ],
