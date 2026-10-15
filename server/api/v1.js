@@ -41,6 +41,7 @@ const { fail, userSubject, isRobotId, json } = require('../util');
 const { getProfile, listProfiles, checkProfile } = require('../profiles');
 const kits = require('../kits');
 const resourceIndex = require('./resource-index');
+const resourceControl = require('./resource-control');
 
 const CAP = {
     read: 'bot.robot.read',
@@ -65,6 +66,8 @@ const MACHINE_SERVICES = {
 function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, submissions = null, routines = null, webhooks = null }) {
     const r = express.Router();
     r.use(limits.reads('bot.read'));
+    // Control first (bot.resource.control), then the index (bot.resource.read) for everything else under /resources.
+    r.use('/resources/control', limits('bot.control', { minute: 120, hour: 1200 }), resourceControl.router({ domain, apiAuth, hub }));
     r.use('/resources', resourceIndex.router({ db: domain.db, apiAuth }));
     const manage = limits('bot.robot.manage', { minute: 30, hour: 300 });
     const control = limits('bot.control', { minute: 120, hour: 1200 });
