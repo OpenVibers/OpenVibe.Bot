@@ -155,6 +155,18 @@ const { HOME_CSP: SITE_CSP } = require('../server/web/home');
         for (const p of ['/docs', '/docs/drivers', '/docs/profiles']) assert.ok(xml.includes(`http://bot.test${p}<`), `sitemap has no ${p}`);
     });
 
+    await check('GET /updates: the shared update log in the Frame, one heading, canonical', async () => {
+        const r = await get('/updates');
+        assert.strictEqual(r.status, 200);
+        assert.strictEqual(r.headers.get('content-security-policy'), SITE_CSP);
+        const html = await r.text();
+        assert.ok(html.includes('<h1>What shipped on OpenVibe.Bot</h1>') && html.includes('data-ov-shipped="log" data-service="bot"'));
+        assert.strictEqual((html.match(/<h1[\s>]/g) || []).length, 1);
+        assert.match(html, /<script src="\/shared\/shipped\.js\?v=[0-9a-f]+" defer><\/script>/);
+        assert.match(html, /<link rel="canonical" href="[^"]+\/updates">/);
+        assert.match(await (await get('/sitemap.xml')).text(), /<loc>[^<]+\/updates<\/loc>/);
+    });
+
     await check('GET / links the build pages', async () => {
         const html = await (await get('/')).text();
         assert.match(html, /href="\/docs"/);

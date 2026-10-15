@@ -15,6 +15,7 @@
 const shell = require('openvibe-shared/shell');
 const showcase = require('openvibe-shared/showcase');
 const ovServe = require('openvibe-shared/serve');
+const frame = require('openvibe-shared/frame');
 const appIcon = require('openvibe-shared/app-icon');
 
 const SITE_NAME = 'OpenVibe.Bot';
@@ -100,10 +101,18 @@ function framePage({ config, title, description, canonicalPath = '/', body, head
     return shell.page({
         name: SITE_NAME, service: 'bot', lang: 'en', title, siteName: SITE_NAME, description, summary: description,
         canonical: `${config.baseUrl}${canonicalPath}`, robots: 'index, follow',
-        navbar: nav, footer: { service: 'bot', variant: 'full', mount: '#ov-footer', brandName: SITE_NAME }, home: '/',
+        navbar: nav, footer: { service: 'bot', variant: 'full', mount: '#ov-footer', brandName: SITE_NAME, updates: '/updates' }, home: '/',
         navLinks: [{ label: 'Robots', href: '/robots' }, { label: 'Build', href: '/docs' }],
         head: [appIcon.headTags({ site: 'bot' }), '<link rel="manifest" href="/manifest.webmanifest">', head].filter(Boolean).join('\n'),
         body: `<div id="navbar-mount"></div>\n${body}`,
+    });
+}
+
+/** /updates: what shipped on OpenVibe.Bot, the network's shared update log (openvibe-shared/frame updatesBody). */
+function renderUpdates({ config }) {
+    return framePage({
+        config, title: `What shipped on ${SITE_NAME}`, description: `Every change deployed to ${SITE_NAME}, newest first.`, canonicalPath: '/updates',
+        body: `<main id="main" class="page">\n${frame.updatesBody({ service: 'bot', siteName: SITE_NAME })}\n</main>\n<script src="${ovServe.url('shipped.js')}" defer></script>`,
     });
 }
 
@@ -140,4 +149,4 @@ ${sections({ signedIn })}
     });
 }
 
-module.exports = { renderHome, framePage, HOME_CSP, sections };
+module.exports = { renderHome, renderUpdates, framePage, HOME_CSP, sections };
