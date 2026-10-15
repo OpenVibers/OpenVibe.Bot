@@ -41,6 +41,9 @@ const DEVICE_MAX_PAYLOAD = 640 * 1024;
 // status, and the reply window (the owner's approval on the machine plus the program's own run).
 const COMPUTER_CAP = { exec: 'terminal', fs: 'files', screen: 'screen', probe: 'probe', input: 'input', browser: 'browser' };
 const COMPUTER_KINDS = Object.keys(COMPUTER_CAP);
+// The live screen (contracts 0.182.0): a device kind only Bot sends (machineScreen), with the machine's own private
+// stream filled in. It is not one of bot.command@1's kinds, so no operator, agent or service can send it.
+const SCREEN_KIND = 'screen_stream';
 const COMPUTER_DEFAULT_MS = 60000;
 const COMPUTER_MAX_MS = 600000;
 /** What an audit row keeps of a computer command: never a file's content, stdin or arguments (they may hold secrets). */
@@ -300,7 +303,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         const declared = (conn.status && conn.status.capabilities) || json(conn.device.capabilities, {}) || {};
         conn.computerAllowed = !robot || !!declared.computer;
         const base = robot ? domain.control.allowedFor(robot, 'owner', profile) : ['halt'];
-        const allowed = conn.computerAllowed ? [...new Set([...base, ...COMPUTER_KINDS])] : base;
+        const allowed = conn.computerAllowed ? [...new Set([...base, ...COMPUTER_KINDS, SCREEN_KIND])] : base;
         sendFrame(conn, 'config', {
             heartbeat_ms: config.device.heartbeatMs, limits, allowed_commands: allowed,
             estop_latched: robot ? !!robot.estop_latched : false,
@@ -623,6 +626,17 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
      * → { id, result, code?, reason?, latency_ms?, data?, cached? }
      */
     function machineCommand(deviceId, principal, subject, msg) {
+        return machineSend(deviceId, principal, subject, { id: msg.id, kind: msg.kind, value: msg.value, ms: msg.ms });
+    }
+    /**
+     * The live screen to the machine (api/v1.js and the web routes, the owner only): `value` is screen_stream's,
+     * with the stream's WHIP URL and key on a start. Audited with the action, seconds and fps only, never the URL
+     * or the key. → as machineCommand
+     */
+    function machineScreen(deviceId, principal, subject, value) {
+        return machineSend(deviceId, principal, subject, { kind: SCREEN_KIND, value, ms: 20000, screen: true });
+    }
+    function machineSend(deviceId, principal, subject, msg) {
         return new Promise((resolve, reject) => {
             let settled = false;
             const finish = (r) => { if (!settled) { settled = true; resolve(r); } };
@@ -656,17 +670,26 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             const kind = String(msg.kind || '');
             const value = msg.value && typeof msg.value === 'object' && !Array.isArray(msg.value) ? msg.value : {};
             const refuse = async (code, reason, summary = null) => {
-                await domain.audit.record({ robotId: deviceId, deviceId, subject, operatorKind: conn.principal.kind, role: 'owner', kind: COMPUTER_CAP[kind] ? kind : 'unknown', value: summary || {}, result: 'refused', reason: code });
+                await domain.audit.record({ robotId: deviceId, deviceId, subject, operatorKind: conn.principal.kind, role: 'owner', kind: COMPUTER_CAP[kind] || kind === SCREEN_KIND ? kind : 'unknown', value: summary || {}, result: 'refused', reason: code });
                 return sendFrame(conn, 'command_result', { id, result: 'refused', code, reason });
             };
-            if (!COMPUTER_CAP[kind]) return refuse('bot.invalid_input', `kind is ${COMPUTER_KINDS.join(', ')}`);
-            const check = validate('bot.command@1', { v: 1, seq: 0, ts: 0, type: 'command', id, kind, value });
-            if (!check.valid) return refuse('bot.invalid_input', `invalid ${kind}: ${(check.errors && check.errors[0] && (check.errors[0].message || JSON.stringify(check.errors[0]))) || 'bad value'}`.slice(0, 300));
-            const summary = computerSummary(kind, value);
+            const screen = msg.screen === true && kind === SCREEN_KIND;
+            if (!screen && !COMPUTER_CAP[kind]) return refuse('bot.invalid_input', `kind is ${COMPUTER_KINDS.join(', ')}`);
+            if (!screen) {
+                const check = validate('bot.command@1', { v: 1, seq: 0, ts: 0, type: 'command', id, kind, value });
+                if (!check.valid) return refuse('bot.invalid_input', `invalid ${kind}: ${(check.errors && check.errors[0] && (check.errors[0].message || JSON.stringify(check.errors[0]))) || 'bad value'}`.slice(0, 300));
+            }
+            const summary = screen
+                ? { action: String(value.action), ...(Number.isInteger(value.seconds) ? { seconds: value.seconds } : {}), ...(Number.isInteger(value.fps) ? { fps: value.fps } : {}) }
+                : computerSummary(kind, value);
             const device = deviceConns.get(deviceId);
             if (!device || !device.online) return refuse('bot.device_offline', 'the machine is offline', summary);
             const offered = computerOf(deviceId);
-            if (!offered || !offered[COMPUTER_CAP[kind]]) return refuse('bot.computer_off', `this machine does not offer ${COMPUTER_CAP[kind]}: its computer plugin is off (openvibe-node, --computer)`, summary);
+            if (screen) {
+                if (value.action === 'start' && !(offered && offered.screen && offered.screen.stream === true)) {
+                    return refuse('bot.computer_off', 'this machine does not show its screen live: it needs OpenVibe Node v0.12.0 or newer, with the computer plugin running in your graphical session', summary);
+                }
+            } else if (!offered || !offered[COMPUTER_CAP[kind]]) return refuse('bot.computer_off', `this machine does not offer ${COMPUTER_CAP[kind]}: its computer plugin is off (openvibe-node, --computer)`, summary);
             const requested = Number(msg.ms);
             const windowMs = Number.isInteger(requested) && requested > 0 ? Math.min(Math.max(requested, 1000), COMPUTER_MAX_MS) : COMPUTER_DEFAULT_MS;
             const deviceCmdId = prefixedId('cmd', now());
@@ -900,7 +923,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         /** A one-time ticket for the embedded panel's Drive (POST /panel/:id/ticket), or null. */
         issueControlTicket(principal, robotId) { return tickets.issue(principal, robotId); },
         isOnline, deviceState, sendToDevice, sendToRobotDevices, broadcast, closeDevice, robotState, refreshConfig, pushEstop, closeWatchers, dropSubject, operatorCommand,
-        machineCommand, computerOf,
+        machineCommand, machineScreen, computerOf,
         // Real devices only: a simulator is not a machine anyone runs.
         onlineCount() { let n = 0; for (const c of deviceConns.values()) if (c.online && !c.sim) n++; return n; },
         devices() { return [...deviceConns.values()].filter((c) => !c.sim).map((c) => ({ device_id: c.device.id, online: c.online })); },

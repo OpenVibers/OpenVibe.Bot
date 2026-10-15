@@ -594,7 +594,8 @@ function renderMachinesPage({ machines = [], pairing = null }) {
         const c = (m.capabilities && typeof m.capabilities === 'object' ? m.capabilities : {}).computer;
         if (!c || typeof c !== 'object') return null;
         const level = m.computer_level || ((c.files || c.terminal || c.screen || {}).level) || null;
-        return { level: LEVELS[level] ? level : null, terminal: !!c.terminal, files: !!c.files, screen: !!c.screen, probe: !!c.probe, input: !!c.input };
+        return { level: LEVELS[level] ? level : null, terminal: !!c.terminal, files: !!c.files, screen: !!c.screen, probe: !!c.probe, input: !!c.input,
+            screenStream: !!(c.screen && c.screen.stream === true) };
     };
     const computerRow = (m) => {
         const c = computerOf(m);
@@ -605,6 +606,7 @@ function renderMachinesPage({ machines = [], pairing = null }) {
         return `<div class="machine-computer"><span class="pill">Computer: ${esc(c.level ? LEVELS[c.level] : 'on')}</span><span class="muted">${esc(can)}</span>${waiting}`
             + `<form method="post" action="/machines/${esc(m.id)}/agent-computer"><input type="hidden" name="on" value="${m.agent_computer ? '0' : '1'}">`
             + `<button type="submit" class="button quiet" aria-pressed="${m.agent_computer ? 'true' : 'false'}">${m.agent_computer ? 'Stop my agent using this computer' : 'Let my agent use this computer'}</button></form>`
+            + (c.screenStream && m.online ? `<form method="post" action="/machines/${esc(m.id)}/screen"><button type="submit" class="button quiet">${m.computer_screen_stream === 'live' ? 'Watch my screen' : 'Show my screen'}</button></form>` : '')
             + (c.probe ? `<form method="post" action="/machines/${esc(m.id)}/watch-probe"><input type="hidden" name="on" value="${m.watch_probe ? '0' : '1'}">`
                 + `<button type="submit" class="button quiet" aria-pressed="${m.watch_probe ? 'true' : 'false'}">${m.watch_probe ? 'Stop my watches checking from here' : 'Let my watches check things from this computer'}</button></form>` : '')
             + '</div>';
@@ -637,6 +639,41 @@ ${list}
 ${add}
 </main>`;
     return page('Your machines', body, { scripts: pairing ? ['/panel/panel.js'] : [], description: 'Your own machines that run your jobs on OpenVibe.', canonical: '/machines' });
+}
+
+/**
+ * /machines/:id/screen: the machine's screen, live, for its owner only (plan T14). The tile waits for the machine's
+ * session (public/panel.js polls `stateUrl`) and plays it like a robot's camera; Stop ends it at once.
+ */
+function renderMachineScreenPage({ machine, until = null, error = null, idle = false }) {
+    const name = machine.name || machine.id;
+    const stateUrl = `/machines/${encodeURIComponent(machine.id)}/screen.json`;
+    // Idle (nothing is shown, as from a link): a start button instead of waiting for a stream nobody started.
+    if (idle && !error) {
+        const body = `${topbar(`<a class="crumb" href="/machines">Machines</a><span class="crumb">${esc(name)}</span>`)}
+<main class="page">
+<h1>${esc(name)}: screen</h1>
+<p class="muted">Show this computer's screen here, live, to you only, for 10 minutes. Nothing is recorded, and the computer says on its desktop that its screen is live.</p>
+<form method="post" action="/machines/${esc(machine.id)}/screen"><button type="submit" class="primary">Show my screen</button></form>
+</main>`;
+        return page(`${name}: screen`, body, { description: 'Your machine\'s screen, live, for you only.', canonical: '/machines' });
+    }
+    const ends = until ? `<p class="muted">Shown until <time datetime="${esc(until)}" data-local-time>${esc(until)}</time>, to you only. Nothing is recorded.</p>` : '';
+    const body = `${topbar(`<a class="crumb" href="/machines">Machines</a><span class="crumb">${esc(name)}</span>`)}
+<main class="page">
+<h1>${esc(name)}: screen</h1>
+${error ? `<p class="error" role="alert">${esc(error)}</p>` : ends}
+<figure class="camera machine-screen" data-screen-state="${esc(stateUrl)}">
+<div class="camera-screen" data-camera-screen>${icon('plug', 'icon camera-icon')}<p class="camera-title" data-screen-status role="status">${error ? 'The screen is not shown.' : 'Waiting for the machine…'}</p>
+<p class="camera-sub">The picture comes from the machine itself, a few frames a second.</p></div>
+</figure>
+<div class="machine-screen-actions">
+<form method="post" action="/machines/${esc(machine.id)}/screen/stop"><button type="submit" class="primary">Stop showing my screen</button></form>
+<form method="post" action="/machines/${esc(machine.id)}/screen"><button type="submit" class="button quiet">${error ? 'Try again' : 'Start again (10 more minutes)'}</button></form>
+</div>
+<p class="muted small">The machine says on its desktop that its screen is live. <code>openvibe-node stop</code> on the machine ends it at once, and it ends on its own after its time.</p>
+</main>`;
+    return page(`${name}: screen`, body, { scripts: ['/panel/panel.js'], description: 'Your machine\'s screen, live, for you only.', canonical: '/machines' });
 }
 
 /**
@@ -673,4 +710,4 @@ function renderPhonePage() {
     return page('This phone is a robot', body, { scripts: ['/panel/phone-device.js'], bodyClass: 'phone-page', description: 'Turn a phone into a robot on OpenVibe.Bot from its browser: its camera, voice and face, with nothing to install.', canonical: '/device/phone' });
 }
 
-module.exports = { page, renderPanel, renderPhonePage, renderMachinesPage, panelScripts, isSim, TRY_DESCRIPTION, renderEmbedRefused, renderDrivePage, renderWidget, renderRobotsPage, renderPairingPage, camerasOf, esc };
+module.exports = { page, renderPanel, renderPhonePage, renderMachinesPage, renderMachineScreenPage, panelScripts, isSim, TRY_DESCRIPTION, renderEmbedRefused, renderDrivePage, renderWidget, renderRobotsPage, renderPairingPage, camerasOf, esc };

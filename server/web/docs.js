@@ -394,6 +394,16 @@ ${code(COMPUTER_APPROVE)}
 <p>On ${inLink('/machines', 'Your machines')}, <b>Let my agent use this computer</b> is off until you turn it on. With it on, a task you give ${out('https://openvibe.actor', 'OpenVibe.Actor')}, such as "what changed in ~/site today?", can list and read files, run programs and write files there, as you and at your level. The ${out('https://openvibe.actor/console', 'Console')} shows what waits for you. Turning the switch off stops it at once.</p>
 <p><b>Let my watches check things from this computer</b> is a separate switch. It lets ${out('https://openvibe.watch', 'OpenVibe.Watch')} probe your own network from the computer for your watches, for example "tell me when my NAS stops answering". It allows only probes: one GET or one TCP connect, to private addresses only.</p></section>
 
+<section class="card" aria-labelledby="screen-c-h"><h2 id="screen-c-h">Watch your screen live</h2>
+<p>On ${inLink('/machines', 'Your machines')}, <b>Show my screen</b> shows the computer's screen live, to you only, for 10 minutes (30 seconds to 30 minutes through the API).</p>
+<ul>
+<li><b>Private.</b> It goes to a private stream of that computer's own: nothing is recorded, it never appears on OpenVibe Live, and only you can open it. Your agents, your watches and anyone else cannot start it.</li>
+<li><b>How it is captured.</b> The computer takes a few pictures of its screen a second with the same tools as a screenshot. It needs OpenVibe Node v0.12.0 or newer, with the computer plugin running in your desktop session.</li>
+<li><b>It says so.</b> The desktop shows a notice when it starts, and <code>openvibe-node status</code> shows it while it runs.</li>
+<li><b>Stopping it.</b> <b>Stop showing my screen</b> ends it, and so do its time running out and <code>openvibe-node stop</code> on the computer, at once. To never offer it, set <code>allow_screen_stream: false</code> in the plugin's config.</li>
+</ul>
+<p>From the API, with your own token: <code>POST /api/v1/machines/:id/screen</code> (<code>seconds</code>, <code>fps</code> from 1 to 5) starts it, <code>GET</code> answers <code>signaling_url</code> once the computer is sending, and <code>DELETE</code> stops it.</p></section>
+
 <section class="card" aria-labelledby="api-c-h"><h2 id="api-c-h">The API</h2>
 <p>Your own token reaches your own computers. The answer comes back in <code>data</code>:</p>
 ${code(COMPUTER_CALL)}
