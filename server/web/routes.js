@@ -40,7 +40,7 @@ const { renderPanel, renderEmbedRefused, renderDrivePage, renderPairingPage, ren
 const { createMachineScreen } = require('../machine-screen');
 const { renderDocsIndex, renderDriversPage, renderProfilesPage, renderAutomationPage, renderComputersPage } = require('./docs');
 const { checkProfile } = require('../profiles');
-const { renderHome, HOME_CSP } = require('./home');
+const { renderHome, renderUpdates, HOME_CSP } = require('./home');
 const { renderDirectory, renderModels, renderModel, renderRobotPage, renderAddRobot, renderSubmit, renderSubmissions, modelOf } = require('./directory');
 const { LICENSES } = require('../submissions');
 
@@ -52,7 +52,7 @@ const TRY_PROFILE = loadProfiles().get('sim.rover');
 const SITE_TAGLINE = 'An open control panel for robots';
 // Every public GET page, for the sitemap. The interactive pages (/robots, /pair/, /panel/) need a session and
 // are Disallowed in robots.txt; the API and sign-in are not pages.
-const PUBLIC_PAGES = ['/', '/try', '/robots', '/models', '/install', '/docs', '/docs/drivers', '/docs/profiles', '/docs/automation', '/docs/computers', '/terms', '/privacy', '/dmca'];
+const PUBLIC_PAGES = ['/', '/try', '/robots', '/models', '/install', '/docs', '/docs/drivers', '/docs/profiles', '/docs/automation', '/docs/computers', '/updates', '/terms', '/privacy', '/dmca'];
 // The public pages an AI crawler can read, for /llms.txt and /llms-full.txt (llmstxt.org). Same pages as the
 // sitemap minus /install (a 302 to the installer script, not a page); no signed-in or per-robot page, nothing
 // under the API or /internal. `note` is the one-line llms.txt entry, `text` the page's full text in llms-full.txt,
@@ -105,6 +105,11 @@ const LLMS_PAGES = [
         path: '/docs/computers', title: 'Your computer for your agents',
         note: 'The Node\'s computer plugin: levels set on the computer, approvals there, the agent switch and the API.',
         text: 'How to let your agents use your own computer through the OpenVibe Node\'s computer plugin. Installed with --computer, it runs as your own account, never root, and its only folder is your home. The level is set on the computer only: observe (screenshots, listing and reading files), ask (programs and writes each approved on the computer with openvibe-node approve), trusted (inside its folders without asking) or full. Programs are argv, never a shell line, time-limited and output-capped. The local stop drops it to observe. The switch Let my agent use this computer on openvibe.bot/machines lets your OpenVibe.Actor agent use it as you. Bot\'s machine commands take exec, fs and screen, and the computer\'s answer comes back in data.',
+    },
+    {
+        path: '/updates', title: 'What shipped on OpenVibe.Bot',
+        note: 'Every change deployed to OpenVibe.Bot, newest first, from the network\'s shared update log.',
+        text: 'The update log of OpenVibe.Bot: every change deployed to the site, newest first, each line a commit from the OpenVibers repositories linked to the change itself. Batches of changes become Patch notes on openvibe.blog, and the whole network\'s log is on openvibe.network/updates.',
     },
     {
         path: '/terms', title: 'Terms of Service',
@@ -259,6 +264,8 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     const frameCsp = (req, res, next) => { res.setHeader('Content-Security-Policy', HOME_CSP); next(); };
     r.get('/docs/docs.css', asset('docs.css', 'text/css'));
     r.get('/docs', frameCsp, (req, res) => res.type('html').send(renderDocsIndex({ config })));
+    // What shipped on this site: the shared update log, as on every OpenVibe site.
+    r.get('/updates', frameCsp, (req, res) => res.type('html').send(renderUpdates({ config })));
     r.get('/docs/drivers', frameCsp, (req, res) => res.type('html').send(renderDriversPage({ config })));
     r.get('/docs/profiles', frameCsp, (req, res) => res.type('html').send(renderProfilesPage({ config })));
     r.get('/docs/automation', frameCsp, (req, res) => res.type('html').send(renderAutomationPage({ config })));
