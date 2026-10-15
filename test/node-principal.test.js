@@ -4,12 +4,14 @@
 // as for a credential, `status` persists what the machine declares, `reauth` keeps the socket, and revoke
 // and rotate reach Network and the machine. Credential devices keep today's behaviour.
 const assert = require('assert');
+const { signDeliveryHeaders } = require('openvibe-sdk/events');
 const { boot, check, done } = require('./helpers/app');
 
 const WHIP_BASE = 'https://whip.test/ingest';
+const EVENTS_SECRET = `whsec_${'noderevoked'.repeat(4)}`;
 
 (async () => {
-    const t = await boot({ env: { BOT_WHIP_BASE: WHIP_BASE } });
+    const t = await boot({ env: { BOT_WHIP_BASE: WHIP_BASE, BOT_EVENTS_SECRET: EVENTS_SECRET } });
     const alex = t.network.newUser('alex');
     const sam = t.network.newUser('sam');
 
@@ -200,6 +202,27 @@ const WHIP_BASE = 'https://whip.test/ingest';
         assert.ok(await c.waitFor((m) => m.type === 'rotate'));
         assert.strictEqual((await deviceRow(hello.device_id)).credential_hash, null);
         c.close();
+    });
+
+    await check('network.node.revoked revokes the machine\'s devices and closes its live socket at once', async () => {
+        const { principal } = await paired();
+        const c = await connect(t.network.signNode(principal));
+        const hello = await c.waitFor((m) => m.type === 'hello');
+        assert.ok(t.hub.isOnline(hello.device_id));
+        const event = {
+            event_id: 'evt_01JZ0000000000000000000N01', event_type: 'network.node.revoked', version: 1, source: 'network',
+            actor: { type: 'user', id: alex.subject }, timestamp: new Date().toISOString(), visibility: 'internal',
+            subject: { type: 'node', id: principal },
+            payload: { node_id: `n-${'a'.repeat(26)}`, principal_id: principal, owner: { kind: 'user', subject: alex.subject }, reason: 'owner', at: new Date().toISOString() },
+        };
+        const body = JSON.stringify({ event });   // Events delivers { cursor?, event }
+        const res = await fetch(`${t.base}/internal/events`, { method: 'POST', body, headers: { 'Content-Type': 'application/json', ...signDeliveryHeaders(body, EVENTS_SECRET) } });
+        assert.strictEqual(res.status < 300, true, `${res.status} ${await res.text()}`);
+        assert.strictEqual(await c.waitForClose(), 4003, 'the socket closes at once, not at the reauth deadline');
+        assert.ok((await deviceRow(hello.device_id)).revoked_at, 'the device is revoked');
+        assert.ok(!t.hub.isOnline(hello.device_id));
+        const again = await fetch(`${t.base}/internal/events`, { method: 'POST', body, headers: { 'Content-Type': 'application/json', ...signDeliveryHeaders(body, EVENTS_SECRET) } });
+        assert.strictEqual(again.status < 300, true, 'a redelivery is harmless');
     });
 
     await t.close();
