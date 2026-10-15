@@ -36,7 +36,8 @@ const { getProfile, listProfiles, loadProfiles } = require('../profiles');
 const { frameAncestors } = require('../config');
 const { BotError } = require('../util');
 const kits = require('../kits');
-const { renderPanel, renderEmbedRefused, renderDrivePage, renderPairingPage, renderPhonePage, renderMachinesPage } = require('./render');
+const { renderPanel, renderEmbedRefused, renderDrivePage, renderPairingPage, renderPhonePage, renderMachinesPage, renderMachineScreenPage } = require('./render');
+const { createMachineScreen } = require('../machine-screen');
 const { renderDocsIndex, renderDriversPage, renderProfilesPage, renderAutomationPage, renderComputersPage } = require('./docs');
 const { checkProfile } = require('../profiles');
 const { renderHome, HOME_CSP } = require('./home');
@@ -438,7 +439,50 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
             ...d, online: !!(hub && hub.isOnline(d.id)), robot: robot ? robot.name : null,
             computer_level: typeof sensors.computer_level === 'string' ? sensors.computer_level : null,
             computer_waiting: Number.isInteger(sensors.computer_waiting) ? sensors.computer_waiting : null,
+            computer_screen_stream: sensors.computer_screen_stream === 'live' ? 'live' : 'off',
         };
+    }));
+    // ── The live screen (plan T14): the owner watches their machine's screen on their own private stream ──
+    const machineScreen = createMachineScreen({ domain, hub });
+    const myMachine = async (req, me) => {
+        const mine = (await domain.machines.list(me.subject)).find((d) => d.id === req.params.id);
+        if (!mine) throw new BotError(404, 'bot.device_not_found', 'no such machine of yours');
+        return mine;
+    };
+    const asUser = (me) => ({ kind: 'user', sub: me.subject });
+    r.post('/machines/:id/screen', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        const mine = await myMachine(req, me);
+        try {
+            const out = await machineScreen.start(mine, me.subject, asUser(me));
+            res.redirect(303, `/machines/${encodeURIComponent(mine.id)}/screen?until=${encodeURIComponent(out.until)}`);
+        } catch (e) {
+            if (!(e instanceof BotError)) throw e;
+            res.setHeader('Content-Security-Policy', PANEL_CSP);
+            res.status(e.status).type('html').send(renderMachineScreenPage({ machine: mine, error: e.detail || e.message }));
+        }
+    }));
+    r.get('/machines/:id/screen', page(async (req, res) => {
+        const me = requireUser(req);
+        const mine = await myMachine(req, me);
+        const until = typeof req.query.until === 'string' && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,3})?Z$/.test(req.query.until) ? req.query.until : null;
+        res.setHeader('Vary', 'Cookie');
+        res.setHeader('Content-Security-Policy', PANEL_CSP);
+        res.type('html').send(renderMachineScreenPage({ machine: mine, until }));
+    }));
+    r.get('/machines/:id/screen.json', page(async (req, res) => {
+        const me = requireUser(req);
+        const mine = await myMachine(req, me);
+        res.setHeader('Cache-Control', 'private, no-store');
+        res.json(await machineScreen.state(mine, me.subject));
+    }));
+    r.post('/machines/:id/screen/stop', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        const mine = await myMachine(req, me);
+        await machineScreen.stop(mine, me.subject, asUser(me));
+        res.redirect(303, '/machines');
     }));
     r.get('/machines', frameCsp, page(async (req, res) => {
         const me = requireUser(req);
@@ -475,6 +519,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         const mine = (await domain.machines.list(me.subject)).find((d) => d.id === req.params.id);
         if (!mine) throw new BotError(404, 'bot.device_not_found', 'no such machine of yours');
         await domain.devices.revoke(mine.id);
+        await domain.machines.screen.archive(mine, me.subject).catch((e) => log.warn(`[Bot] machine ${mine.id} screen stream: ${e.message}`));
         if (mine.node_principal) await domain.devices.revokeNode(mine.node_principal).catch((e) => log.warn(`[Bot] machine ${mine.id} on Network: ${e.message}`));
         if (hub) hub.closeDevice(mine.id, 'revoked');
         res.redirect(303, '/machines');

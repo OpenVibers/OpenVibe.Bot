@@ -674,6 +674,65 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
                  SELECT 1 FROM robots r WHERE r.owner_subject = $1 AND d.robot_ids @> jsonb_build_array(r.id))))
              ORDER BY d.created_at DESC`, [subject]);
     }
+    // ── The live screen (plan T14, contracts 0.182.0) ──────────────────────────────────────────────────────
+    /**
+     * A new ingest key for the machine's own screen stream on OpenRestream, as its owner → { streamId, key, whipUrl }.
+     * One private stream per machine (external ref bot:machine:<id>): playback private, no recording, never on Live.
+     * Each start rotates the key and ends a session still open, so only the newest start publishes. Bot keeps the
+     * stream id, never the key, which goes once to the machine in its start command. Throws 503 without OpenRestream
+     * or a WHIP ingest.
+     */
+    async function screenKey(device, owner) {
+        if (!openre || !whipUrl('x')) fail(503, 'bot.openre_unavailable', 'OpenRestream is not configured here, so the screen cannot be shown');
+        const rotated = async (streamId) => {
+            const r = await openre.rotate(streamId, owner, { grace_seconds: 0, end_sessions: true });
+            return r && { streamId, key: r.key };
+        };
+        let out = device.screen_stream_id ? await rotated(device.screen_stream_id) : null;
+        if (!out) {
+            const found = await openre.find(`bot:machine:${device.id}`, owner);
+            if (found && found.id) out = await rotated(found.id);
+        }
+        if (!out) {
+            const label = String(device.name || device.id).slice(0, 100);
+            const created = await openre.create({
+                title: `${label} screen`, protocols: ['webrtc'], recording_mode: 'none', recording_visibility: 'private',
+                playback_visibility: 'private', mirror_to_live: false,
+                external_refs: [{ service: 'bot', type: 'machine', id: device.id, label }],
+            }, owner);
+            out = created && created.stream && { streamId: created.stream.id, key: created.key };
+        }
+        if (!out || typeof out.streamId !== 'string' || !out.key || typeof out.key.key !== 'string' || !out.key.key) {
+            fail(503, 'bot.openre_unavailable', 'OpenRestream answered no ingest key for the screen');
+        }
+        if (out.streamId !== device.screen_stream_id) {
+            await db.query('UPDATE devices SET screen_stream_id = $2, updated_at = $3 WHERE id = $1', [device.id, out.streamId, iso(now())]);
+        }
+        return { streamId: out.streamId, key: out.key.key, whipUrl: whipUrl(out.key.key) };
+    }
+    /** The viewer signaling URL of the machine's open screen session, as its owner, or null (none is live yet). */
+    async function screenLive(device, owner) {
+        if (!openre || !device.screen_stream_id) return null;
+        const open = await openre.sessions(device.screen_stream_id, owner, { state: 'open' });
+        const session = open.find((x) => x && x.protocol === 'webrtc') || null;
+        if (!session) return null;
+        const descriptor = await openre.playback(session.id, owner);
+        const url = descriptor && descriptor.webrtc && descriptor.webrtc.signaling_url;
+        return typeof url === 'string' && /^wss?:\/\//.test(url) ? url : null;
+    }
+    /** Stop: retire the screen stream's key and end its session at once → whether there was a stream. */
+    async function screenEnd(device, owner) {
+        if (!openre || !device.screen_stream_id) return false;
+        await openre.rotate(device.screen_stream_id, owner, { grace_seconds: 0, end_sessions: true });
+        return true;
+    }
+    /** A machine removed: its screen stream goes too (archived on OpenRestream). */
+    async function screenArchive(device, owner) {
+        if (!openre || !device.screen_stream_id) return false;
+        await openre.archive(device.screen_stream_id, owner);
+        await db.query('UPDATE devices SET screen_stream_id = NULL WHERE id = $1', [device.id]);
+        return true;
+    }
     /** Let the owner's watches probe from this machine, or stop them (the owner check is the caller's). */
     async function setWatchProbe(deviceId, value) {
         return db.maybe('UPDATE devices SET watch_probe = $2, updated_at = $3 WHERE id = $1 AND revoked_at IS NULL RETURNING *', [deviceId, !!value, iso(now())]);
@@ -1099,7 +1158,8 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         members: { roleOf, add: addOperator, remove: removeOperator, list: listOperators },
         pairing: { create: createPairingCode, redeem, prune: prunePairingCodes, installerCommand, driverForProfile, whipUrl },
         devices: { byCredential, bindNode, issuePublishKey, revokeVideo, updateDeclared, revokeNode, ensureServerDevice, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, revokeByNode, touchSeen, setOnline, ownerOf, onChange },
-        machines: { mint: mintMachine, list: listMachines, workerRef, setAgentComputer, setWatchProbe },
+        machines: { mint: mintMachine, list: listMachines, workerRef, setAgentComputer, setWatchProbe,
+            screen: { key: screenKey, live: screenLive, end: screenEnd, archive: screenArchive } },
         streaming: { get: streaming, set: setStreaming },
         video: { live: liveVideo },
         estop: { set: setEstop, clear: clearEstop },

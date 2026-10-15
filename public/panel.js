@@ -555,6 +555,7 @@
         let current = null;    // the session being connected: { ws, transport, consumers }
         let timer = null;      // the pending reconnect
         let attempt = 0;
+        let stopped = false;   // stop(): no more reconnects (a machine's screen that ended)
 
         /** The tile shows the video or its placeholder, never both. */
         function showLive(on) {
@@ -572,7 +573,7 @@
         }
         /** The placeholder returns, the session closes, and the next attempt is a backoff away. */
         function retry() {
-            if (timer) return;
+            if (timer || stopped) return;
             showLive(false);
             teardown();
             timer = setTimeout(() => { timer = null; connect(); }, Math.min(10000, 500 * 2 ** attempt++));
@@ -632,8 +633,50 @@
             }
         }
         connect();
+        return {
+            stop() {
+                stopped = true;
+                if (timer) { clearTimeout(timer); timer = null; }
+                showLive(false);
+                teardown();
+            },
+        };
     }
     for (const tile of $$('[data-signaling-url]')) liveCamera(tile);
+
+    // ── A machine's live screen (/machines/:id/screen): wait until the machine publishes, then play it as a camera ──
+    for (const time of $$('time[data-local-time]')) {
+        const at = new Date(time.getAttribute('datetime'));
+        if (!Number.isNaN(at.getTime())) time.textContent = at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    for (const tile of $$('[data-screen-state]')) {
+        const status = $('[data-screen-status]', tile);
+        let playing = null;
+        let misses = 0;
+        const say = (text) => { if (status) status.textContent = text; };
+        const poll = async () => {
+            let s = null;
+            try {
+                const r = await fetch(tile.dataset.screenState, { headers: { Accept: 'application/json' }, credentials: 'same-origin', cache: 'no-store' });
+                s = r.ok ? await r.json() : null;
+            } catch { s = null; }
+            if (s && s.signaling_url && !playing) {
+                tile.dataset.signalingUrl = s.signaling_url;
+                say('Connecting to the screen…');
+                playing = liveCamera(tile);
+            } else if (playing && s && s.state === 'off') {
+                // The machine stopped (its time is up, Stop, or its kill switch): leave the last word on the page.
+                playing.stop();
+                say('Your screen is no longer shown.');
+                return;
+            } else if (!playing) {
+                misses += 1;
+                say(s && s.online === false ? 'The machine is offline.' : misses > 20 ? 'Still waiting for the machine. Is the Node running in your desktop session?' : 'Waiting for the machine…');
+            }
+            setTimeout(poll, playing ? 5000 : 1500);
+        };
+        if (status && !$('.error', document)) poll();
+    }
 
     // ── State ─────────────────────────────────────────────────────────────────────────────────────────
     function enableControls() {

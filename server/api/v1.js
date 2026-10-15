@@ -38,6 +38,7 @@ const express = require('express');
 const { parseSteps, stepHelp, AGENT_MAX_STEPS, AGENT_MAX_S } = require('../routines');
 const { http } = require('openvibe-contracts');
 const { fail, userSubject, isRobotId, json } = require('../util');
+const { createMachineScreen } = require('../machine-screen');
 const { getProfile, listProfiles, checkProfile } = require('../profiles');
 const kits = require('../kits');
 const resourceIndex = require('./resource-index');
@@ -71,6 +72,7 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
     r.use('/resources', resourceIndex.router({ db: domain.db, apiAuth }));
     const manage = limits('bot.robot.manage', { minute: 30, hour: 300 });
     const control = limits('bot.control', { minute: 120, hour: 1200 });
+    const machineScreen = createMachineScreen({ domain, hub });
     // The command route counts against the acted-for person, not the service token: a bound channel's chat
     // forwards many viewers' commands through one service, and each viewer gets their own bucket. A service
     // is also capped by its own token (bot.control.service, 10× the per-person bucket): the subject is only
@@ -431,6 +433,26 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         const result = await hub.machineCommand(device.id, principal, subject, { id: req.body?.id, kind: req.body?.kind, value: req.body?.value, ms: req.body?.ms });
         if (result.result === 'refused') fail(commandRefusalStatus(result.code), result.code, result.reason || null);
         res.json({ machine_id: device.id, ...result });
+    }));
+    // The live screen (plan T14): the machine's owner, signed in as themselves, watches it on their own private stream.
+    // Never an agent, a watch or another service: screen_stream is not a bot.command@1 kind, and only this route sends it.
+    const screenOwner = async (req) => {
+        if (req.principal.kind !== 'user') fail(403, 'bot.forbidden', 'only the machine\'s owner, signed in, shows its screen');
+        return computerMachine(req, { agentNeedsOptIn: false });
+    };
+    r.post('/machines/:id/screen', manage, wrap(async (req, res) => {
+        const { device, subject } = await screenOwner(req);
+        const out = await machineScreen.start(device, subject, req.principal, { seconds: req.body?.seconds, fps: req.body?.fps });
+        res.status(201).json({ machine_id: device.id, ...out });
+    }));
+    r.get('/machines/:id/screen', wrap(async (req, res) => {
+        const { device, subject } = await screenOwner(req);
+        res.set('Cache-Control', 'no-store');
+        res.json({ machine_id: device.id, ...(await machineScreen.state(device, subject)) });
+    }));
+    r.delete('/machines/:id/screen', manage, wrap(async (req, res) => {
+        const { device, subject } = await screenOwner(req);
+        res.json({ machine_id: device.id, ...(await machineScreen.stop(device, subject, req.principal)) });
     }));
     // The owner lets their watches probe from the machine, or stops them (never Watch itself).
     r.post('/machines/:id/watch-probe', manage, wrap(async (req, res) => {
