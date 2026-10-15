@@ -353,7 +353,8 @@ const COMPUTER_INSTALL = `curl -fsSL https://openvibe.bot/install | sh -s -- \\
 const COMPUTER_APPROVE = `openvibe-node approvals          # what waits: id, kind, what it would do
 openvibe-node approve cmd_01J…   # let it run
 openvibe-node deny cmd_01J…      # refuse it
-openvibe-node stop               # the kill switch: observe only until resume`;
+openvibe-node stop               # the kill switch: observe only until resume
+openvibe-node tray               # the same in your notification area (Linux, Windows)`;
 const COMPUTER_CALL = `curl -X POST https://openvibe.bot/api/v1/machines/dev_…/commands \\
   -H "Authorization: Bearer $OPENVIBE_TOKEN" -H "Content-Type: application/json" \\
   -d '{"kind": "exec", "value": {"argv": ["git", "status", "--short"], "cwd": "/home/you/site"}}'
@@ -379,8 +380,14 @@ ${code(COMPUTER_INSTALL)}
 <p>A program is always a program and its arguments, never a shell line. It runs for at most the time you set (30 seconds by default), at most two at once, and its output is cut at 64 KB. A path is checked after links are followed, so a link out of a folder is outside it.</p></section>
 
 <section class="card" aria-labelledby="approve-h"><h2 id="approve-h">Approving on the computer</h2>
-<p>At level <b>ask</b>, a request waits up to two minutes for your answer, with a desktop notification when the Node runs in your session:</p>
+<p>At level <b>ask</b>, a request waits up to two minutes for your answer. You can answer in three places:</p>
+<ul>
+<li><b>The tray</b> (Linux and Windows). <code>openvibe-node tray</code> lists what waits, each with <b>Approve</b> and <b>Deny</b>, beside the stop and resume. It raises a notification with the same two buttons, and its icon turns amber while something waits. The installer starts it when you sign in.</li>
+<li><b>A notification or dialog</b> from the Node itself when it runs in your session: buttons on Linux, a dialog whose default is Deny on macOS.</li>
+<li><b>The command line</b>:</li>
+</ul>
 ${code(COMPUTER_APPROVE)}
+<p>An approval is not taken while the agent is using the mouse or keyboard, nor for two seconds after, so a click the agent makes can never press Approve. Deny always goes through.</p>
 <p>The local stop drops the computer to observe at once: what runs is killed, what waits is denied, and nothing runs or changes until you resume.</p></section>
 
 <section class="card" aria-labelledby="agent-c-h"><h2 id="agent-c-h">Your agent</h2>
@@ -394,6 +401,15 @@ ${code(COMPUTER_CALL)}
 <li><code>exec</code>: <code>argv</code>, <code>cwd</code>, <code>timeout_s</code>, <code>stdin</code> → <code>exit_code</code>, <code>stdout</code>, <code>stderr</code>, <code>truncated</code>, <code>timed_out</code>.</li>
 <li><code>fs</code>: <code>op</code> list, stat, read (<code>offset</code>, <code>length</code>), write (<code>content_b64</code>, <code>mode</code> create, overwrite or append) or mkdir, and an absolute <code>path</code>.</li>
 <li><code>screen</code>: <code>max_width</code> → a JPEG in <code>content_b64</code>.</li>
+<li><code>browser</code>: <code>action</code>, which is one of:
+<ul>
+<li><code>open</code> a <code>url</code>;</li>
+<li><code>click</code> a CSS <code>selector</code> or the button or link showing <code>text</code>;</li>
+<li><code>fill</code> a field (<code>selector</code> and <code>text</code>);</li>
+<li><code>press</code> a <code>key</code>;</li>
+<li><code>back</code>, <code>read</code>, <code>screenshot</code> or <code>close</code>.</li>
+</ul>
+The page answers with its URL, title, text and links. The browser is the agent's own, in a profile of its own on your computer; it never sees your browser's sessions. Reading, screenshots and closing run at every level; the rest are approved one by one at ask. Below full, <code>open</code> refuses an address on your own network. The audit keeps the host, the selector, the key and the number of characters filled, never the text.</li>
 <li><code>input</code>: <code>action</code> (<code>move</code>, <code>click</code>, <code>double_click</code>, <code>right_click</code> at <code>x</code>, <code>y</code>; <code>scroll</code> by <code>dy</code>; <code>type</code> a <code>text</code>; <code>key</code> one key or chord such as <code>ctrl+s</code>), with <code>width</code> and <code>height</code> of the screenshot the coordinates come from; the computer scales them to its real screen. It acts, so your level decides: never at observe, approved one by one at ask. xdotool on Linux (X11), cliclick on macOS. The audit keeps the action and the number of characters typed, never the text.</li>
 <li><code>probe</code>: <code>target</code> (<code>http(s)://…</code> or <code>tcp://host:port</code> on the computer's own network) → the status and body of one GET, or whether the port is open. It is read-only and runs at every level.</li>
 </ul>
