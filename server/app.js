@@ -111,6 +111,7 @@ function createApp(opts = {}) {
     const gauges = registerBotGauges(registry, { db, hub, now, log });
     app.get('/metrics', (req, res, next) => (isLoopbackDirect(req) ? gauges.refresh().then(() => next(), () => next()) : next()));
     const metrics = require('openvibe-shared/metrics').instrument(app, { service: 'bot', release: release.release, registry });
+    app.use(require('openvibe-sdk/service').telemetryMiddleware);   // request telemetry: a no-op until server/index.js calls telemetry.init()
 
     app.use(http.middleware());
     app.use((req, res, next) => {
