@@ -120,6 +120,8 @@ Production runs the Node process under systemd as `openvibe-bot.service` (unit r
 
 To run the schema migrations before the service serves, start it once with the direct owner connection in `/etc/openvibe/bot.env` (`DATABASE_DIRECT_URL`); the boot applies `migrations/` and then serves on the pooled `DATABASE_URL`.
 
+Request telemetry: each HTTP request is aggregated by route template, method and status class, never by raw URL, and `/shared` files, static assets, health, readiness and `/metrics` are not counted. Once a minute one `http.request` sample per key, plus the active-requests, p95 latency and event-loop-lag gauges, is written to Bot's own `telemetry_samples` table (migration `0018_telemetry.sql`; openvibe-sdk 0.46 telemetry, the `platform.telemetry-sample@1` shape), and rows older than 14 days are deleted daily. `server/app.js` mounts openvibe-sdk's `telemetryMiddleware` (a no-op until init); `server/index.js` calls `telemetry.init()` at production start, runs the retention and flushes on stop.
+
 Set `BOT_PAIRING_AUTHORITY` to `bot` (the default) or `network`; any other value refuses to boot.
 
 Set `BOT_EMBED_ORIGINS` (comma or space separated; default `https://openvibe.live,https://www.openvibe.live`) to the pages that may frame a robot's read-only panel (the CSP `frame-ancestors` list). Each entry is a bare https origin, with no path, query or wildcard (`http://localhost:<port>` only outside production); an invalid entry refuses to boot. A robot is embeddable only after its owner turns on `embed_public` with the form on its panel (`POST /robots/:id/embed`); the flag is web-only and never appears in `/api/v1`. Migration `0005_embed_public.sql` adds the column, off for every robot.
