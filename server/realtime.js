@@ -39,7 +39,7 @@ const WATCH_MAX_PAYLOAD = 4 * 1024;   // a watcher only ever sends join/leave
 const DEVICE_MAX_PAYLOAD = 640 * 1024;
 // The Node's computer plugin (plan T14/T17): the kinds a person's machine takes, the capability each needs in its
 // status, and the reply window (the owner's approval on the machine plus the program's own run).
-const COMPUTER_CAP = { exec: 'terminal', fs: 'files', screen: 'screen', probe: 'probe', input: 'input' };
+const COMPUTER_CAP = { exec: 'terminal', fs: 'files', screen: 'screen', probe: 'probe', input: 'input', browser: 'browser' };
 const COMPUTER_KINDS = Object.keys(COMPUTER_CAP);
 const COMPUTER_DEFAULT_MS = 60000;
 const COMPUTER_MAX_MS = 600000;
@@ -50,6 +50,13 @@ function computerSummary(kind, value) {
     if (kind === 'probe') { try { const u = new URL(value.target); return { scheme: u.protocol.replace(':', ''), host: u.host }; } catch { return { scheme: null }; } }
     // Typed text can be anything (a password the person asked for): the audit keeps its length, never the text.
     if (kind === 'input') return { action: value.action, ...(value.x != null ? { x: value.x, y: value.y } : {}), ...(typeof value.text === 'string' ? { chars: value.text.length } : {}), ...(value.keys ? { keys: value.keys } : {}), ...(value.dy ? { dy: value.dy } : {}) };
+    // The browser: where it went (the host only, never a path or query), what it clicked, how much was typed.
+    if (kind === 'browser') {
+        let host = null;
+        if (typeof value.url === 'string') { try { host = new URL(value.url).host; } catch { host = null; } }
+        return { action: value.action, ...(host ? { host } : {}), ...(typeof value.selector === 'string' ? { selector: value.selector.slice(0, 120) } : {}),
+            ...(value.action === 'fill' && typeof value.text === 'string' ? { chars: value.text.length } : {}), ...(value.key ? { key: value.key } : {}) };
+    }
     return { max_width: value.max_width || null };
 }
 
