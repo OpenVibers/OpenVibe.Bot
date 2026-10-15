@@ -14,7 +14,7 @@ const { boot, check, done } = require('./helpers/app');
     let seq = 0;
     const frame = (type, fields) => ({ v: 1, seq: ++seq, ts: Date.now(), type, ...fields });
     const poll = async (fn, ms = 8000) => { const end = Date.now() + ms; while (Date.now() < end) { const v = await fn(); if (v) return v; await t.wait(30); } return null; };
-    const COMPUTER = { terminal: { level: 'trusted', timeout_s: 30 }, files: { level: 'trusted', roots: ['/home/alex'] }, screen: { level: 'trusted', tool: 'grim' }, probe: { lan_only: true }, input: { level: 'trusted', tool: 'xdotool', scroll: true } };
+    const COMPUTER = { terminal: { level: 'trusted', timeout_s: 30 }, files: { level: 'trusted', roots: ['/home/alex'] }, screen: { level: 'trusted', tool: 'grim' }, probe: { lan_only: true }, input: { level: 'trusted', tool: 'xdotool', scroll: true }, browser: { level: 'trusted', browser: 'chromium', headless: true } };
     const seen = [];
 
     /** A Network-paired machine of `owner` whose fake Node answers computer commands like the plugin would. */
@@ -33,6 +33,7 @@ const { boot, check, done } = require('./helpers/app');
             else if (m.kind === 'fs') c.send(frame('ack', { id: m.id, data: { path: m.value.path, entries: [], total: 0, truncated: false } }));
             else if (m.kind === 'probe') c.send(frame('ack', { id: m.id, data: { status: 200, body: '{"up":true}', ms: 3 } }));
             else if (m.kind === 'input') c.send(frame('ack', { id: m.id, data: { done: true, action: m.value.action } }));
+            else if (m.kind === 'browser') c.send(frame('ack', { id: m.id, data: { url: m.value.url || 'https://example.org/', title: 'Example', text: 'Example page', truncated: false, links: [] } }));
             else c.send(frame('nack', { id: m.id, fault_code: 'not_allowed', message: 'this machine allows observing only' }));
         });
         await poll(() => t.hub.computerOf(deviceId) !== null || !computer);
@@ -73,6 +74,20 @@ const { boot, check, done } = require('./helpers/app');
         assert.deepStrictEqual(seen.filter((m) => m.kind === 'input').map((m) => m.value.action), ['type', 'click']);
         const shell = await cmd(mine.deviceId, { kind: 'input', value: { action: 'key', keys: 'ctrl+s; rm -rf ~' } }, { user: alex });
         assert.deepStrictEqual([shell.status, shell.json.code], [422, 'bot.invalid_input']);
+    });
+
+    await check('the browser kind reaches the machine; a file: address is refused before it leaves', async () => {
+        const open = await cmd(mine.deviceId, { kind: 'browser', value: { action: 'open', url: 'https://example.org/account?token=abc' } }, { user: alex });
+        assert.deepStrictEqual([open.status, open.json.result, open.json.data.title], [200, 'ack', 'Example']);
+        const fill = await cmd(mine.deviceId, { kind: 'browser', value: { action: 'fill', selector: '#password', text: 'hunter3 secret' } }, { user: alex });
+        assert.strictEqual(fill.json.result, 'ack');
+        assert.deepStrictEqual(seen.filter((m) => m.kind === 'browser').map((m) => m.value.action), ['open', 'fill']);
+        const file = await cmd(mine.deviceId, { kind: 'browser', value: { action: 'open', url: 'file:///etc/passwd' } }, { user: alex });
+        assert.deepStrictEqual([file.status, file.json.code], [422, 'bot.invalid_input']);
+        const rows = await t.db.many("SELECT * FROM command_audit WHERE robot_id = $1 AND kind = 'browser' AND result = 'ack' ORDER BY id", [mine.deviceId]);
+        assert.deepStrictEqual(rows.map((r) => r.value), [{ action: 'open', host: 'example.org' }, { action: 'fill', selector: '#password', chars: 14 }],
+            'the audit keeps the host (never the path or query) and how much was typed (never the text)');
+        assert.ok(!JSON.stringify(rows).includes('hunter3') && !JSON.stringify(rows).includes('token=abc'));
     });
 
     await check('the audit keeps what was asked in short, never stdin, arguments or content', async () => {

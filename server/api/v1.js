@@ -399,7 +399,7 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
             id: device.id, name: device.name || null, online: !!st.online, agent_computer: !!device.agent_computer, watch_probe: !!device.watch_probe,
             computer: offered ? {
                 level: typeof sensors.computer_level === 'string' ? sensors.computer_level : ((pick('files') || pick('terminal') || pick('screen') || {}).level || null),
-                terminal: pick('terminal'), files: pick('files'), screen: pick('screen'), probe: pick('probe'), input: pick('input'),
+                terminal: pick('terminal'), files: pick('files'), screen: pick('screen'), probe: pick('probe'), input: pick('input'), browser: pick('browser'),
                 waiting: Number.isInteger(sensors.computer_waiting) ? sensors.computer_waiting : null,
             } : null,
         };
