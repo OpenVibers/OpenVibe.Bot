@@ -794,9 +794,12 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         const at = iso(now());
         await db.tx(async (t) => {
             if (online) await t.query('UPDATE devices SET last_seen = $2 WHERE id = $1', [device.id, at]);
+            // The owner rides along (contracts 0.192.0): OpenVibe.Quest credits "Bring a robot online" from it.
+            const owners = new Map(robotIds.length ? (await t.many('SELECT id, owner_subject FROM robots WHERE id = ANY($1::text[])', [robotIds])).map((r) => [r.id, r.owner_subject]) : []);
             for (const robotId of robotIds) {
+                const owner = owners.get(robotId);
                 await emit(t, online ? 'bot.robot.online' : 'bot.robot.offline', { type: 'robot', id: robotId },
-                    { robot_id: robotId, device_id: device.id });
+                    { robot_id: robotId, device_id: device.id, ...(/^usr_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(owner || '')) ? { owner } : {}) });
             }
         });
     }

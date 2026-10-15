@@ -73,6 +73,10 @@ const { boot, check, done } = require('./helpers/app');
         await t.wait(50);
         const rows = await t.outboxRows('bot.robot.offline');
         assert.ok(rows.some((e) => e.payload.robot_id === robot.id), 'bot.robot.offline for the robot');
+        // Both events name the robot's owner (contracts 0.192.0), so Quest can credit "Bring a robot online".
+        assert.ok(rows.some((e) => e.payload.robot_id === robot.id && e.payload.owner === alex.subject), 'the owner on bot.robot.offline');
+        const online = await t.outboxRows('bot.robot.online');
+        assert.ok(online.some((e) => e.payload.robot_id === robot.id && e.payload.owner === alex.subject), 'the owner on bot.robot.online');
         dev.close();
     });
 
