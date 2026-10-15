@@ -601,6 +601,17 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         return updated;
     }
 
+    /**
+     * Network revoked a node principal (network.node.revoked: its owner, the pairing service or an account deletion):
+     * every live device bound to it is revoked here too, without asking Network again. → the revoked rows
+     */
+    async function revokeByNode(principalId) {
+        const at = iso(now());
+        const rows = await db.many('UPDATE devices SET revoked_at = $2, credential_prev_hash = NULL, prev_valid_until = NULL, updated_at = $2 WHERE node_principal = $1 AND revoked_at IS NULL RETURNING *', [String(principalId), at]);
+        if (rows.length) changed();
+        return rows;
+    }
+
     // ── Network-paired devices (node principals, T2 §9.2 B1) ──────────────────────────────────────
     /**
      * The live device bound to Network node principal `principalId`, creating it on first use. Idempotent:
@@ -1087,7 +1098,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
             localProfile, saveLocalProfile, useCatalogueProfile },
         members: { roleOf, add: addOperator, remove: removeOperator, list: listOperators },
         pairing: { create: createPairingCode, redeem, prune: prunePairingCodes, installerCommand, driverForProfile, whipUrl },
-        devices: { byCredential, bindNode, issuePublishKey, revokeVideo, updateDeclared, revokeNode, ensureServerDevice, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, touchSeen, setOnline, ownerOf, onChange },
+        devices: { byCredential, bindNode, issuePublishKey, revokeVideo, updateDeclared, revokeNode, ensureServerDevice, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, revokeByNode, touchSeen, setOnline, ownerOf, onChange },
         machines: { mint: mintMachine, list: listMachines, workerRef, setAgentComputer, setWatchProbe },
         streaming: { get: streaming, set: setStreaming },
         video: { live: liveVideo },

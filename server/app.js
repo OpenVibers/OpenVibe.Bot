@@ -131,7 +131,19 @@ function createApp(opts = {}) {
     const accountSend = opts.accountSend || (config.oauth.clientSecret
         ? createNetworkSender({ networkInternalUrl: config.network.internalUrl, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret, fetch: fetchImpl })
         : async () => { throw new Error('OV_OAUTH_CLIENT_SECRET is not set: Bot cannot answer account events'); });
-    app.post('/internal/events', accountData.consumer({ secrets: config.events.secrets, send: accountSend, log }));
+    // network.node.revoked (a person's paired machine revoked on Network): its devices are revoked and a live session is
+    // closed at once, instead of at the machine's next reauth deadline.
+    const onEvent = async (ev) => {
+        if (ev && ev.event_type === 'network.node.revoked') {
+            const principal = String((ev.payload && ev.payload.principal_id) || '');
+            if (!/^nod_[0-9A-HJKMNP-TV-Z]{26}$/.test(principal)) return 'applied';
+            const revoked = await domain.devices.revokeByNode(principal);
+            for (const d of revoked) hub.closeDevice(d.id, 'machine revoked on OpenVibe.Network');
+            if (revoked.length) log.log(`[Bot] node ${principal} revoked on Network: ${revoked.length} device(s) revoked`);
+        }
+        return 'applied';
+    };
+    app.post('/internal/events', accountData.consumer({ secrets: config.events.secrets, send: accountSend, onEvent, log }));
 
     // The OpenVibe Frame's scripts and the showcase stylesheet the front page links (content-hashed URLs).
     app.use('/shared', require('openvibe-shared/serve').handler());

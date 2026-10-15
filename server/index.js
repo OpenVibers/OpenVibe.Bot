@@ -19,7 +19,7 @@ const { seedProfiles } = require('./profiles');
 const { createApp } = require('./app');
 const { createValkey } = require('openvibe-sdk/valkey');
 const { gracefulStop } = require('openvibe-sdk/service');
-const { startSubscriptions } = require('openvibe-sdk/account-data');
+const { startSubscriptions, TOPICS } = require('openvibe-sdk/account-data');
 const { createRegistry } = require('openvibe-shared/metrics');
 
 async function main() {
@@ -68,7 +68,9 @@ async function main() {
     // kit's 5000 ms default is the right value.
     // The two account subscriptions at OpenVibe.Events (ADR-033), created when missing; off without EVENTS_URL,
     // BOT_EVENTS_SECRET or the client secret.
+    // Plus network.node.revoked: a machine revoked on Network is revoked here at once (app.js onEvent).
     const subscriptions = startSubscriptions({
+        topics: [...TOPICS, 'network.node.revoked'],
         eventsUrl: config.events.url, endpoint: `http://127.0.0.1:${config.port}/internal/events`, secret: config.events.secrets[0],
         networkInternalUrl: config.network.internalUrl, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret,
     });
