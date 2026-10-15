@@ -146,7 +146,7 @@ Set `BOT_ONVIF_CAMERAS` (JSON, unset by default) to the server-side cameras Bot 
 OpenVibe.Sites no longer generates `deploy/nginx/openvibe.bot.conf` (sites.json marks the vhost as owned by OpenVibe.Bot), and Bot serves nothing from a Sites checkout: the legal pages, `robots.txt`, `sitemap.xml`, `manifest.webmanifest` and the 404 page all come from the app. A Sites deploy leaves an installed vhost it no longer generates in place, so the current Sites vhost keeps serving openvibe.bot until Bot's first deploy installs this file over it; later Sites deploys never overwrite Bot's `/device` and `/control` routes.
 
 <!-- versions:start -->
-- openvibe-contracts: v0.188.2
+- openvibe-contracts: v0.192.0
 - openvibe-sdk: v0.46.0
 - openvibe-shared: v4.2.1
 <!-- versions:end -->
