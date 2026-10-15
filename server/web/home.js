@@ -70,9 +70,14 @@ function sections({ signedIn }) {
         ],
     }) + showcase.features({
         title: 'Robots it drives today',
+        // One card per robot profile Bot ships (server/profiles): what each one drives, said as its profile says it.
+        lede: 'Each has a profile the panel draws its controls from. ONVIF PTZ cameras and a generic relay, for anything a local script can switch, come with them.',
         items: [
             { icon: 'ov:check', title: 'Adeept 4WD Smart Car', text: 'The Raspberry Pi kit, with its parts list and build guide; a mecanum-wheel build has its own profile. The first robot on OpenVibe.Bot.' },
-            { icon: 'ov:check', title: 'Cozmo', text: 'Through the device agent on a computer next to it.' },
+            { icon: 'ov:check', title: 'ROS 2 robots', text: 'A TurtleBot 3 or 4, a Jackal or a home-built base on cmd_vel, mecanum and omni bases too: drive, camera, the distance ahead and the battery, through the OpenVibe Node.' },
+            { icon: 'ov:check', title: 'LOOI', text: 'The tracked desk robot with a phone for a face: drive and head tilt over Bluetooth from a computer running the OpenVibe Node and the community LOOI driver.' },
+            { icon: 'ov:check', title: 'Cozmo', text: 'Drive, head and lift, speech, its face display, lights and camera, through a computer next to it that joins the robot\'s Wi-Fi.' },
+            { icon: 'ov:check', title: 'A phone', text: 'Any phone as a robot\'s eyes, voice and face, from its browser with nothing to install: camera, speech, a full-screen face and its torch.' },
             { icon: 'ov:check', title: 'A simulated rover', text: 'A rover in a small arena with a camera, a range finder, line sensors, headlights and a horn. Drive it at /try in your browser, with no account and no hardware.' },
         ],
     }) + `<section class="sc-sec" id="build"><h2>Build for OpenVibe.Bot</h2>

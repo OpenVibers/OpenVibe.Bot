@@ -26,6 +26,10 @@ const { boot, check, done } = require('./helpers/app');
         assert.match(html, /<link rel="canonical" href="http:\/\/bot\.test\/">/);
         assert.match(html, /href="\/auth\/login\?next=%2Frobots">Sign in with OpenVibe/);
         assert.strictEqual((html.match(/<h1[ >]/g) || []).length, 1, 'one h1');
+        // Every robot Bot ships a profile for is on the front page: six cards under "Robots it drives today".
+        const robots = (/<section class="sc-sec"[^>]*aria-labelledby="sc-robots-it-drives-today"[\s\S]*?<\/section>/.exec(html) || [''])[0];
+        assert.deepStrictEqual([...robots.matchAll(/<b>([^<]+)<\/b>/g)].map((m) => m[1]), ['Adeept 4WD Smart Car', 'ROS 2 robots', 'LOOI', 'Cozmo', 'A phone', 'A simulated rover']);
+        for (const id of ['adeept.adr036', 'ros2.diffdrive', 'looi', 'cozmo', 'phone.camera', 'sim.rover']) assert.ok(require('fs').existsSync(require('path').join(__dirname, '..', 'server', 'profiles', `${id}.json`)), `${id} is a shipped profile`);
         const css = html.match(/href="(\/shared\/showcase\.css\?v=[0-9a-f]{12})"/);
         assert.ok(css, 'links the showcase stylesheet');
         const sheet = await get(css[1]);
@@ -37,7 +41,8 @@ const { boot, check, done } = require('./helpers/app');
     await check('GET /: no promise the service cannot keep (video waits for OpenRestream; no store, no unsupported boards)', async () => {
         const html = await (await get('/')).text();
         assert.match(html, /sends its camera over WebRTC to OpenRestream and the panel plays it live/);
-        for (const claim of [/ESP32/, /ROS 2/, /Android/, /arrive paired/i, /\bbuy\b/i, /webhook/i]) assert.ok(!claim.test(html), `no ${claim}`);
+        // ROS 2 left this list with Bot#95 (ros2.diffdrive, ros2.holonomic, the Node's plugins/ros2 driver).
+        for (const claim of [/ESP32/, /Android/, /arrive paired/i, /\bbuy\b/i, /webhook/i]) assert.ok(!claim.test(html), `no ${claim}`);
     });
 
     await check('GET /: signed in, the first action opens your robots', async () => {
