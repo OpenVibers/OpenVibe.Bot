@@ -38,8 +38,10 @@ const { HOME_CSP: SITE_CSP } = require('../server/web/home');
     await check('GET /docs/drivers: the guide, connection kinds, every message, safety rules and testing', async () => {
         const r = await get('/docs/drivers');
         assert.strictEqual(r.status, 200);
+        // Code blocks scroll sideways on a phone, so each is a keyboard stop (axe scrollable-region-focusable).
         assert.strictEqual(r.headers.get('content-security-policy'), SITE_CSP);
         const html = await r.text();
+        assert.ok(!/<pre(?![^>]*tabindex)[\s>]/.test(html), 'every <pre> is focusable');
         assert.match(html, /Write a driver/);
         assert.match(html, /stdin\/stdout/);
         assert.match(html, /openvibe_plugin/);

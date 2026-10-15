@@ -562,7 +562,7 @@ function renderPairingPage({ robot, pairing, profile = null, phoneUrl = null }) 
 <p class="muted">It opens the robot's page on the phone with this code filled in. Tap Pair, allow the camera, and keep the page open: the phone is the robot now. No app to install.</p>
 <p class="muted">No camera app handy? Open <b>openvibe.bot/device/phone</b> on the phone and enter the robot and code by hand: <code>${esc(robot.id)}</code></p></li>`
         : `<li class="card"><h2>Run this on the machine that serves the robot${profile ? ` <span class="pill">${esc(profile.name)}</span>` : ''}</h2>
-<pre class="installer"><code data-copy-source>${esc(pairing.installer)}</code></pre>
+<pre tabindex="0" class="installer"><code data-copy-source>${esc(pairing.installer)}</code></pre>
 <button type="button" class="copy" data-copy>${icon('copy')}<span data-copy-label>Copy the command</span></button></li>`;
     const body = `${topbar(`<span class="crumb">${esc(robot.name)}</span>`)}
 <main class="page pairing" data-pair-robot="${esc(robot.id)}">
@@ -620,11 +620,11 @@ function renderMachinesPage({ machines = [], pairing = null }) {
         : `<div class="empty">${icon('plug', 'icon empty-icon')}<p class="empty-title">No machines yet.</p><p>Add your computer or a server you own. It runs the jobs you start, such as a coding task on openvibe.codes, and nobody else's.</p></div>`;
     const add = pairing
         ? `<ol class="steps"><li class="card"><h2>Run this on the machine</h2>
-<pre class="installer"><code data-copy-source>${esc(pairing.installer)}</code></pre>
+<pre tabindex="0" class="installer"><code data-copy-source>${esc(pairing.installer)}</code></pre>
 <button type="button" class="copy" data-copy>${icon('copy')}<span data-copy-label>Copy the command</span></button>
 <p class="muted">Linux with systemd. It installs OpenVibe Node, turns its job worker on (jobs run as a separate user, in a sandbox, with the limits you set) and pairs the machine with your account. For coding jobs the machine also needs Node.js 22 or newer and git, and a coding agent: Claude Code, Codex, OpenCode, or a DeepSeek key.</p></li>
 <li class="card"><h2>Or let your agents use this computer</h2>
-<pre class="installer"><code>${esc(pairing.installer.replace(/ --worker$/, ' --computer ask'))}</code></pre>
+<pre tabindex="0" class="installer"><code>${esc(pairing.installer.replace(/ --worker$/, ' --computer ask'))}</code></pre>
 <p class="muted">Instead of running jobs, the machine's terminal, files and screen become usable by your agents, at the level you set on the machine: <code>ask</code> waits for <code>openvibe-node approve</code> there before anything runs or changes. The Node runs as your own account, never root. <a href="https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/computer.md">How it works</a>.</p></li>
 <li class="card"><h2>Or enter the pairing code</h2><p><strong class="code">${esc(pairing.code)}</strong></p>
 <p class="muted">Valid until <time datetime="${esc(pairing.expires_at)}">${esc(pairing.expires_at)}</time>. It works once.</p></li></ol>

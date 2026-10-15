@@ -271,7 +271,7 @@ function submissionRow(sub, { review = false, by = null } = {}) {
     const note = sub.review_note ? `<p class="muted">Reviewer: ${esc(sub.review_note)}</p>` : '';
     const done = sub.status === 'approved' ? `<p>${link(`/models/${sub.profile_id}`, 'Its model page')}</p>` : '';
     const withdraw = !review && sub.status === 'pending' ? `<form method="post" action="/robots/submissions/${esc(sub.id)}/withdraw"><button type="submit" class="dir-btn">Withdraw</button></form>` : '';
-    const decide = review ? `<details><summary>The profile</summary><pre class="dir-pre">${esc(JSON.stringify(p, null, 2))}</pre></details>
+    const decide = review ? `<details><summary>The profile</summary><pre tabindex="0" class="dir-pre">${esc(JSON.stringify(p, null, 2))}</pre></details>
 ${sub.notes ? `<p class="muted">Notes: ${esc(sub.notes)}</p>` : ''}
 <form class="dir-review" method="post" action="/robots/submissions/${esc(sub.id)}/review">
 <label class="dir-field dir-wide"><span class="dir-field-label">Note (needed to reject)</span><input type="text" name="note" maxlength="1000"></label>

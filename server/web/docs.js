@@ -6,7 +6,7 @@
  *
  * They are rendered with the app's own page helper (server/web/render.js, the one the robots page uses), which
  * emits the site stylesheet and no script at all, so these pages run under the site-wide `default-src 'self'`
- * CSP. Every value is escaped; the code samples are `<pre class="installer"><code>…</code></pre>`, escaped.
+ * CSP. Every value is escaped; the code samples are `<pre tabindex="0" class="installer"><code>…</code></pre>`, escaped.
  *
  *   renderDocsIndex({ config })                       GET /docs
  *   renderDriversPage({ config })                     GET /docs/drivers
@@ -24,8 +24,8 @@ const NODE = 'https://github.com/OpenVibers/OpenVibe.Node';
 const TREE = `${NODE}/tree/main`;
 const BLOB = `${NODE}/blob/main`;
 
-/** A code sample, in a `<pre><code>` block, escaped. */
-const code = (text) => `<pre class="installer"><code>${esc(text)}</code></pre>`;
+/** A code sample, in a `<pre tabindex="0"><code>` block, escaped. */
+const code = (text) => `<pre tabindex="0" class="installer"><code>${esc(text)}</code></pre>`;
 /** An external link (openvibe.bot's CSP allows none of these origins in a frame, so it is a plain link). */
 const out = (href, text) => `<a href="${esc(href)}" rel="noopener">${esc(text)}</a>`;
 /** A link on this site. */
