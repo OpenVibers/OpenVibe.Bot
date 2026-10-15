@@ -46,6 +46,8 @@ const { loadProfiles } = require('../server/profiles');
         assert.strictEqual(r.headers.get('set-cookie'), null);
         assert.doesNotMatch(r.headers.get('content-security-policy') || '', /esm\.sh|openre/, 'no outside script or socket');
         const html = await r.text();
+        // The description fits a search result (at most 160 characters).
+        { const d = (/<meta name="description" content="([^"]*)"/.exec(html) || [])[1] || ''; assert.ok(d.length >= 50 && d.length <= 160, `description ${d.length}: ${d}`); }
         assert.ok(html.includes('data-transport="local"') && html.includes('data-role="owner"') && html.includes('data-sim-camera'));
         const scripts = [...html.matchAll(/<script src="([^"]+)" defer><\/script>/g)].map((m) => m[1]);
         assert.deepStrictEqual(scripts, ['/panel/sim-world.js', '/panel/try-device.js', '/panel/panel.js', '/panel/sim-view.js'], 'the rover and its socket before the panel, the camera after');

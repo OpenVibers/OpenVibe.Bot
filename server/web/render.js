@@ -467,8 +467,7 @@ ${tryIt ? tryOutro(profile) : ''}${role === 'owner' && !embed && !tryIt ? `<div 
     });
 }
 
-const TRY_DESCRIPTION = 'Drive a simulated rover from your browser, no account and no hardware: the same OpenVibe.Bot panel, '
-    + 'safety gate and e-stop a real robot gets, with a live camera, a distance sensor, line sensors, headlights and a horn.';
+const TRY_DESCRIPTION = 'Drive a simulated rover from your browser with no account or hardware: the same Bot panel, safety gate and e-stop a real robot gets, with a live camera.';
 
 /** /try's opening lines: what this is, and that nothing here is real hardware. */
 function tryIntro() {
