@@ -35,6 +35,15 @@
     const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
     const wsUrl = (path = '/control') => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${path}`;
 
+    // The camera pins under the sticky e-stop bar on phones (public/panel.css): the bar's height, kept current as it
+    // wraps, rotates or shows the latched note.
+    const banner = $('[data-estop-banner]');
+    if (banner) {
+        const setTop = () => document.documentElement.style.setProperty('--banner-h', `${banner.offsetHeight}px`);
+        setTop();
+        if ('ResizeObserver' in window) new ResizeObserver(setTop).observe(banner); else window.addEventListener('resize', setTop);
+    }
+
     for (const b of $$('[data-copy]')) {
         b.addEventListener('click', () => {
             const src = $('[data-copy-source]');
