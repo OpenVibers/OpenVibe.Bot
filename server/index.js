@@ -48,6 +48,8 @@ async function main() {
         routines.start();   // scheduled routines (server/routines.js)
         webhooks.start();   // robot webhook deliveries (server/webhooks.js)
         offers.start();     // the worker offers of the machines connected here, to Network (server/jobs/offers.js)
+        // The model pages in OpenVibe.Search (server/search-index.js; off without BOT_SEARCH_URL).
+        require('./search-index').createModelSearchIndex({ config, db, log: console }).start();
     }
 
     const server = app.listen(config.port, config.host, () => {

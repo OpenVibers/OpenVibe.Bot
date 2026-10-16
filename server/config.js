@@ -146,6 +146,8 @@ function loadConfig(env = process.env) {
             scope: env.OV_OAUTH_SCOPE || 'profile',
         },
         cookies: { secure: env.COOKIE_SECURE != null ? bool(env.COOKIE_SECURE) : isProduction },
+        // OpenVibe.Search's owner API (server/search-index.js): the model pages as Search documents. Unset: off.
+        search: { url: trim(env.BOT_SEARCH_URL || '') },
 
         events: {
             url: trim(env.EVENTS_URL || ''),
