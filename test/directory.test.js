@@ -28,7 +28,7 @@ const { loadProfiles } = require('../server/profiles');
         for (const p of profiles) assert.ok(html.includes(`href="/models/${p.id}"`), p.id);
         assert.ok(html.includes('href="/try"') && html.includes('Sign in and add a robot'));
         assert.ok(!html.includes('Your robots') && !html.includes('Garage rover'), 'an unlisted robot is nobody else\'s business');
-        assert.ok(html.includes('No robot is listed yet.'));
+        assert.ok(html.includes('<a class="dir-card-link" href="/try"><span class="dir-card-head"><b>Simulated rover</b>'), 'the simulated rover is always the first robot to drive');
     });
 
     await check('signed in: your robots, each marked listed or not, and Add a robot', async () => {

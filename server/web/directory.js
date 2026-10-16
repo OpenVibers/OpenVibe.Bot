@@ -138,6 +138,12 @@ function robotCard(r) {
         + `<p class="dir-card-foot">${esc(POLICY_WORDS[r.access_policy] || '')}</p></li>`;
 }
 
+// The simulated rover anyone can drive (/try): always the first card, so the directory shows a robot to drive today.
+const DEMO_CARD = '<li class="dir-card"><a class="dir-card-link" href="/try"><span class="dir-card-head"><b>Simulated rover</b>'
+    + '<span class="dir-state" data-state="online"><span class="dir-dot"></span>Online</span></span>'
+    + '<span class="dir-card-text">Runs in your browser · OpenVibe.Bot</span></a>'
+    + '<p class="dir-card-foot">Anyone can drive it, no account needed</p></li>';
+
 // ── GET /robots ─────────────────────────────────────────────────────────────────────────────────────
 function renderDirectory({ config, listed = [], mine = null, models = [], signedIn = false }) {
     const yours = !signedIn ? `<section class="dir-sec dir-cta"><h2>Have a robot?</h2>
@@ -152,8 +158,8 @@ ${mine && mine.length ? `<ul class="dir-list">${mine.map((r) => `<li class="dir-
 <p class="muted">Robots people share on OpenVibe.Bot, and every model it drives. Watch any listed robot live; some take visitors at the controls in turns.</p></header>
 ${yours}
 <section class="dir-sec" aria-labelledby="listed-h"><h2 id="listed-h">In the directory</h2>
-${listed.length ? `<ul class="dir-grid">${listed.map(robotCard).join('')}</ul>`
-        : `<p class="muted">No robot is listed yet. An owner lists theirs from its panel (Directory), and it shows here with its live camera.</p>`}</section>
+<ul class="dir-grid">${DEMO_CARD}${listed.map(robotCard).join('')}</ul>
+${listed.length ? '' : '<p class="muted">Owners list their robots from the panel (Directory), and each shows here with its live camera.</p>'}</section>
 <section class="dir-sec" aria-labelledby="models-h"><div class="dir-sec-head"><h2 id="models-h">Models it drives</h2>${link('/models', 'All models')}</div>
 <ul class="dir-grid">${sortModels(models).map(modelCard).join('')}</ul></section>
 <section class="dir-sec" aria-labelledby="byo-h"><h2 id="byo-h">Something else?</h2>
