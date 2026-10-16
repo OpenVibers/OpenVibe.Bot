@@ -61,5 +61,5 @@
     "server-side ONVIF cameras (profile camera.onvif, driver onvif, server/onvif): an in-process device beside the simulator attaches a camera configured with BOT_ONVIF_CAMERAS (its URL plus username_ref/password_ref secret references, never in the profile or in clear), writes a real kind server device row, translates ptz commands to ONVIF ContinuousMove/Stop with the profile deadline as a deadman, and carries the camera's GetStatus readout in telemetry; every request goes only to the configured host, with a timeout and no redirects",
     "a person's own machines that run their jobs (/machines: add with a --worker command, list, remove); their worker offers reported to Network as user-owned offers naming the owner; jobs reach a machine only for its owner (plan T14/T16)"
   ],
-  "updated": "2026-10-15"
+  "updated": "2026-10-16"
 }
