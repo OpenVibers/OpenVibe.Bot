@@ -120,6 +120,8 @@ Production runs the Node process under systemd as `openvibe-bot.service` (unit r
 
 To run the schema migrations before the service serves, start it once with the direct owner connection in `/etc/openvibe/bot.env` (`DATABASE_DIRECT_URL`); the boot applies `migrations/` and then serves on the pooled `DATABASE_URL`.
 
+Search: every robot model page (`/models/<id>`) is an OpenVibe.Search document (owner `bot`, type `model`) written through Search's owner API with Bot's service token (`search.document.write`; `server/search-index.js`, `BOT_SEARCH_URL`), a minute after boot and every six hours; a model that leaves the catalogue is tombstoned.
+
 Request telemetry: each HTTP request is aggregated by route template, method and status class, never by raw URL, and `/shared` files, static assets, health, readiness and `/metrics` are not counted. Once a minute one `http.request` sample per key, plus the active-requests, p95 latency and event-loop-lag gauges, is written to Bot's own `telemetry_samples` table (migration `0018_telemetry.sql`; openvibe-sdk 0.46 telemetry, the `platform.telemetry-sample@1` shape), and rows older than 14 days are deleted daily. `server/app.js` mounts openvibe-sdk's `telemetryMiddleware` (a no-op until init); `server/index.js` calls `telemetry.init()` at production start, runs the retention and flushes on stop.
 
 Set `BOT_PAIRING_AUTHORITY` to `bot` (the default) or `network`; any other value refuses to boot.
