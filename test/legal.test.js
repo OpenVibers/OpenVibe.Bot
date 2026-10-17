@@ -63,6 +63,8 @@ const { boot, check, done } = require('./helpers/app');
         assert.strictEqual(m.name, 'OpenVibe.Bot');
         assert.strictEqual(m.short_name, 'Bot');
         assert.strictEqual(m.start_url, '/');
+        // Its icons are the shared set the site serves under /shared/icons (it named /assets/logo-*.png, never served).
+        assert.ok(m.icons.length === 4 && m.icons.every((i) => /^\/shared\/icons\/[a-z0-9-]+-(maskable-)?(192|512)\.png\?v=/.test(i.src)), JSON.stringify(m.icons));
         assert.ok(Array.isArray(m.icons) && m.icons.length > 0, 'has icons');
     });
 

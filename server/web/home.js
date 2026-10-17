@@ -103,7 +103,7 @@ function framePage({ config, title, description, canonicalPath = '/', body, head
         canonical: `${config.baseUrl}${canonicalPath}`, robots: 'index, follow',
         navbar: nav, footer: { service: 'bot', variant: 'full', mount: '#ov-footer', brandName: SITE_NAME, updates: '/updates' }, home: '/',
         navLinks: [{ label: 'Robots', href: '/robots' }, { label: 'Build', href: '/docs' }],
-        head: [appIcon.headTags({ site: 'bot' }), '<link rel="manifest" href="/manifest.webmanifest">', head].filter(Boolean).join('\n'),
+        head: [appIcon.headTags({ site: 'bot' }), '<link rel="manifest" href="/manifest.webmanifest">', `<link rel="apple-touch-icon" href="${require('openvibe-shared/app-icons').url('bot', 192)}">`, head].filter(Boolean).join('\n'),
         body: `<div id="navbar-mount"></div>\n${body}`,
     });
 }
@@ -139,7 +139,7 @@ function renderHome({ config, signedIn = false }) {
         navbar: nav, footer, home: '/', navLinks: [{ label: 'Robots', href: '/robots' }, { label: 'Build', href: '/docs' }],
         head: [
             appIcon.headTags({ site: 'bot' }),
-            '<link rel="manifest" href="/manifest.webmanifest">',
+            '<link rel="manifest" href="/manifest.webmanifest">', `<link rel="apple-touch-icon" href="${require('openvibe-shared/app-icons').url('bot', 192)}">`,
             `<link rel="stylesheet" href="${ovServe.url(showcase.STYLESHEET)}">`,
         ].join('\n'),
         body: `<div id="navbar-mount"></div>

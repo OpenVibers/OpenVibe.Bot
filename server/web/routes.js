@@ -173,11 +173,13 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     })));
     // Browsers ask for /favicon.ico on their own (a 404 page links no icon): the app icon, as SVG.
     r.get('/favicon.ico', (req, res) => res.type('image/svg+xml').set('Cache-Control', 'public, max-age=86400').send(appIcon.favicon({ site: 'bot' })));
-    // The web app manifest (openvibe-shared/app-icon): the same icon design and start URL every OpenVibe site ships.
+    // The web app manifest. Its icons are the shared set (openvibe-shared/app-icons, under /shared/icons): it named
+    // /assets/logo-*.png, which this site never served (every install icon was a 404 until 2026-10-17).
     r.get('/manifest.webmanifest', (req, res) => {
-        res.type('application/manifest+json').send(JSON.stringify(appIcon.manifest({
-            site: 'bot', name: 'OpenVibe.Bot', shortName: 'Bot', description: SITE_TAGLINE, startUrl: '/',
-        })));
+        res.type('application/manifest+json').send(JSON.stringify({
+            ...appIcon.manifest({ site: 'bot', name: 'OpenVibe.Bot', shortName: 'Bot', description: SITE_TAGLINE, startUrl: '/' }),
+            icons: [192, 512].flatMap((s) => [false, true].map((maskable) => ({ src: require('openvibe-shared/app-icons').url('bot', s, { maskable }), sizes: `${s}x${s}`, type: 'image/png', purpose: maskable ? 'maskable' : 'any' }))),
+        }));
     });
     if (!domain) return r;
 
