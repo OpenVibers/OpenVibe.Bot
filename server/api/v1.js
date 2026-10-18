@@ -31,6 +31,8 @@
  * | POST   /robots/:id/streaming                    | bot.robot.manage       | the owner                           |
  * | POST   /jobs, /jobs/:id/cancel, GET /jobs/:id   | bot.job.dispatch       | — (services only)                   |
  * | POST   /pair                                    | — (one-time code)      | the agent (code is the credential)  |
+ * | POST   /claims                                  | — (anyone)             | a device asking to be added: a code |
+ * | GET    /claims/:id                              | — (X-OV-Claim-Secret)  | that device: pending, or its pairing|
  *
  * With BOT_PAIRING_AUTHORITY=network the pairing codes are Network's and POST /pair answers 410 bot.pairing_moved.
  */
@@ -64,7 +66,7 @@ const MACHINE_SERVICES = {
     'svc:watch': { kinds: new Set(['probe']), flag: 'watch_probe', off: 'the owner has not let their watches check things from this computer' },
 };
 
-function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, submissions = null, routines = null, webhooks = null }) {
+function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, submissions = null, routines = null, webhooks = null, claims = null }) {
     const r = express.Router();
     r.use(limits.reads('bot.read'));
     // Control first (bot.resource.control), then the index (bot.resource.read) for everything else under /resources.
@@ -549,6 +551,24 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
             capabilities: req.body?.capabilities && typeof req.body.capabilities === 'object' ? req.body.capabilities : {}, name: req.body?.name || null,
         });
         res.status(201).json({ device_id: result.device.id, credential: result.credential, ...domain.present.video(result), robot_id: json(result.device.robot_ids, [])[0], profile: result.profile });
+    }));
+
+    // ── A device asking to be added (server/claims.js): the installer run with no robot and no code ─
+    // Anyone may start one: it only makes a code for a signed-in person to approve on /link. Only the secret the start
+    // answered reads it back (a header of its own, so it is never taken for a token). Both are counted by address.
+    const claimStart = limits('bot.claim', { minute: 6, hour: 40 });
+    const claimPoll = limits('bot.claim.poll', { minute: 40, hour: 1200 });
+    const needClaims = () => { if (!claims) fail(503, 'bot.unavailable', 'adding a device by code is not available here'); };
+    r.post('/claims', claimStart, wrap(async (req, res) => {
+        needClaims();
+        const out = await claims.start({ hostname: req.body?.hostname, hardware: req.body?.hardware, address: req.ip || null });
+        res.setHeader('Cache-Control', 'no-store');
+        res.status(201).json(out);
+    }));
+    r.get('/claims/:id', claimPoll, wrap(async (req, res) => {
+        needClaims();
+        res.setHeader('Cache-Control', 'no-store');
+        res.json(await claims.poll(req.params.id, String(req.headers['x-ov-claim-secret'] || '')));
     }));
 
     // ── Bootstrap of a Network-paired machine (its node token, once after pairing) ────────────────

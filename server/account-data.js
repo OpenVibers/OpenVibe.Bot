@@ -29,6 +29,8 @@ const TABLES = [
     { table: 'pairing_codes', subject: 'created_by', file: null, erase: anonymize },
     { table: 'robot_operators', subject: 'added_by', file: null, erase: anonymize },
     { table: 'live_conversions', subject: 'owner_subject', file: null },
+    // A device's request to be added (server/claims.js): who approved or denied it. Short-lived; erased with the account.
+    { table: 'device_claims', subject: 'owner_subject', file: null },
     { table: 'run_jobs', subject: 'subject', value: (usr) => [usr, `user:${usr}`], file: 'run-jobs.json', columns: ['id', 'class', 'state', 'wall_ms', 'exit_reason', 'created_at', 'finished_at'], erase: { keep: 'usage seconds reported to Billing' } },
     // Community robot profiles: the person's own submissions are exported; on deletion the ones still waiting, refused or
     // withdrawn go (extraErase) and an approved one stays in the catalogue, authorless (robots may use it).

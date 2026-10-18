@@ -235,6 +235,8 @@ function renderAddRobot({ config, models = [], values = {}, error = null }) {
         .map(([k, title]) => [title, sortModels(models).filter((m) => m.connect === k)]).filter(([, ms]) => ms.length);
     const body = `<p class="dir-crumb">${link('/robots', 'Robots')}</p>
 <header class="dir-hero"><h1>Add a robot</h1><p class="muted">Name it, say what it is, and choose who may drive. A simulated rover drives the moment it is added; anything else gets a one-time pairing code and one command to paste on its computer.</p></header>
+<section class="dir-form" aria-labelledby="add-from-device"><h2 id="add-from-device" class="dir-field-label">At the robot already? Start there</h2>
+<p class="muted">On its Raspberry Pi (or other Linux computer) run <code>curl -fsSL ${esc(config.installer.scriptUrl)} | sh</code>. It finds the kit (an Adeept ADR036 4WD and the other models below), turns on what it needs, and shows a code: enter it at ${link('/link', 'openvibe.bot/link')} and approve it. Nothing else to fill in here.</p></section>
 <form class="dir-form" method="post" action="/robots">
 ${error ? `<p class="dir-error" role="alert">${esc(error)}</p>` : ''}
 <label class="dir-field"><span class="dir-field-label">Name</span><input type="text" name="name" maxlength="80" required autocomplete="off" placeholder="e.g. Kitchen rover" value="${esc(values.name || '')}"></label>
