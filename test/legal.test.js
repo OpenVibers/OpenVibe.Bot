@@ -42,10 +42,11 @@ const { boot, check, done } = require('./helpers/app');
         assert.strictEqual(r.status, 200);
         assert.match(r.headers.get('content-type'), /xml/);
         const xml = await r.text();
-        for (const p of ['/', '/install', '/terms', '/privacy', '/dmca']) {
+        for (const p of ['/', '/terms', '/privacy', '/dmca']) {
             assert.ok(xml.includes(`<loc>http://bot.test${p}</loc>`), `sitemap lists ${p}`);
         }
-        assert.ok(assertSitemapLastmods(xml).length >= 5);
+        assert.ok(!xml.includes('<loc>http://bot.test/install</loc>'), 'not /install, a redirect to the installer script');
+        assert.ok(assertSitemapLastmods(xml).length >= 4);
     });
 
     await check('GET /favicon.ico: the app icon as SVG (browsers ask for it even on a 404 page)', async () => {

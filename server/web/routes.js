@@ -51,8 +51,9 @@ const TRY_PROFILE = loadProfiles().get('sim.rover');
 // The tagline stated for openvibe.bot (openvibe-contracts manifests/services/bot.json site.tagline).
 const SITE_TAGLINE = 'An open control panel for robots';
 // Every public GET page, for the sitemap. The interactive pages (/robots, /pair/, /panel/) need a session and
-// are Disallowed in robots.txt; the API and sign-in are not pages.
-const PUBLIC_PAGES = ['/', '/try', '/robots', '/models', '/install', '/docs', '/docs/drivers', '/docs/profiles', '/docs/automation', '/docs/computers', '/updates', '/terms', '/privacy', '/dmca'];
+// are Disallowed in robots.txt; the API and sign-in are not pages, and neither is /install (a 302 to the installer
+// script: a sitemap that lists a redirect wastes the crawl on it).
+const PUBLIC_PAGES = ['/', '/try', '/robots', '/models', '/docs', '/docs/drivers', '/docs/profiles', '/docs/automation', '/docs/computers', '/updates', '/terms', '/privacy', '/dmca'];
 // The public pages an AI crawler can read, for /llms.txt and /llms-full.txt (llmstxt.org). Same pages as the
 // sitemap minus /install (a 302 to the installer script, not a page); no signed-in or per-robot page, nothing
 // under the API or /internal. `note` is the one-line llms.txt entry, `text` the page's full text in llms-full.txt,
