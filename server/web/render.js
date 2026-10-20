@@ -15,6 +15,8 @@
  *   renderWidget(widget, { profile, allowed_commands })
  *   renderRobotsPage({ robots, profiles, error, values })
  *   renderPairingPage({ robot, pairing, profile })
+ *   renderLinkPage({ code, error, installer }), renderClaimPage({ claim, models, values, error }),
+ *   renderClaimApproved({ robot, profile, live, chatUrl })   /link: a device that asked to be added (server/claims.js)
  *   camerasOf(profile)
  *   esc(value)
  */
@@ -579,6 +581,76 @@ ${first}
 }
 
 /**
+ * /link (server/claims.js): the code a device shows after `curl -fsSL https://openvibe.bot/install | sh` with no code.
+ * renderLinkPage asks for it; renderClaimPage shows what that device found and the choices its robot starts with;
+ * renderClaimApproved follows the device as it pairs on its own.
+ */
+function renderLinkPage({ code = '', error = null, installer = 'curl -fsSL https://openvibe.bot/install | sh' } = {}) {
+    const body = `${topbar('<span class="crumb">Add a device</span>')}
+<main class="page link">
+<h1>Add a device</h1>
+<form class="card" method="get" action="/link">
+<p>Enter the code the robot's computer shows. It shows one when you run this on it:</p>
+<pre tabindex="0" class="installer"><code>${esc(installer)}</code></pre>
+${error ? `<p class="error" role="alert">${esc(error)}</p>` : ''}
+<label class="field"><span class="field-label">Code</span><input type="text" name="code" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="12" placeholder="XXXX-XXXX" value="${esc(code)}" required autofocus></label>
+<button type="submit" class="primary">Continue</button>
+</form>
+</main>`;
+    return page('Add a device', body);
+}
+
+function renderClaimPage({ claim, models = [], values = {}, error = null, now = Date.now() }) {
+    const hw = claim.hardware || {};
+    const minutes = (ms) => Math.max(0, Math.round(ms / 60000));
+    const asked = minutes(now - new Date(claim.created_at).getTime());
+    const left = minutes(new Date(claim.expires_at).getTime() - now);
+    const suggested = models.some((m) => m.id === claim.suggested_profile) ? claim.suggested_profile : null;
+    const chosen = values.profile_id || suggested || (models[0] && models[0].id);
+    const facts = [
+        ['Computer', [hw.model, hw.os, hw.arch].filter(Boolean).join(' · ') || 'not reported'],
+        ['It found', (hw.found && hw.found.length ? hw.found.join(', ') : '') || hw.kit_name || 'no kit it knows'],
+        ['Camera', hw.camera || 'none found'],
+        ['Asked', `${asked < 1 ? 'just now' : `${asked} min ago`}${claim.address ? ` from ${claim.address}` : ''}`],
+    ];
+    const option = (m) => `<option value="${esc(m.id)}"${m.id === chosen ? ' selected' : ''}>${esc(m.name)}${m.id === suggested ? ' (found on it)' : ''}</option>`;
+    const policy = values.access_policy || 'private';
+    const live = values.live !== false;
+    const body = `${topbar('<span class="crumb">Add a device</span>')}
+<main class="page link">
+<h1>Add ${esc(claim.hostname)}?</h1>
+<p class="muted">Only approve a device you set up yourself, just now. If you did not run the command on it, deny it.</p>
+<dl class="card facts">${facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
+<form class="card" method="post" action="/link/${esc(claim.id)}/approve">
+${error ? `<p class="error" role="alert">${esc(error)}</p>` : ''}
+<label class="field"><span class="field-label">Name</span><input type="text" name="name" maxlength="80" required autocomplete="off" value="${esc(values.name != null ? values.name : claim.hostname)}"></label>
+<label class="field"><span class="field-label">Model</span><select name="profile_id">${models.map(option).join('')}</select></label>
+<label class="field"><span class="field-label">Who may drive</span><select name="access_policy">${POLICIES.map(([v, label]) => `<option value="${esc(v)}"${v === policy ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select></label>
+<label class="field check"><input type="checkbox" name="live" value="on"${live ? ' checked' : ''}> <span>Show its camera on my OpenVibe.Live channel</span></label>
+<button type="submit" class="primary">Approve</button>
+</form>
+<form method="post" action="/link/${esc(claim.id)}/deny"><button type="submit" class="quiet">Deny</button> <span class="muted">This code works for ${left} more minute${left === 1 ? '' : 's'}.</span></form>
+</main>`;
+    return page(`Add ${claim.hostname}`, body);
+}
+
+function renderClaimApproved({ robot, profile = null, live = false, chatUrl = null }) {
+    const body = `${topbar(`<span class="crumb">${esc(robot.name)}</span>`)}
+<main class="page pairing" data-pair-robot="${esc(robot.id)}">
+<h1>${esc(robot.name)} is yours</h1>
+<p class="pair-status" data-pair-status data-state="waiting" role="status" aria-live="polite"><span class="dot"></span><span data-pair-text>Waiting for the device.</span> <a class="button primary" href="/panel/${esc(robot.id)}" data-pair-open hidden>Open the panel</a></p>
+<ol class="steps">
+<li class="card"><h2>The device carries on by itself${profile ? ` <span class="pill">${esc(profile.name)}</span>` : ''}</h2>
+<p class="muted">It pairs, starts its driver and its camera, and prints its panel link. This page turns green when it connects.</p></li>
+${live ? '<li class="card"><h2>On your Live channel</h2><p class="muted">Its camera goes on your OpenVibe.Live channel once it is streaming. Turn that off any time on its panel.</p></li>' : ''}
+${chatUrl ? `<li class="card"><h2>Drive it from your chat</h2><p class="muted">Let your channel's chat commands (!forward, !left, !say …) drive this robot.</p><p><a class="button" href="${esc(chatUrl)}">Use it in my OpenVibe.Live chat</a></p></li>` : ''}
+</ol>
+<p class="muted"><a href="/panel/${esc(robot.id)}">Open the panel</a> any time.</p>
+</main>`;
+    return page(`${robot.name} is yours`, body, { scripts: ['/panel/panel.js'] });
+}
+
+/**
  * /machines (plan T14/T16): a person's own machines that run jobs for them, and the command that adds one. A machine
  * here runs its owner's jobs only (Bot refuses anyone else's), connects out, and keeps its local limits and kill switch.
  */
@@ -709,4 +781,4 @@ function renderPhonePage() {
     return page('This phone is a robot', body, { scripts: ['/panel/phone-device.js'], bodyClass: 'phone-page', description: 'Turn a phone into a robot on OpenVibe.Bot from its browser: its camera, voice and face, with nothing to install.', canonical: '/device/phone' });
 }
 
-module.exports = { page, renderPanel, renderPhonePage, renderMachinesPage, renderMachineScreenPage, panelScripts, isSim, TRY_DESCRIPTION, renderEmbedRefused, renderDrivePage, renderWidget, renderRobotsPage, renderPairingPage, camerasOf, esc };
+module.exports = { page, renderPanel, renderPhonePage, renderMachinesPage, renderMachineScreenPage, panelScripts, isSim, TRY_DESCRIPTION, renderEmbedRefused, renderDrivePage, renderWidget, renderRobotsPage, renderPairingPage, renderLinkPage, renderClaimPage, renderClaimApproved, camerasOf, esc };

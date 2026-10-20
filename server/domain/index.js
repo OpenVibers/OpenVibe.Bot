@@ -298,6 +298,15 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     }
 
     // ── Pairing (ADR-043 decision 2) ──────────────────────────────────────────────────────────────
+    // What runs once a robot's device has paired (its stream exists from then on): a device claim's choices
+    // (server/claims.js). A hook that fails is logged; the pairing stands.
+    const pairedHooks = [];
+    const onPaired = (fn) => { pairedHooks.push(fn); };
+    async function paired(robotId) {
+        for (const fn of pairedHooks) {
+            try { await fn(robotId); } catch (e) { log.warn(`[Bot] after pairing ${robotId}: ${e.message}`); }
+        }
+    }
     const networkPairing = () => config.pairing.authority === 'network';
     async function createPairingCode(robotId, createdBy, installerUrl, robotRow = null) {
         const robot = robotRow || await getRobot(robotId);
@@ -383,6 +392,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
             return { device, credential, issued, robot_id: row.robot_id };
         });
         if (result.error) fail(result.error[0], result.error[1], result.error[2]);
+        await paired(result.robot_id);
         const profile = await getProfile(db, (await getRobot(result.robot_id)).profile_id);
         return { device: result.device, credential: result.credential, ...videoKey(result.issued), profile: profile ? profile.profile : null };
     }
@@ -767,6 +777,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
                 [id, !!issued, issued ? issued.hint : null, iso(now())]);
         });
         if (!device) fail(404, 'bot.device_not_found', 'no live device');
+        if (robot) await paired(robot.id);   // a Network-paired machine's first key (and any later one)
         const profile = robot ? await getProfile(db, robot.profile_id) : null;
         return { device, ...videoKey(issued), profile: profile ? profile.profile : null };
     }
@@ -1159,7 +1170,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         robots: { create: createRobot, list: listRobots, get: getRobot, update: updateRobot, setEmbedPublic, setListed, listListed, setAgentControl, remove: removeRobot,
             localProfile, saveLocalProfile, useCatalogueProfile },
         members: { roleOf, add: addOperator, remove: removeOperator, list: listOperators },
-        pairing: { create: createPairingCode, redeem, prune: prunePairingCodes, installerCommand, driverForProfile, whipUrl },
+        pairing: { create: createPairingCode, redeem, prune: prunePairingCodes, installerCommand, driverForProfile, whipUrl, onPaired },
         devices: { byCredential, bindNode, issuePublishKey, revokeVideo, updateDeclared, revokeNode, ensureServerDevice, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, revokeByNode, touchSeen, setOnline, ownerOf, onChange },
         machines: { mint: mintMachine, list: listMachines, workerRef, setAgentComputer, setWatchProbe,
             screen: { key: screenKey, live: screenLive, end: screenEnd, archive: screenArchive } },

@@ -36,7 +36,7 @@ const { getProfile, listProfiles, loadProfiles } = require('../profiles');
 const { frameAncestors } = require('../config');
 const { BotError } = require('../util');
 const kits = require('../kits');
-const { renderPanel, renderEmbedRefused, renderDrivePage, renderPairingPage, renderPhonePage, renderMachinesPage, renderMachineScreenPage } = require('./render');
+const { renderPanel, renderEmbedRefused, renderDrivePage, renderPairingPage, renderPhonePage, renderMachinesPage, renderMachineScreenPage, renderLinkPage, renderClaimPage, renderClaimApproved } = require('./render');
 const { createMachineScreen } = require('../machine-screen');
 const { renderDocsIndex, renderDriversPage, renderProfilesPage, renderAutomationPage, renderComputersPage } = require('./docs');
 const { checkProfile } = require('../profiles');
@@ -140,11 +140,11 @@ const PANEL_CSP = ["default-src 'self'", `script-src 'self' ${PANEL_SCRIPT_SRC}`
 const embedCsp = (config) => ["default-src 'self'", `script-src 'self' ${PANEL_SCRIPT_SRC}`, `connect-src 'self' ${PANEL_CONNECT_SRC}`,
     `frame-ancestors ${frameAncestors(config)}`, "object-src 'none'", "base-uri 'self'"].join('; ');
 
-function createWebRoutes(config, { domain = null, sim = null, onvif = null, limits = null, identity = null, hub = null, log = console, submissions = null, routines = null, webhooks = null, releaseLastmod } = {}) {
+function createWebRoutes(config, { domain = null, sim = null, onvif = null, limits = null, identity = null, hub = null, log = console, submissions = null, routines = null, webhooks = null, claims = null, releaseLastmod } = {}) {
     const r = express.Router();
     // The public front page is crawlable; sign-in, the API and every signed-in or per-robot page are not.
     r.get('/robots.txt', (req, res) => res.type('text/plain').send(['User-agent: *', 'Allow: /$', 'Disallow: /auth/', 'Disallow: /api/',
-        'Disallow: /robots/new', 'Disallow: /robots/submit', 'Disallow: /robots/submissions', 'Disallow: /pair/', 'Disallow: /panel/', 'Disallow: /install', `Sitemap: ${config.baseUrl}/sitemap.xml`, ''].join('\n')));
+        'Disallow: /robots/new', 'Disallow: /robots/submit', 'Disallow: /robots/submissions', 'Disallow: /pair/', 'Disallow: /panel/', 'Disallow: /install', 'Disallow: /link', `Sitemap: ${config.baseUrl}/sitemap.xml`, ''].join('\n')));
     // `curl -fsSL` follows the redirect. The target is config only (checked at boot): no query parameter steers it.
     r.get('/install', (req, res) => res.redirect(302, config.installer.sourceUrl));
     // The sitemap lists every public GET page (openvibe-shared/seo); robots.txt already names it.
@@ -431,6 +431,62 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         const profile = await profileOf(robot);
         if (await attachInProcess(robot, profile)) return res.redirect(303, `/panel/${robot.id}`);
         return res.status(201).type('html').send(renderPairingPage({ robot: domain.present.robot(robot), pairing, profile, phoneUrl: phoneUrl(robot.id, pairing) }));
+    }));
+
+    // ── A device that asked to be added (server/claims.js): its code, what it found, approve or deny ──
+    // Looking a code up is counted per person like Add robot, so codes cannot be guessed from here either.
+    const lookup = limits
+        ? [(req, res, next) => { if (req.viewer && !req.principal) req.principal = req.viewer; next(); }, limits('bot.claim.lookup', { minute: 20, hour: 200 })]
+        : [];
+    // What a claimed device can be: a model the installer has a driver for, or the generic relay (your own program).
+    const claimModels = async () => (await catalogue())
+        .filter((m) => !m.id.startsWith('local.') && (domain.pairing.driverForProfile(m.id) !== 'none' || m.id === 'relay.generic'));
+    const linkInstaller = () => `curl -fsSL ${config.installer.scriptUrl} | sh`;
+    const needClaims = () => { if (!claims) throw new BotError(404, 'bot.not_found', 'adding a device by code is not available here'); };
+    r.get('/link', ...lookup, page(async (req, res) => {
+        requireUser(req);
+        needClaims();
+        const code = typeof req.query.code === 'string' ? req.query.code.slice(0, 20) : '';
+        if (!code) return res.type('html').send(renderLinkPage({ installer: linkInstaller() }));
+        const claim = await claims.find(code);
+        if (!claim) {
+            return res.status(404).type('html').send(renderLinkPage({ code, installer: linkInstaller(),
+                error: 'No device is waiting with that code. A code lasts 15 minutes: run the command on the device again for a new one.' }));
+        }
+        return res.type('html').send(renderClaimPage({ claim, models: await claimModels() }));
+    }));
+    r.post('/link/:id/approve', ...manage, express.urlencoded({ extended: false, limit: '4kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        needClaims();
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        const body = req.body || {};
+        const values = { name: typeof body.name === 'string' ? body.name : '', profile_id: String(body.profile_id || ''),
+            access_policy: String(body.access_policy || 'private'), live: body.live === 'on' };
+        const models = await claimModels();
+        let made;
+        try {
+            if (!models.some((m) => m.id === values.profile_id)) throw new BotError(422, 'bot.unknown_profile', 'choose one of the models listed');
+            made = await claims.approve(req.params.id, me.subject, values);
+        } catch (e) {
+            if (e.status === 422) {
+                const claim = await claims.waiting(req.params.id);
+                return res.status(422).type('html').send(renderClaimPage({ claim, models, values, error: e.detail || e.code }));
+            }
+            throw e;
+        }
+        const profile = await profileOf(made.robot);
+        // Their Live channel (the username is the same on every site) binds the robot to its chat after they confirm there.
+        const liveOrigin = (config.embed && config.embed.origins && config.embed.origins[0]) || null;
+        const username = req.viewerClaims && typeof req.viewerClaims.username === 'string' ? req.viewerClaims.username : '';
+        const chatUrl = liveOrigin && username ? `${liveOrigin}/@${encodeURIComponent(username)}?bind_robot=${encodeURIComponent(made.robot.id)}` : null;
+        return res.status(201).type('html').send(renderClaimApproved({ robot: domain.present.robot(made.robot), profile, live: values.live, chatUrl }));
+    }));
+    r.post('/link/:id/deny', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        needClaims();
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        await claims.deny(req.params.id, me.subject);
+        return res.type('html').send(renderLinkPage({ installer: linkInstaller(), error: 'Denied. That device was told no and added nothing.' }));
     }));
 
     // A load replaces the robot's unused code, so only a navigation from this site (or a typed address) mints one.

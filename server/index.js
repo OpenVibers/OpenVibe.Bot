@@ -34,7 +34,7 @@ async function main() {
     const valkey = createValkey({ url: config.valkey.url, prefix: config.valkey.prefix });
 
     const app = createApp({ config, db, valkey, registry });
-    const { domain, keys, outbox, usage, hub, offers, sim, onvif, routines, webhooks } = app.locals;
+    const { domain, keys, outbox, usage, hub, offers, sim, onvif, routines, webhooks, claims } = app.locals;
     keys.start().catch(() => { /* logged by the JWKS client */ });
 
     const timers = [];
@@ -42,6 +42,7 @@ async function main() {
         const every = (ms, fn) => { const t = setInterval(() => { Promise.resolve().then(fn).catch((e) => console.warn('[Bot] job:', e.message)); }, ms); t.unref(); timers.push(t); };
         every(6 * 3600 * 1000, () => domain.audit.prune(30));
         every(30 * 60 * 1000, () => domain.pairing.prune());
+        every(30 * 60 * 1000, () => claims.prune());   // device claims a day past their time (server/claims.js)
         every(1000, async () => { for (const robotId of await domain.queue.sweep()) hub.broadcast(robotId); });
         outbox.start();
         usage.start();
