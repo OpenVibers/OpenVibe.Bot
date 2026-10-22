@@ -41,7 +41,8 @@ const { createMachineScreen } = require('../machine-screen');
 const { renderDocsIndex, renderDriversPage, renderProfilesPage, renderAutomationPage, renderComputersPage } = require('./docs');
 const { checkProfile } = require('../profiles');
 const { renderHome, renderUpdates, HOME_CSP } = require('./home');
-const { renderDirectory, renderModels, renderModel, renderRobotPage, renderAddRobot, renderSubmit, renderSubmissions, modelOf } = require('./directory');
+const { renderDirectory, renderModels, renderModel, renderRobotPage, renderAddRobot, renderSubmit, renderSubmissions, modelOf, sortModels } = require('./directory');
+const { createNetworkReads } = require('./network-reads');
 const { LICENSES } = require('../submissions');
 
 const PUBLIC = path.join(__dirname, '..', '..', 'public');
@@ -143,6 +144,7 @@ const embedCsp = (config) => ["default-src 'self'", `script-src 'self' ${PANEL_S
 
 function createWebRoutes(config, { domain = null, sim = null, onvif = null, limits = null, identity = null, hub = null, log = console, submissions = null, routines = null, webhooks = null, claims = null, releaseLastmod } = {}) {
     const r = express.Router();
+    const networkReads = createNetworkReads({ searchUrl: config.search && config.search.url, log });
     // The public front page is crawlable; sign-in, the API and every signed-in or per-robot page are not.
     r.get('/robots.txt', (req, res) => res.type('text/plain').send(['User-agent: *', 'Allow: /$', 'Disallow: /auth/', 'Disallow: /api/',
         'Disallow: /robots/new', 'Disallow: /robots/submit', 'Disallow: /robots/submissions', 'Disallow: /pair/', 'Disallow: /panel/', 'Disallow: /install', 'Disallow: /link', `Sitemap: ${config.baseUrl}/sitemap.xml`, ''].join('\n')));
@@ -296,12 +298,25 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
 
     // The front page of openvibe.bot (server/web/home.js): public, indexable, with the OpenVibe Frame. Its two
     // actions differ by sign-in, so it is never stored by a shared cache.
-    r.get('/', (req, res) => {
-        res.setHeader('Content-Security-Policy', HOME_CSP);
-        res.setHeader('Cache-Control', 'private, no-cache');
-        res.setHeader('Vary', 'Cookie');
-        res.type('html').send(renderHome({ config, signedIn: !!req.viewer }));
+    // Its data sections: the catalogue, the robots people list (online first), the first kit, and robotics openings
+    // from OpenVibe.Search (cached; empty without BOT_SEARCH_URL).
+    r.get('/', async (req, res, next) => {
+        try {
+            const [models, rows, jobs] = await Promise.all([catalogue(), domain.robots.listListed({ limit: 24 }), networkReads.jobs()]);
+            const byId = new Map(models.map((m) => [m.id, m]));
+            const names = await namesOf(rows.map((row) => row.owner_subject));
+            const robots = (await Promise.all(rows.map(async (row) => ({
+                id: row.id, name: row.name, access_policy: row.access_policy, owner: names.get(row.owner_subject) || null, online: await onlineOf(row.id),
+                model_name: (byId.get(row.profile_id) || { name: row.profile_id.startsWith('local.') ? 'Its own profile' : row.profile_id }).name,
+            })))).sort((a, b) => Number(b.online) - Number(a.online));
+            const kit = kits.list()[0] || null;
+            res.setHeader('Content-Security-Policy', HOME_CSP);
+            res.setHeader('Cache-Control', 'private, no-cache');
+            res.setHeader('Vary', 'Cookie');
+            res.type('html').send(renderHome({ config, signedIn: !!req.viewer, models: sortModels(models), robots, kit, jobs }));
+        } catch (e) { next(e); }
     });
+    r.get('/home.css', asset('home.css', 'text/css'));
 
     // ── The directory (plan T15 "a robot directory (/robots)"): public pages inside the OpenVibe Frame. ──
     // Every catalogue profile as a model; a community one carries its approved submission (who, driver, guide, key).
