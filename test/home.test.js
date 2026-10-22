@@ -26,10 +26,33 @@ const { boot, check, done } = require('./helpers/app');
         assert.match(html, /<link rel="canonical" href="http:\/\/bot\.test\/">/);
         assert.match(html, /href="\/auth\/login\?next=%2Frobots">Sign in with OpenVibe/);
         assert.strictEqual((html.match(/<h1[ >]/g) || []).length, 1, 'one h1');
-        // Every robot Bot ships a profile for is on the front page: six cards under "Robots it drives today".
-        const robots = (/<section class="sc-sec"[^>]*aria-labelledby="sc-robots-it-drives-today"[\s\S]*?<\/section>/.exec(html) || [''])[0];
-        assert.deepStrictEqual([...robots.matchAll(/<b>([^<]+)<\/b>/g)].map((m) => m[1]), ['Adeept 4WD Smart Car', 'ROS 2 robots', 'LOOI', 'Cozmo', 'A phone', 'A simulated rover']);
-        for (const id of ['adeept.adr036', 'ros2.diffdrive', 'looi', 'cozmo', 'phone.camera', 'sim.rover']) assert.ok(require('fs').existsSync(require('path').join(__dirname, '..', 'server', 'profiles', `${id}.json`)), `${id} is a shipped profile`);
+        // Every robot model in the catalogue (the shipped profiles) has a card under "Robots it drives today".
+        const models = (/<section class="sc-sec hm-sec" id="models"[\s\S]*?<\/section>/.exec(html) || [''])[0];
+        const names = [...models.matchAll(/<span class="hm-card-head"><b>([^<]+)<\/b>/g)].map((m) => m[1]);
+        const shipped = fs.readdirSync(path.join(__dirname, '..', 'server', 'profiles')).filter((f) => f.endsWith('.json')).map((f) => JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'server', 'profiles', f), 'utf8')).name);
+        assert.deepStrictEqual(names.slice().sort(), shipped.slice().sort(), 'one card per catalogue model');
+        assert.match(html, new RegExp(`<b>${shipped.length}</b><span>robot models</span>`), 'the stat row counts the catalogue');
+        assert.ok(!/listed robots? online/.test(html), 'no online count while nothing listed is online');
+        // The simulated rover is always first under "Drive one now"; nothing else is listed yet.
+        const now = (/<section class="sc-sec hm-sec" id="now"[\s\S]*?<\/section>/.exec(html) || [''])[0];
+        assert.strictEqual((now.match(/class="hm-card[ "]/g) || []).length, 1);
+        assert.match(now, /href="\/try"/);
+        // The first kit's parts list, and no jobs section without OpenVibe.Search configured.
+        assert.match(html, /<h2 id="kit-h">The first kit: Adeept ADR036/);
+        assert.match(html, /<b>4×<\/b><span>TT DC motors<\/span>/);
+        assert.ok(!html.includes('id="jobs"'), 'a section with nothing to show is left out');
+        // JSON-LD: the site, the app, the models as an ItemList, and the questions the page shows as a FAQPage.
+        const ld = [...html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)].map((m) => JSON.parse(m[1]));
+        const types = ld.map((x) => x['@type']);
+        for (const t of ['WebSite', 'WebApplication', 'ItemList', 'FAQPage']) assert.ok(types.includes(t), `JSON-LD ${t}`);
+        assert.strictEqual(ld.find((x) => x['@type'] === 'ItemList').numberOfItems, shipped.length);
+        const faq = (/<section class="sc-sec hm-sec" id="faq"[\s\S]*?<\/section>/.exec(html) || [''])[0];
+        const questions = [...faq.matchAll(/<h3>([^<]+)<\/h3>/g)].map((m) => m[1].replace(/&#39;/g, "'"));
+        assert.deepStrictEqual(ld.find((x) => x['@type'] === 'FAQPage').mainEntity.map((q) => q.name), questions, 'FAQPage holds exactly the questions shown');
+        assert.ok(questions.length >= 6);
+        const home = await get('/home.css');
+        assert.strictEqual(home.status, 200);
+        assert.match(home.headers.get('content-type'), /^text\/css/);
         const css = html.match(/href="(\/shared\/showcase\.css\?v=[0-9a-f]{12})"/);
         assert.ok(css, 'links the showcase stylesheet');
         const sheet = await get(css[1]);
@@ -42,7 +65,25 @@ const { boot, check, done } = require('./helpers/app');
         const html = await (await get('/')).text();
         assert.match(html, /sends its camera over WebRTC to OpenRestream and the panel plays it live/);
         // ROS 2 left this list with Bot#95 (ros2.diffdrive, ros2.holonomic, the Node's plugins/ros2 driver).
-        for (const claim of [/ESP32/, /Android/, /arrive paired/i, /\bbuy\b/i, /webhook/i]) assert.ok(!claim.test(html), `no ${claim}`);
+        // Webhooks left this list when they shipped (routines and webhooks, migration 0011, /docs/automation).
+        for (const claim of [/ESP32/, /Android/, /arrive paired/i, /\bbuy\b/i]) assert.ok(!claim.test(html), `no ${claim}`);
+    });
+
+    await check('GET /: a listed robot shows under "Drive one now", online first, and the stat row counts it', async () => {
+        const { robot: rover } = await t.robot(alex, { name: 'Arena rover', profile_id: 'sim.rover', access_policy: 'queue' });
+        const { robot: car } = await t.robot(alex, { name: 'Garage car', profile_id: 'adeept.adr036' });
+        await t.domain.robots.setListed(car.id, true);
+        await t.domain.robots.setListed(rover.id, true);
+        await t.app.locals.sim.attach(rover.id);
+        const html = await (await get('/')).text();
+        const now = (/<section class="sc-sec hm-sec" id="now"[\s\S]*?<\/section>/.exec(html) || [''])[0];
+        const cards = [...now.matchAll(/<b>([^<]+)<\/b><span class="hm-state" data-state="(\w+)"/g)].map((m) => `${m[1]}:${m[2]}`);
+        assert.deepStrictEqual(cards, ['Simulated rover:online', 'Arena rover:online', 'Garage car:offline']);
+        assert.match(now, new RegExp(`href="/r/${car.id}"`));
+        assert.match(now, /Adeept ADR036 4WD Smart Car · @alex/);
+        assert.match(html, /<b>1<\/b><span>listed robot online<\/span>/);
+        await t.domain.robots.setListed(car.id, false);
+        await t.domain.robots.setListed(rover.id, false);
     });
 
     await check('GET /: signed in, the first action opens your robots', async () => {
