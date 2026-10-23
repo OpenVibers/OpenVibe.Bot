@@ -161,7 +161,7 @@ main { padding: 1rem max(1rem, env(safe-area-inset-right)) calc(1.5rem + env(saf
 .stat { display: flex; flex-direction: column; gap: 0.15rem; padding: 0.55rem 0.6rem; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); min-width: 0; }
 .stat .readout { font-size: 1.15rem; }
 .stat-label { color: var(--muted); font-size: 0.72rem; }
-[data-quality="good"] { color: var(--ok); } [data-quality="fair"] { color: var(--warn); } [data-quality="poor"] { color: var(--danger); }
+[data-quality="good"] { color: var(--ok); } [data-quality="fair"] { color: var(--warn); } [data-quality="poor"] { color: var(--danger-text, var(--danger)); }
 
 /* On a phone the picture never scrolls away while driving: the camera stays pinned under the e-stop bar (its height,
    --banner-h, is measured by public/panel.js) and everything else scrolls beneath it. Upright, it takes at most a
