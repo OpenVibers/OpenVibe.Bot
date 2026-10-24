@@ -600,6 +600,7 @@ ${error ? `<p class="error" role="alert">${esc(error)}</p>` : ''}
 <label class="field"><span class="field-label">Code</span><input type="text" name="code" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="12" placeholder="XXXX-XXXX" value="${esc(code)}" required autofocus></label>
 <button type="submit" class="primary">Continue</button>
 </form>
+<p class="muted">Nothing on the robot's card yet? <a href="/setup/sd-card">Start from a blank microSD card</a>: the card adds the robot by itself, with no code.</p>
 </main>`;
     return page('Add a device', body);
 }

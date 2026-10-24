@@ -39,6 +39,7 @@ const kits = require('../kits');
 const { renderPanel, renderEmbedRefused, renderDrivePage, renderPairingPage, renderPhonePage, renderMachinesPage, renderMachineScreenPage, renderLinkPage, renderClaimPage, renderClaimApproved } = require('./render');
 const { createMachineScreen } = require('../machine-screen');
 const { renderDocsIndex, renderDriversPage, renderProfilesPage, renderAutomationPage, renderComputersPage } = require('./docs');
+const { renderSdCard } = require('./sd-card');
 const { checkProfile } = require('../profiles');
 const { renderHome, renderUpdates, HOME_CSP } = require('./home');
 const { renderDirectory, renderModels, renderModel, renderRobotPage, renderAddRobot, renderSubmit, renderSubmissions, modelOf, sortModels } = require('./directory');
@@ -72,6 +73,11 @@ const LLMS_PAGES = [
         path: '/try', title: 'Try the panel with a simulated rover',
         note: 'Drive a simulated rover in the browser, no account and no hardware.',
         text: 'A rover simulated in the visitor\'s own browser, driven through the same OpenVibe.Bot panel a paired robot gets: a touch joystick, the keyboard (W A S D or the arrows, Space to stop) or a gamepad, with the same command shaping, deadman and latched e-stop. It has a front camera drawn from its position in a small arena, an ultrasonic distance sensor, three line sensors over a strip of yellow tape, a battery, RGB headlights and a horn. Nothing pressed there moves real hardware, and nothing needs an account. The page ends with the way to a real robot: add one, pair its computer with one pasted command, and the same panel drives it.',
+    },
+    {
+        path: '/setup/sd-card', title: 'A robot from a blank microSD card',
+        note: 'Set up a Raspberry Pi robot from a blank card with no screen or keyboard: the card adds the robot by itself.',
+        text: 'A guided setup for a Raspberry Pi robot starting from a blank microSD card. Signed in, the person describes the robot (name, model, who may drive, its camera on their OpenVibe.Live channel) and their Wi-Fi, and chooses a login; the page makes the card\'s two cloud-init files, user-data and network-config, in the browser, so the Wi-Fi and login passwords never reach openvibe.bot (the login password is stored hashed with SHA-512 crypt). They write Raspberry Pi OS Lite (64-bit) to the card with Raspberry Pi Imager without its customisation, copy the two files to the card\'s bootfs drive and switch the robot on. On first boot the Pi joins the Wi-Fi, turns on SSH and I2C, and runs the OpenVibe installer with the card\'s setup key, which adds the robot to the person\'s account approved, with no code to read off a screen. The page follows the card until the robot is online. A setup key adds one robot and lasts 7 days; a retry before the robot pairs pairs the same robot again. If it does not arrive, the person can SSH to <hostname>.local with the login they chose and read journalctl -u openvibe-setup.',
     },
     {
         path: '/robots', title: 'Robots',
@@ -142,12 +148,12 @@ const PANEL_CSP = ["default-src 'self'", `script-src 'self' ${PANEL_SCRIPT_SRC}`
 const embedCsp = (config) => ["default-src 'self'", `script-src 'self' ${PANEL_SCRIPT_SRC}`, `connect-src 'self' ${PANEL_CONNECT_SRC}`,
     `frame-ancestors ${frameAncestors(config)}`, "object-src 'none'", "base-uri 'self'"].join('; ');
 
-function createWebRoutes(config, { domain = null, sim = null, onvif = null, limits = null, identity = null, hub = null, log = console, submissions = null, routines = null, webhooks = null, claims = null, releaseLastmod } = {}) {
+function createWebRoutes(config, { domain = null, sim = null, onvif = null, limits = null, identity = null, hub = null, log = console, submissions = null, routines = null, webhooks = null, claims = null, setupKeys = null, releaseLastmod } = {}) {
     const r = express.Router();
     const networkReads = createNetworkReads({ searchUrl: config.search && config.search.url, log });
     // The public front page is crawlable; sign-in, the API and every signed-in or per-robot page are not.
     r.get('/robots.txt', (req, res) => res.type('text/plain').send(['User-agent: *', 'Allow: /$', 'Disallow: /auth/', 'Disallow: /api/',
-        'Disallow: /robots/new', 'Disallow: /robots/submit', 'Disallow: /robots/submissions', 'Disallow: /pair/', 'Disallow: /panel/', 'Disallow: /install', 'Disallow: /link', `Sitemap: ${config.baseUrl}/sitemap.xml`, ''].join('\n')));
+        'Disallow: /robots/new', 'Disallow: /robots/submit', 'Disallow: /robots/submissions', 'Disallow: /pair/', 'Disallow: /setup/sd-card/keys', 'Disallow: /panel/', 'Disallow: /install', 'Disallow: /link', `Sitemap: ${config.baseUrl}/sitemap.xml`, ''].join('\n')));
     // `curl -fsSL` follows the redirect. The target is config only (checked at boot): no query parameter steers it.
     r.get('/install', (req, res) => res.redirect(302, config.installer.sourceUrl));
     // The sitemap lists every public GET page (openvibe-shared/seo); robots.txt already names it.
@@ -194,6 +200,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     r.get('/panel/sim-view.js', asset('sim-view.js', 'application/javascript'));
     r.get('/panel/try-device.js', asset('try-device.js', 'application/javascript'));
     r.get('/panel/phone-device.js', asset('phone-device.js', 'application/javascript'));
+    r.get('/panel/sd-card.js', asset('sd-card.js', 'application/javascript'));
 
     // /device/phone: a phone becomes the robot's device from its browser (plan T15). Public: the one-time pairing code
     // is the credential, and a paired phone keeps its device credential in its own storage. Its CSP adds only the
@@ -503,6 +510,51 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
         await claims.deny(req.params.id, me.subject);
         return res.type('html').send(renderLinkPage({ installer: linkInstaller(), error: 'Denied. That device was told no and added nothing.' }));
+    }));
+
+    // ── A robot from a blank microSD card (server/setup-keys.js, server/web/sd-card.js, public/sd-card.js) ──
+    // The page is public (the steps), the form needs a sign-in. The browser asks for a setup key with the robot's
+    // choices only (never the Wi-Fi or login password, which go only into the files it makes) and follows the card.
+    const sdJson = (fn) => async (req, res) => {
+        res.setHeader('Cache-Control', 'no-store');
+        try { await fn(req, res); } catch (e) {
+            const status = e.status && e.status < 600 ? e.status : 500;
+            if (status === 500) log.warn(`[Bot] setup key: ${e.message}`);
+            res.status(status).json({ error: e.code || 'bot.error', detail: status === 500 ? 'something went wrong; try again' : (e.detail || e.code) });
+        }
+    };
+    const needSetupKeys = () => { if (!setupKeys || !claims) throw new BotError(404, 'bot.not_found', 'card setup is not available here'); };
+    r.get('/setup/sd-card', page(async (req, res) => {
+        needSetupKeys();
+        res.setHeader('Content-Security-Policy', HOME_CSP);
+        const models = await claimModels();
+        const asked = typeof req.query.profile === 'string' && models.some((m) => m.id === req.query.profile) ? req.query.profile : null;
+        res.type('html').send(renderSdCard({ config, signedIn: !!req.viewer, models, values: { profile_id: asked } }));
+    }));
+    r.post('/setup/sd-card/keys', ...manage, express.json({ limit: '4kb' }), sdJson(async (req, res) => {
+        needSetupKeys();
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site requests are refused');
+        const b = req.body || {};
+        const models = await claimModels();
+        if (!models.some((m) => m.id === b.profile_id)) throw new BotError(422, 'bot.unknown_profile', 'choose one of the models listed');
+        const out = await setupKeys.create(me.subject, { name: b.name, profile_id: b.profile_id, access_policy: String(b.access_policy || 'private'),
+            live: b.live === true, hostname: typeof b.hostname === 'string' ? b.hostname : null });
+        res.status(201).json(out);
+    }));
+    r.get('/setup/sd-card/keys/:id', ...manage, sdJson(async (req, res) => {
+        needSetupKeys();
+        const me = requireUser(req);
+        const s = await setupKeys.status(me.subject, req.params.id);
+        if (!s) throw new BotError(404, 'bot.not_found', 'no such card files');
+        res.json(s);
+    }));
+    r.post('/setup/sd-card/keys/:id/revoke', ...manage, sdJson(async (req, res) => {
+        needSetupKeys();
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site requests are refused');
+        await setupKeys.revoke(me.subject, req.params.id);
+        res.json({ revoked: true });
     }));
 
     // A load replaces the robot's unused code, so only a navigation from this site (or a typed address) mints one.

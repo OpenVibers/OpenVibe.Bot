@@ -73,7 +73,7 @@ function hero({ signedIn, config }) {
 <p class="hm-term-top"><span></span><span></span><span></span><b>On the robot's computer</b></p>
 <pre tabindex="0"><code><span class="hm-prompt">$</span> ${esc(install)}</code></pre>
 <ol class="hm-term-steps"><li>It finds the kit and shows a short code.</li><li>Approve the code at ${link('/link', 'openvibe.bot/link')}.</li><li>Open the robot's panel and drive.</li></ol>
-<p class="hm-term-foot">Raspberry Pi OS or any Linux. No robot yet? ${link('/try', 'Drive the simulated rover')}.</p></div>`;
+<p class="hm-term-foot">Raspberry Pi OS or any Linux. A blank microSD card? ${link('/setup/sd-card', 'Make its setup files')}, no screen needed. No robot yet? ${link('/try', 'Drive the simulated rover')}.</p></div>`;
     return showcase.hero({
         eyebrow: 'OpenVibe.Bot · alpha',
         title: 'Drive your robot', accent: 'from any browser.',

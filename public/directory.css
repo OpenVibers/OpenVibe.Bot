@@ -92,3 +92,33 @@
 .dir-sub-body form { margin: 8px 0 0; }
 .dir-pre { max-height: 320px; overflow: auto; padding: 10px 12px; border-radius: 10px; background: var(--bg-primary, #0a0f1c); border: 1px solid var(--border, #1f2d47); font: 12.5px/1.45 ui-monospace, monospace; }
 .dir-review .dir-field input { font: inherit; min-height: 40px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border, #1f2d47); background: var(--bg-primary, #0a0f1c); color: var(--text-primary, #e6edf7); }
+
+/* /setup/sd-card: a robot from a blank microSD card (server/web/sd-card.js, public/sd-card.js). */
+.sd-list { margin: 0; padding-left: 20px; display: grid; gap: 6px; max-width: 760px; }
+.sd-steps { list-style: none; counter-reset: sd-step; margin: 0 0 30px; padding: 0; display: grid; gap: 18px; max-width: 860px; }
+.sd-step { counter-increment: sd-step; position: relative; padding: 18px 20px 18px 64px; border: 1px solid var(--border, #1f2d47); border-radius: 14px; background: var(--bg-secondary, #101828); }
+.sd-step::before { content: counter(sd-step); position: absolute; left: 18px; top: 16px; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; background: var(--accent-strong, var(--accent, #3472d8)); color: var(--on-accent-strong, #fff); }
+.sd-step > h2 { font-size: 19px; letter-spacing: -.01em; margin: 4px 0 12px; }
+.sd-sub { margin: 0; padding-left: 20px; display: grid; gap: 8px; }
+.sd-legend { font-weight: 700; margin: 4px 0 2px; }
+.sd-form input[type="password"] { font: inherit; min-height: 44px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--border, #1f2d47); background: var(--bg-primary, #0a0f1c); color: var(--text-primary, #e6edf7); }
+.sd-form input[type="password"]:focus { outline: 2px solid var(--accent, #3b82f6); outline-offset: 1px; }
+.sd-check { display: flex; gap: 10px; align-items: flex-start; max-width: 640px; }
+.sd-check input { margin-top: 4px; accent-color: var(--accent, #3b82f6); }
+.sd-more summary { cursor: pointer; font-weight: 650; margin: 6px 0; }
+.sd-more[open] { display: grid; gap: 10px; }
+.sd-private { margin: 0; padding: 12px 14px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--accent, #3b82f6) 35%, transparent); background: color-mix(in srgb, var(--accent, #3b82f6) 8%, transparent); max-width: 760px; }
+.sd-signin { margin: 0; }
+.sd-dl { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 12px; }
+.sd-status { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 12px 0 0; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--border, #1f2d47); background: var(--bg-primary, #0a0f1c); }
+.sd-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--text-secondary, #96a7c2); flex: none; }
+.sd-status[data-state="waiting"] .sd-dot, .sd-status[data-state="installing"] .sd-dot { background: #f59e0b; animation: sd-pulse 1.4s ease-in-out infinite; }
+.sd-status[data-state="paired"] { border-color: rgba(34, 197, 94, .5); }
+.sd-status[data-state="paired"] .sd-dot { background: #22c55e; }
+.sd-status[data-state="expired"] .sd-dot, .sd-status[data-state="revoked"] .sd-dot { background: #ef4444; }
+@keyframes sd-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .sd-status .sd-dot { animation: none !important; } }
+@media (max-width: 560px) { .sd-step { padding: 56px 16px 16px; } .sd-step::before { left: 16px; top: 14px; } }
+/* hidden wins over .dir-btn's display (the panel link waits for a robot, the downloads for the files). */
+.sd [hidden] { display: none !important; }
+.sd-made { margin: 0; padding: 12px 14px; border-radius: 10px; border: 1px solid rgba(34, 197, 94, .45); background: rgba(34, 197, 94, .08); }

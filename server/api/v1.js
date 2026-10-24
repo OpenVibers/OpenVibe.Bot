@@ -561,7 +561,9 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
     const needClaims = () => { if (!claims) fail(503, 'bot.unavailable', 'adding a device by code is not available here'); };
     r.post('/claims', claimStart, wrap(async (req, res) => {
         needClaims();
-        const out = await claims.start({ hostname: req.body?.hostname, hardware: req.body?.hardware, address: req.ip || null });
+        // setup_key: a card made on /setup/sd-card (server/setup-keys.js) approves its own claim.
+        const out = await claims.start({ hostname: req.body?.hostname, hardware: req.body?.hardware, address: req.ip || null,
+            setupKey: typeof req.body?.setup_key === 'string' ? req.body.setup_key : null });
         res.setHeader('Cache-Control', 'no-store');
         res.status(201).json(out);
     }));

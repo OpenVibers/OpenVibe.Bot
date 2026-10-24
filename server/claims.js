@@ -13,7 +13,9 @@
  * paired (domain.pairing.onPaired) the claim drops the pairing and turns on what the owner asked for: the robot's
  * stream exists only from then on.
  *
- *   start({ hostname, hardware, address })     → { id, user_code, secret, expires_at, interval, verification_url, … }
+ *   start({ hostname, hardware, address, setupKey })  → { id, user_code, secret, expires_at, interval, verification_url, … }
+ *       with a setup key (a card made on /setup/sd-card, server/setup-keys.js) the claim is approved at once for the
+ *       key's owner with the choices made with the card files; a retry before the robot has paired pairs the same robot
  *   poll(id, secret)                            → { state: pending | approved (+ pairing) | denied | expired | paired }
  *   find(userCode)                              → the pending claim the code names, or null
  *   approve(id, owner, { name, profile_id, access_policy, live })  → { robot, claim }
@@ -54,10 +56,18 @@ function cleanHardware(h) {
     return out;
 }
 
-function createClaims({ db, domain, config, now = () => Date.now(), log = console }) {
+function createClaims({ db, domain, config, setupKeys = null, now = () => Date.now(), log = console }) {
     const base = String(config.baseUrl || 'https://openvibe.bot').replace(/\/+$/, '');
 
-    async function start({ hostname, hardware, address = null } = {}) {
+    async function start({ hostname, hardware, address = null, setupKey = null } = {}) {
+        let key = null;
+        if (setupKey != null && setupKey !== '') {
+            key = setupKeys ? await setupKeys.redeem(setupKey) : null;
+            if (!key) {
+                fail(403, 'bot.setup_key_invalid', "this card's setup key was used, revoked or is more than 7 days old: make new card files "
+                    + `on ${base}/setup/sd-card, or run the installer without --setup and approve its code on ${base}/link`);
+            }
+        }
         const hw = cleanHardware(hardware);
         const kit = hw.kit && !hw.kit.startsWith('local.') ? await getProfile(db, hw.kit).catch(() => null) : null;
         const id = prefixedId('clm', now());
@@ -73,9 +83,11 @@ function createClaims({ db, domain, config, now = () => Date.now(), log = consol
                     address ? clip(String(address), 64) : null, iso(at), iso(at + TTL_MS)]);
             if (row) {
                 const userCode = formatCode(code);
+                if (key) await approveWithKey(id, key);
                 return {
                     id, user_code: userCode, secret, expires_at: iso(at + TTL_MS), interval: POLL_S,
                     verification_url: `${base}/link`, verification_url_complete: `${base}/link?code=${userCode}`,
+                    ...(key ? { approved: true } : {}),
                 };
             }
         }
@@ -139,6 +151,30 @@ function createClaims({ db, domain, config, now = () => Date.now(), log = consol
         return { robot: made.robot, claim };
     }
 
+    /**
+     * A claim started with a setup key: approved for the key's owner at once. The first one makes the robot with the
+     * card's choices; a retry (the robot has not paired yet) gives the same robot a fresh pairing code instead of a
+     * second robot. Two first starts at once: the one that marks the key first makes the robot, the other is refused.
+     */
+    async function approveWithKey(id, key) {
+        const existing = key.robot_id ? await domain.robots.get(key.robot_id) : null;
+        if (existing) {
+            const p = await domain.pairing.create(existing.id, key.owner_subject, null, existing);
+            await db.query(
+                `UPDATE device_claims SET state = 'approved', owner_subject = $2, robot_id = $3, pairing = $4::jsonb, want_live = $5, decided_at = $6
+                 WHERE id = $1 AND state = 'pending'`,
+                [id, key.owner_subject, existing.id, JSON.stringify({ code: p.code, expires_at: p.expires_at, pairing_id: p.pairing_id || null }),
+                    !!key.want_live, iso(now())]);
+            await setupKeys.attach(key.id, { claim_id: id });
+            return;
+        }
+        const first = await db.maybe('UPDATE device_setup_keys SET claimed_at = $2, claim_id = $3 WHERE id = $1 AND claimed_at IS NULL RETURNING id',
+            [key.id, iso(now()), id]);
+        if (!first) fail(409, 'bot.setup_key_busy', 'this card is being added right now: wait a minute and run the installer again');
+        const made = await approve(id, key.owner_subject, { name: key.name, profile_id: key.profile_id, access_policy: key.access_policy, live: key.want_live });
+        await setupKeys.attach(key.id, { claim_id: id, robot_id: made.robot.id });
+    }
+
     async function deny(id, owner) {
         await pending(id);
         const row = await db.maybe("UPDATE device_claims SET state = 'denied', owner_subject = $2, decided_at = $3 WHERE id = $1 AND state = 'pending' RETURNING id", [id, owner, iso(now())]);
@@ -147,6 +183,7 @@ function createClaims({ db, domain, config, now = () => Date.now(), log = consol
 
     /** The robot paired: drop the pairing, and turn on what its owner asked for when they approved it. */
     async function afterPair(robotId) {
+        if (setupKeys) await setupKeys.paired(robotId).catch((e) => log.warn(`[Bot] setup key of ${robotId}: ${e.message}`));
         const row = await db.maybe(
             `UPDATE device_claims SET state = 'paired', pairing = NULL, paired_at = $2
              WHERE robot_id = $1 AND state IN ('approved', 'paired') RETURNING *`, [robotId, iso(now())]);
