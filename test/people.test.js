@@ -148,13 +148,14 @@ function identityStub() {
         assert.ok(back.includes('<b>Carol</b><small>@carol · Viewer</small>'));
     });
 
-    await check('a queue robot: a signed-in non-member gets the turn strip; the owner does not', async () => {
+    await check('a queue robot: a signed-in non-member gets the turn strip; the owner gets only its give-back form', async () => {
         const { robot: q } = await t.robot(alex, { name: 'Queue', access_policy: 'queue' });
         const html = await (await get(`/panel/${q.id}`, bob)).text();
         assert.ok(html.includes('<div class="turn" data-turn hidden><span class="turn-state" data-turn-state></span><span class="turn-meta" data-turn-meta></span>'));
         assert.ok(html.includes(`<form method="post" action="/robots/${q.id}/queue/leave" data-turn-leave>`));
         const owner = await (await get(`/panel/${q.id}`, alex)).text();
-        assert.ok(!owner.includes('data-turn'), 'the owner sees no leave strip');
+        assert.ok(!owner.includes('data-turn-leave'), 'the owner sees no leave strip');
+        assert.ok(owner.includes('<button type="button" class="quiet" data-turn-give hidden>Give back now</button>'), 'the owner\'s strip, hidden until a takeover pauses a turn, only gives back');
         assert.ok(owner.includes('Anyone signed in can also take a turn'), 'the queue note is on the owner card');
 
         // Bob joins on /control (the queue's own door) and becomes the active turn; Carol waits.

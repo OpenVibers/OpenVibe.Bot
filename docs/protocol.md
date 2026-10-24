@@ -99,7 +99,36 @@ Bot sends a `halt` of its own when a `queue` robot's turn ends — the turn ran 
 before the next person's first command can pass the gate, so a held button, a drive still inside its
 deadline or firmware that keeps going on its own never carries into the next turn. Its `operator` is
 `{ "subject": null, "role": "system" }`; the device acks it like any command. A waiting person leaving
-sends none.
+sends none. The same halt goes out when the owner or an operator takes over a turn (below).
+
+**What the order guarantees, and what it does not.** Frames on one device connection arrive in the order
+Bot sent them (one WebSocket), and OpenVibe.Node handles them in that order. Two things follow:
+- **Nothing decided under a turn follows that turn's halt.** Bot ends a turn and sends its halt in one
+  synchronous step that also moves the robot's control epoch. A queue driver's command whose gate decision
+  began before that step is refused (`bot.not_your_turn`) at the moment it would be sent, with no await between
+  the check and the send. So on the wire, everything authorised under turn N precedes N's halt.
+- **Lateness is bounded by the deadline.** Every motion command carries `deadline_ms` on Bot's clock, at
+  most the robot's `max_command_ms` away. Node compares it with its estimate of Bot's clock on arrival, nacks
+  a late one (`expired`) before any driver sees it, and gives a driver only the time left.
+
+Across a reconnect nothing is replayed. Bot never queues commands for an offline device ("commands are never
+queued"), `seq` starts again on each connection, and the device sees only server-minted command ids (Node
+answers a repeated id from its dedup cache instead of running it again). A command in flight when the
+socket drops is lost, and its operator gets `expired`.
+
+Not carried to a driver today: the turn epoch, Bot's `seq` or `ts`. A plugin sees the command id, kind,
+value, the time left and `operator { subject, role }`, so it can tell turns apart only by the operator's
+subject. A per-turn epoch in the command frame, checked by Node and passed to plugins, is the planned next
+step.
+
+**Owner takeover.** When the owner or an operator sends a command to a `queue` robot while someone holds
+the turn:
+- Bot pauses that turn: the turn's clock stops.
+- Bot sends its halt (audited `{ reason: "owner_takeover", turn_of }`), and the owner's or operator's command
+  goes after it.
+- The paused holder's commands are refused `bot.owner_control`, and waiting people stay in line.
+- The turn resumes 15 s after their last command, or at once when they send `give_back` on `/control`. Its end
+  moves on by the paused time.
 
 `status` of a Network-paired machine also says what it is: `device_kind` (`onboard` \| `bridge` \|
 `server`), `drivers` (an array of strings), `capabilities` (an object) and `agent_version` (a string of at
@@ -337,6 +366,7 @@ needs an explicit owner or operator role — a no-role caller is refused `bot.no
 | `command` | `id, kind, value, ms?` | the same `kind`s as the device; `ms` requests a deadline (capped by `max_command_ms`) |
 | `estop` | — | latch the e-stop (owner or operator) |
 | `estop_clear` | — | clear the latched e-stop (**owner only**) |
+| `give_back` | — | owner or operator: hand back a queue turn your driving paused (§1 Owner takeover); it resumes at once with its time kept |
 
 ### Server → client
 
@@ -348,10 +378,12 @@ needs an explicit owner or operator role — a no-role caller is refused `bot.no
 | `error` | `code, detail` | a frame or join the server refused |
 
 `robot_state.queue` (only for a `queue` robot) is
-`{ robot_id, subject, active, turn_ends_at, position, budget, used }` — `subject` is the reader's own,
+`{ robot_id, subject, active, turn_ends_at, paused, position, budget, used }` — `subject` is the reader's own,
 never another person's, so a waiting person's `position` is 1-based (0 while they hold the turn) and no
 member ever learns the active driver's subject. When a turn ends Bot halts the robot before the next
-turn starts (§1).
+turn starts (§1). `paused` is `null`, or `{ by: "owner" | "operator", since, resumes_after_idle_ms }` while an
+owner or operator has taken the turn over (§1). The client message `give_back` (owner or operator)
+resumes it at once.
 
 ### Examples
 
@@ -399,7 +431,8 @@ turn starts (§1).
 Refusal codes (the gate, in order): `bot.robot_not_found`, `bot.unknown_command`, `bot.command_not_allowed`
 (the profile takes no such kind), `bot.estop_latched`, `bot.not_an_operator`, `bot.sign_in`,
 `bot.read_only`, `bot.command_not_allowed` (the role's allowlist), `bot.device_offline`, `bot.cooldown`,
-`bot.not_your_turn`, `bot.turn_budget`, `bot.unknown_actuator`, `bot.invalid_input`, `bot.text_too_long`.
+`bot.not_your_turn`, `bot.owner_control` (the owner or an operator has taken the turn over), `bot.turn_budget`,
+`bot.unknown_actuator`, `bot.invalid_input`, `bot.text_too_long`.
 A `command` whose `id` is still in flight (the first one has not been acked) is answered `refused`
 `bot.command_pending` rather than a second device command or a silent wait.
 `halt` is never refused for the e-stop, the allowlist, a cooldown or the turn budget; it still needs a
@@ -507,7 +540,8 @@ the panel's owner-only forms `POST /robots/:id/operators` (body `username`, `rol
 Every command — allowed or refused — is written to `command_audit` (robot, device, the operator
 principal and its kind, role, kind, the clamped value summary, result `ack|nack|refused|expired`,
 reason, latency, time), kept 30 days. Bot's own halt at the end of a queue turn (§1) is a row with
-`operator_kind` `system`, no subject and `value` `{ reason: "turn_ended" | "turn_left", turn_of }`. Changing a robot's streaming toggles writes one row per real change
+`operator_kind` `system`, no subject and `value` `{ reason: "turn_ended" | "turn_left" | "owner_takeover", turn_of }`; a
+queue command refused because its turn ended while the gate decided is a `refused` row with reason `bot.turn_ended`. Changing a robot's streaming toggles writes one row per real change
 (`kind` `streaming.media` or `streaming.live`, `value` `{ on }`, role `owner`, result `ack`); an
 idempotent repeat writes none. The outbox publishes `bot.robot.online`, `bot.robot.offline`,
 `bot.estop.set`, `bot.estop.cleared` and `bot.command.refused` — small payloads of ids, kinds and

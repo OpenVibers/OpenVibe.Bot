@@ -292,6 +292,103 @@ const plugins = require('./helpers/plugins');
         c.close(); d.close();
     });
 
+    await check('a command whose turn ends while the gate decides is refused, never sent after the handoff halt', async () => {
+        // The race a LOOI driver's reviewers asked about (A2): the gate read carol's turn, the turn ended (the sweep, or
+        // she left) during the gate's later awaits and the halt went out, and her command followed the halt into dave's
+        // turn. The control epoch moves with the halt; a queue command decided under the old one is refused.
+        const { robot, pairing } = await t.robot(alex, { access_policy: 'queue', limits: { turn_ms: 60000, turn_budget: 5 } });
+        const dev = await deviceFor(robot.id, pairing.code);
+        const c = await op(carol);
+        await joinResult(c, robot.id);
+        const d = await op(dave);
+        await joinResult(d, robot.id);
+        const real = t.domain.control.prepare;
+        t.domain.control.prepare = async (args) => {
+            const decision = await real(args);
+            if (args.principal && args.principal.subject === carol.subject) await t.domain.queue.leave(robot.id, carol.subject);
+            return decision;
+        };
+        try {
+            cmd(c, { id: 'r1', kind: 'drive', value: { throttle: 0.3 } });
+            const r = await result(c, 'r1');
+            assert.deepStrictEqual([r.result, r.code], ['refused', 'bot.not_your_turn'], r.reason);
+        } finally {
+            t.domain.control.prepare = real;
+        }
+        const halt = await dev.waitFor((m) => m.type === 'command' && m.kind === 'halt');
+        dev.send({ type: 'ack', id: halt.id });
+        await t.wait(50);
+        assert.ok(!dev.messages.some((m) => m.type === 'command' && m.ref === 'r1'), 'the ended turn\'s command never reached the robot');
+        cmd(d, { id: 'r2', kind: 'drive', value: { throttle: 0.3 } });
+        const r2 = await dev.waitFor((m) => m.type === 'command' && m.ref === 'r2');
+        dev.send({ type: 'ack', id: r2.id });
+        await result(d, 'r2');
+        assert.deepStrictEqual(dev.messages.filter((m) => m.type === 'command').map((m) => (m.kind === 'halt' ? 'halt' : m.ref)), ['halt', 'r2']);
+        const audit = await t.domain.audit.list(robot.id, { limit: 5 });
+        assert.ok(audit.some((x) => x.result === 'refused' && x.reason === 'bot.turn_ended'), 'the refusal is audited');
+        c.close(); d.close();
+    });
+
+    await check('owner takeover: the owner driving pauses the turn and halts the robot first; the turn keeps its time and resumes on give-back or after the owner is idle', async () => {
+        const { robot, pairing } = await t.robot(alex, { access_policy: 'queue', limits: { turn_ms: 60000, turn_budget: 20 } });
+        const dev = await deviceFor(robot.id, pairing.code);
+        const c = await op(carol);
+        await joinResult(c, robot.id);
+        const a = await op(alex);
+        assert.strictEqual((await joinResult(a, robot.id)).role, 'owner');
+        cmd(c, { id: 'o1', kind: 'drive', value: { throttle: 0.3 } });
+        const o1 = await dev.waitFor((m) => m.type === 'command' && m.ref === 'o1');
+        dev.send({ type: 'ack', id: o1.id });
+        await result(c, 'o1');
+        const before = await t.domain.queue.currentTurn(robot.id);
+        cmd(a, { id: 'o2', kind: 'drive', value: { throttle: 0.5 } });
+        const o2 = await dev.waitFor((m) => m.type === 'command' && m.ref === 'o2');
+        dev.send({ type: 'ack', id: o2.id });
+        await result(a, 'o2');
+        const cmds = dev.messages.filter((m) => m.type === 'command');
+        assert.deepStrictEqual(cmds.map((m) => (m.kind === 'halt' ? 'halt' : m.ref)), ['o1', 'halt', 'o2'], 'the robot halts before the owner drives');
+        const halt = cmds.find((m) => m.kind === 'halt');
+        dev.send({ type: 'ack', id: halt.id });
+        assert.deepStrictEqual(halt.operator, { subject: null, role: 'system' });
+        await t.wait(30);
+        const row = (await t.domain.audit.list(robot.id, { limit: 6 })).find((x) => x.kind === 'halt');
+        assert.deepStrictEqual(row.value, { reason: 'owner_takeover', turn_of: carol.subject }, 'audited as an owner takeover of carol\'s turn');
+        let q = await t.domain.queue.state(robot.id, carol.subject);
+        assert.strictEqual(q.active, true);
+        assert.strictEqual(q.paused.by, 'owner');
+        cmd(c, { id: 'o3', kind: 'drive', value: { throttle: 0.3 } });
+        const r3 = await result(c, 'o3');
+        assert.deepStrictEqual([r3.result, r3.code], ['refused', 'bot.owner_control'], 'the paused holder does not drive');
+        // The owner gives it back: the turn resumes at once, its end moved on by the paused time.
+        await t.wait(40);
+        a.send({ type: 'give_back' });
+        for (let i = 0; i < 50 && (await t.domain.queue.state(robot.id, carol.subject)).paused; i++) await t.wait(20);
+        q = await t.domain.queue.state(robot.id, carol.subject);
+        assert.strictEqual(q.paused, null, 'given back');
+        assert.ok(new Date(q.turn_ends_at).getTime() > new Date(before.turn_ends_at).getTime(), 'the paused time is added to the turn');
+        cmd(c, { id: 'o4', kind: 'drive', value: { throttle: 0.3 } });
+        const o4 = await dev.waitFor((m) => m.type === 'command' && m.ref === 'o4');
+        dev.send({ type: 'ack', id: o4.id });
+        assert.strictEqual((await result(c, 'o4')).result, 'ack', 'carol drives again');
+        // Taken over again, then the owner goes idle: the sweep resumes the turn after OWNER_IDLE_MS.
+        cmd(a, { id: 'o5', kind: 'drive', value: { throttle: 0.5 } });
+        const o5 = await dev.waitFor((m) => m.type === 'command' && m.ref === 'o5');
+        dev.send({ type: 'ack', id: o5.id });
+        await result(a, 'o5');
+        assert.ok((await t.domain.queue.state(robot.id, carol.subject)).paused, 'paused again');
+        t.clock.offset += t.domain.queue.OWNER_IDLE_MS + 1000;
+        try {
+            await t.domain.queue.sweep();
+            assert.strictEqual((await t.domain.queue.state(robot.id, carol.subject)).paused, null, 'resumed once the owner is idle');
+        } finally {
+            t.clock.offset -= t.domain.queue.OWNER_IDLE_MS + 1000;
+        }
+        // Someone not allowed to take over cannot give back.
+        c.send({ type: 'give_back' });
+        assert.strictEqual((await c.waitFor((m) => m.type === 'error' && m.code === 'bot.forbidden')).code, 'bot.forbidden');
+        c.close(); a.close();
+    });
+
     await check('a service token with bot.robot.control acts for a viewer and is held to the viewer role', async () => {
         const { robot, pairing } = await t.robot(alex);
         const viewer = t.network.newUser('viewer');

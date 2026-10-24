@@ -849,12 +849,57 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     // robot (server/realtime.js), so nothing the last driver sent carries on into the next person's turn.
     const handoffListeners = new Set();
     const onHandoff = (fn) => { handoffListeners.add(fn); return () => handoffListeners.delete(fn); };
-    const handedOff = (robotId, from, reason) => { for (const fn of handoffListeners) { try { fn(robotId, { from, reason }); } catch { /* a listener never breaks the caller */ } } };
+    // A robot's control epoch: one more each time a turn ends or its holder leaves, bumped in the same synchronous step
+    // that sends the handoff halt (the listeners). prepare() notes it before its first await; the hub sends a queue
+    // driver's command only if it is unchanged then, so a command decided under a turn never reaches the robot after
+    // that turn's halt (the race: its gate read the turn, the sweep ended the turn and halted the robot during the gate's
+    // later awaits, and the command followed the halt). In memory: Bot is one process.
+    const epochs = new Map();
+    const epochOf = (robotId) => epochs.get(robotId) || 0;
+    const handedOff = (robotId, from, reason) => {
+        epochs.set(robotId, epochOf(robotId) + 1);
+        if (epochs.size > 10000) epochs.delete(epochs.keys().next().value);
+        for (const fn of handoffListeners) { try { fn(robotId, { from, reason }); } catch { /* a listener never breaks the caller */ } }
+    };
+    // Owner takeover: an owner or operator driving a queue robot while someone holds the turn pauses the turn (its clock
+    // stops) and halts the robot before their command, through the handoff path (reason owner_takeover: the epoch moves,
+    // so the holder's commands still in the gate never follow). The turn resumes OWNER_IDLE_MS after their last command,
+    // or at once when they give it back (giveBack), with the paused time added to its end. In memory, like the epochs:
+    // after a restart a paused turn resumes at the next sweep.
+    const OWNER_IDLE_MS = 15000;
+    const ownerSeen = new Map();   // robotId → { at, subject, role }
+    const resumeListeners = new Set();
+    const onResume = (fn) => { resumeListeners.add(fn); return () => resumeListeners.delete(fn); };
+    async function takeOver(robotId, subject, role) {
+        ownerSeen.set(robotId, { at: now(), subject, role });
+        if (ownerSeen.size > 10000) ownerSeen.delete(ownerSeen.keys().next().value);
+        const paused = await db.maybe(`UPDATE robot_queue SET paused_at = $2, paused_by = $3 WHERE robot_id = $1 AND state = 'active' AND paused_at IS NULL RETURNING subject`,
+            [robotId, iso(now()), role]);
+        if (paused) handedOff(robotId, paused.subject, 'owner_takeover');
+        return !!paused;
+    }
+    async function giveBack(robotId) {
+        ownerSeen.delete(robotId);
+        return await currentTurn(robotId);
+    }
     /** The active turn for a robot, expiring it and promoting the oldest waiting row when it has ended. */
     async function currentTurn(robotId, q = db) {
         const robot = await q.maybe('SELECT * FROM robots WHERE id = $1', [robotId]);
         if (!robot) return null;
         let active = await q.maybe(`SELECT * FROM robot_queue WHERE robot_id = $1 AND state = 'active'`, [robotId]);
+        if (active && active.paused_at) {
+            // Paused by an owner or operator: it waits, clock stopped, until they have been idle OWNER_IDLE_MS or gave it back.
+            const seen = ownerSeen.get(robotId);
+            if (seen && now() - seen.at < OWNER_IDLE_MS) return active;
+            const pausedMs = Math.max(0, now() - new Date(active.paused_at).getTime());
+            const resumed = await q.maybe(`UPDATE robot_queue SET paused_at = NULL, paused_by = NULL, turn_ends_at = turn_ends_at + make_interval(secs => $3::double precision / 1000)
+                WHERE robot_id = $1 AND subject = $2 AND state = 'active' AND paused_at IS NOT NULL RETURNING *`, [robotId, active.subject, pausedMs]);
+            if (resumed) {
+                ownerSeen.delete(robotId);
+                for (const fn of resumeListeners) { try { fn(robotId, { subject: resumed.subject }); } catch { /* a listener never breaks the caller */ } }
+            }
+            active = resumed || await q.maybe(`SELECT * FROM robot_queue WHERE robot_id = $1 AND state = 'active'`, [robotId]);
+        }
         if (active && new Date(active.turn_ends_at).getTime() > now()) return active;
         if (active) {
             // Only the caller that ends the turn reports it (two at once both read it active).
@@ -900,6 +945,8 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         return {
             robot_id: robotId, subject: subject || null, active: !!(active && active.subject === subject),
             turn_ends_at: active ? iso(new Date(active.turn_ends_at).getTime()) : null,
+            // An owner or operator has taken over: the turn is paused (its clock stopped) and resumes after they stop.
+            paused: active && active.paused_at ? { by: active.paused_by || 'owner', since: iso(new Date(active.paused_at).getTime()), resumes_after_idle_ms: OWNER_IDLE_MS } : null,
             position: active && active.subject === subject ? 0 : position,
             budget: turnBudget(robot),
             used: active && active.subject === subject ? active.commands_used : 0,
@@ -908,16 +955,23 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     async function consumeTurn(robotId, subject) {
         const active = await currentTurn(robotId);
         if (!active || active.subject !== subject) return { ok: false, code: 'bot.not_your_turn' };
+        if (active.paused_at) return { ok: false, code: 'bot.owner_control' };
         const robot = await getRobot(robotId);
         if (active.commands_used >= turnBudget(robot)) return { ok: false, code: 'bot.turn_budget' };
-        await db.query(`UPDATE robot_queue SET commands_used = commands_used + 1 WHERE robot_id = $1 AND subject = $2`, [robotId, subject]);
-        return { ok: true };
+        // Only a turn that is still active spends (the sweep may have ended it since it was read).
+        const spent = await db.maybe(`UPDATE robot_queue SET commands_used = commands_used + 1 WHERE robot_id = $1 AND subject = $2 AND state = 'active' RETURNING 1 AS ok`, [robotId, subject]);
+        return spent ? { ok: true } : { ok: false, code: 'bot.not_your_turn' };
     }
     /** Expire ended turns and promote the next waiting person; returns the robots that changed. */
     async function sweepQueues() {
         const changed = new Set();
-        const ended = await db.many(`SELECT DISTINCT robot_id FROM robot_queue WHERE state = 'active' AND turn_ends_at <= $1`, [iso(now())]);
-        for (const r of ended) { await currentTurn(r.robot_id); changed.add(r.robot_id); }
+        const ended = await db.many(`SELECT DISTINCT robot_id FROM robot_queue WHERE state = 'active' AND (turn_ends_at <= $1 OR paused_at IS NOT NULL)`, [iso(now())]);
+        for (const r of ended) {
+            const before = await db.maybe(`SELECT subject, paused_at FROM robot_queue WHERE robot_id = $1 AND state = 'active'`, [r.robot_id]);
+            const after = await currentTurn(r.robot_id);
+            // A turn still paused and still the same holder changed nothing a panel shows.
+            if (!(before && before.paused_at && after && after.paused_at && after.subject === before.subject)) changed.add(r.robot_id);
+        }
         const idle = await db.many(`SELECT DISTINCT q.robot_id FROM robot_queue q WHERE q.state = 'waiting'
             AND NOT EXISTS (SELECT 1 FROM robot_queue a WHERE a.robot_id = q.robot_id AND a.state = 'active')`);
         for (const r of idle) { await currentTurn(r.robot_id); changed.add(r.robot_id); }
@@ -1107,6 +1161,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
      * { ok:false, code, reason, robot?, role? }. `online` is the live socket state the hub knows.
      */
     async function prepare({ robotId, principal, kind, value = {}, online = false, requestedMs = null }) {
+        const epoch = epochOf(robotId);   // before the first await: see epochs above
         const robot = await getRobot(robotId);
         if (!robot) return { ok: false, code: 'bot.robot_not_found', reason: 'no such robot' };
         const profileRow = await getProfile(db, robot.profile_id, robot.profile_version);
@@ -1144,15 +1199,20 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
                 return { ok: false, code: 'bot.cooldown', reason: `wait ${eff.cooldownMs} ms between ${kind} commands`, robot, role };
             }
         }
+        const PAUSED = 'the owner has taken control: your turn is paused and keeps its time';
         if (role === 'queue') {
             // A halt needs the turn (a waiting person may not stop the driver) but spends none of its budget.
             if (halt || release || repeatedHold) {
                 const turn = await currentTurn(robotId);
                 if (!turn || turn.subject !== subject) return { ok: false, code: 'bot.not_your_turn', reason: 'it is not your turn', robot, role };
+                if (turn.paused_at) return { ok: false, code: 'bot.owner_control', reason: PAUSED, robot, role };
             } else {
                 const budget = await consumeTurn(robotId, subject);
-                if (!budget.ok) return { ok: false, code: budget.code, reason: budget.code === 'bot.turn_budget' ? 'your turn budget is spent' : 'it is not your turn', robot, role };
+                if (!budget.ok) return { ok: false, code: budget.code, reason: budget.code === 'bot.turn_budget' ? 'your turn budget is spent' : budget.code === 'bot.owner_control' ? PAUSED : 'it is not your turn', robot, role };
             }
+        } else if ((role === 'owner' || role === 'operator') && robot.access_policy === 'queue' && subject) {
+            // Owner takeover: the holder's turn pauses and the robot halts before this command goes (takeOver).
+            await takeOver(robotId, subject, role);
         }
         let built;
         try { built = buildValue(kind, value, eff, profile); } catch (e) { return { ok: false, code: e.code || 'bot.invalid_input', reason: e.detail || e.message, robot, role }; }
@@ -1171,7 +1231,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         if (activeKey && built.state === 'down') activeButtons.set(activeKey, deadlineMs);
         if (activeKey && built.state === 'up') activeButtons.delete(activeKey);
         if (activeButtons.size > 4096) activeButtons.delete(activeButtons.keys().next().value);
-        return { ok: true, robot, profile, role, kind, value: built, deadlineMs, limits: eff };
+        return { ok: true, robot, profile, role, kind, value: built, deadlineMs, limits: eff, epoch };
     }
 
     return {
@@ -1187,7 +1247,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         streaming: { get: streaming, set: setStreaming },
         video: { live: liveVideo },
         estop: { set: setEstop, clear: clearEstop },
-        queue: { join: joinQueue, leave: leaveQueue, state: queueState, currentTurn, consume: consumeTurn, sweep: sweepQueues, onHandoff },
+        queue: { join: joinQueue, leave: leaveQueue, state: queueState, currentTurn, consume: consumeTurn, sweep: sweepQueues, onHandoff, onResume, epoch: epochOf, giveBack, OWNER_IDLE_MS },
         audit: { record: auditCommand, list: listAudit, listPage: listAuditPage, prune: pruneAudit },
         control: { prepare, allowedFor, effectiveLimits, deviceLimits, buildValue, DEFAULT_ALLOW, KINDS },
     };

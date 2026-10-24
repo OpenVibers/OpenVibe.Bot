@@ -273,6 +273,7 @@
     let allowed = JSON.parse(main.dataset.allowed || '[]');
     let ws = null;
     let joined = false;
+    let myRole = null;   // the role the joined frame gave this panel (owner, operator, viewer, queue)
     let retry = 0;
     let gone = false;          // refused for good (no access): no reconnect
 
@@ -794,12 +795,36 @@
     const turnMetaEl = $('[data-turn-meta]');
     let turnTimer = null;
     const stopTurnTimer = () => { if (turnTimer) { clearInterval(turnTimer); turnTimer = null; } };
-    /** Paint the queue view from a state frame's `queue`: the active turn's countdown, a place in line, or hidden. */
+    const turnGiveEl = $('[data-turn-give]');
+    const turnLeaveEl = $('[data-turn-leave]');
+    if (turnGiveEl) turnGiveEl.addEventListener('click', () => raw({ type: 'give_back' }));
+    /**
+     * Paint the queue view from a state frame's `queue`: the active turn's countdown, a place in line, a turn paused by
+     * an owner takeover (the holder's time is kept; an owner or operator sees it with "Give back now"), or hidden.
+     */
     function paintTurn(queue) {
         stopTurnTimer();
         if (!turnEl) return;
-        if (!queue || (!queue.active && !(queue.position > 0))) { turnEl.hidden = true; return; }
+        const controller = myRole === 'owner' || myRole === 'operator';
+        const paused = queue && queue.paused;
+        if (turnGiveEl) turnGiveEl.hidden = !(paused && controller);
+        if (turnLeaveEl) turnLeaveEl.hidden = !!(controller && !(queue && queue.active));
+        if (!queue || (!queue.active && !(queue.position > 0) && !(paused && controller))) { turnEl.hidden = true; return; }
         turnEl.hidden = false;
+        if (paused) {
+            const idle = Math.round((paused.resumes_after_idle_ms || 15000) / 1000);
+            if (controller && !queue.active) {
+                turnStateEl.textContent = 'You have control';
+                turnMetaEl.textContent = `The queue's turn is paused and keeps its time. It resumes ${idle}s after your last command.`;
+            } else if (queue.active) {
+                turnStateEl.textContent = 'Your turn is paused';
+                turnMetaEl.textContent = `The ${paused.by === 'operator' ? 'operator' : 'owner'} is driving. Your time is kept and resumes when they stop.`;
+            } else {
+                turnStateEl.textContent = `You're #${queue.position} in line`;
+                turnMetaEl.textContent = `Paused while the ${paused.by === 'operator' ? 'operator' : 'owner'} drives`;
+            }
+            return;
+        }
         if (queue.active) {
             const ends = queue.turn_ends_at ? new Date(queue.turn_ends_at).getTime() : null;
             const paintLeft = () => {
@@ -822,6 +847,7 @@
             if (m.ticket) ticket = m.ticket;
             if (driving) {
                 const label = $('[data-role-label]');
+                myRole = m.role || null;
                 if (label && m.role) label.textContent = { owner: 'Owner', operator: 'Operator', viewer: 'Viewer', queue: 'In the queue' }[m.role] || m.role;
                 for (const el of $$('[data-estop]')) el.hidden = !(m.role === 'owner' || m.role === 'operator');
             }
