@@ -191,7 +191,7 @@ function renderModel({ config, model, kit = null }) {
 ${kit.build_guide_url ? `<p>${link(kit.build_guide_url, 'The kit\'s build guide')}</p>` : ''}</section>` : '';
     const add = model.connect === 'browser'
         ? `${link('/try', 'Try it now, no account', 'dir-btn dir-primary')} ${link(`/robots/new?profile=${encodeURIComponent(model.id)}`, 'Add one to your robots', 'dir-btn')}`
-        : `${link(`/robots/new?profile=${encodeURIComponent(model.id)}`, 'Add this robot', 'dir-btn dir-primary')}${model.guide ? ` ${link(model.guide.href, model.guide.label, 'dir-btn')}` : ''}`;
+        : `${link(`/robots/new?profile=${encodeURIComponent(model.id)}`, 'Add this robot', 'dir-btn dir-primary')}${model.connect === 'onboard' ? ` ${link(`/setup/sd-card?profile=${encodeURIComponent(model.id)}`, 'Start from a blank microSD card', 'dir-btn')}` : ''}${model.guide ? ` ${link(model.guide.href, model.guide.label, 'dir-btn')}` : ''}`;
     const body = `<p class="dir-crumb">${link('/robots', 'Robots')} / ${link('/models', 'Models')}</p>
 <header class="dir-hero"><h1>${esc(model.name)}</h1><p>${badge(model.connect)}${communityBadge(model)}${model.vendor ? ` <span class="muted">by ${esc(model.vendor)}</span>` : ''}</p>
 <p class="muted">${esc(model.description)}</p><p class="dir-actions">${add}</p></header>
@@ -235,6 +235,8 @@ function renderAddRobot({ config, models = [], values = {}, error = null }) {
         .map(([k, title]) => [title, sortModels(models).filter((m) => m.connect === k)]).filter(([, ms]) => ms.length);
     const body = `<p class="dir-crumb">${link('/robots', 'Robots')}</p>
 <header class="dir-hero"><h1>Add a robot</h1><p class="muted">Name it, say what it is, and choose who may drive. A simulated rover drives the moment it is added; anything else gets a one-time pairing code and one command to paste on its computer.</p></header>
+<section class="dir-form sd-entry" aria-labelledby="add-from-card"><h2 id="add-from-card" class="dir-field-label">Starting from a blank microSD card?</h2>
+<p class="muted">${link(`/setup/sd-card${values.profile_id ? `?profile=${encodeURIComponent(values.profile_id)}` : ''}`, 'Make the card\'s setup files')}: write Raspberry Pi OS with Raspberry Pi Imager, add two files, switch the robot on. It joins your Wi-Fi and adds itself, with no screen, keyboard or command.</p></section>
 <section class="dir-form" aria-labelledby="add-from-device"><h2 id="add-from-device" class="dir-field-label">At the robot already? Start there</h2>
 <p class="muted">On its Raspberry Pi (or other Linux computer) run <code>curl -fsSL ${esc(config.installer.scriptUrl)} | sh</code>. It finds the kit (an Adeept ADR036 4WD and the other models below), turns on what it needs, and shows a code: enter it at ${link('/link', 'openvibe.bot/link')} and approve it. Nothing else to fill in here.</p></section>
 <form class="dir-form" method="post" action="/robots">

@@ -38,6 +38,7 @@ const { createOnvif } = require('./onvif');
 const { createApiAuth } = require('./api/auth');
 const { v1Router } = require('./api/v1');
 const { createClaims } = require('./claims');
+const { createSetupKeys } = require('./setup-keys');
 const { createJobs } = require('./jobs');
 const { createActorLimits } = require('./api/actor-limits');
 const { createSessionRoutes, viewerMiddleware } = require('./web/session');
@@ -89,7 +90,9 @@ function createApp(opts = {}) {
     const submissions = createSubmissions({ db, config, now, log });
     // Devices that ask to be added (the installer with no code, /link): the approval makes the robot; once its device
     // has paired, what the owner asked for is turned on (server/claims.js).
-    const claims = createClaims({ db, domain, config, now, log });
+    // A card made on /setup/sd-card carries a setup key: its claim is approved at once (server/setup-keys.js).
+    const setupKeys = createSetupKeys({ db, now });
+    const claims = createClaims({ db, domain, config, setupKeys, now, log });
     domain.pairing.onPaired((robotId) => claims.afterPair(robotId));
     hub.bindDomain(domain);
     // One jobs service for the device socket and the jobs API, so both see the same stdout rings.
@@ -173,7 +176,7 @@ function createApp(opts = {}) {
     { const legal = require('openvibe-shared/legal');
       app.get(legal.PATHS, (req, res, next) => { res.setHeader('Content-Security-Policy', HOME_CSP); next(); }, legal.handler({ id: 'bot', service: 'bot', host: 'openvibe.bot', name: 'OpenVibe.Bot', profile: 'games' })); }
     app.use(viewerMiddleware(userAuth));
-    app.use(createWebRoutes(config, { domain, sim, onvif, limits, identity, hub, log, submissions, routines, webhooks, claims, releaseLastmod: release.full().released_at === release.full().booted_at ? undefined : release.full().released_at }));
+    app.use(createWebRoutes(config, { domain, sim, onvif, limits, identity, hub, log, submissions, routines, webhooks, claims, setupKeys, releaseLastmod: release.full().released_at === release.full().booted_at ? undefined : release.full().released_at }));
 
     app.use((req, res) => {
         if (req.path.startsWith('/api/') || req.path.startsWith('/internal/')) return http.sendProblem(res, 404, 'not_found', { ctx: req.ov });
@@ -192,7 +195,7 @@ function createApp(opts = {}) {
         return res.status(500).type('text/plain').send('Something went wrong\n');
     });
 
-    Object.assign(app.locals, { config, db, valkey, domain, keys, outbox, usage, hub, jobs, offers, sim, onvif, userAuth, metrics, submissions, routines, webhooks, claims });
+    Object.assign(app.locals, { config, db, valkey, domain, keys, outbox, usage, hub, jobs, offers, sim, onvif, userAuth, metrics, submissions, routines, webhooks, claims, setupKeys });
     return app;
 }
 
