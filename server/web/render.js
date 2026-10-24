@@ -429,13 +429,16 @@ ${(people || []).map(row).join('\n')}
 }
 
 /**
- * The turn strip a signed-in non-member sees on a `queue` robot's panel: the active turn's countdown or their
- * place in line, and a plain leave form that works without JavaScript (public/panel.js unhides it and paints
- * the state). Hidden until a state frame says there is a queue view for this person.
+ * The turn strip on a `queue` robot's panel. A signed-in non-member sees the active turn's countdown or their place in
+ * line, with a plain leave form that works without JavaScript. The owner and operators see it only while their own
+ * driving has paused someone's turn (owner takeover), with "Give back now". public/panel.js unhides and paints it from
+ * the state frames; it stays hidden until one says there is something to show this person.
  */
 function turnStrip(robot, role) {
-    if (robot.access_policy !== 'queue' || role !== 'queue') return '';
-    return `<div class="turn" data-turn hidden><span class="turn-state" data-turn-state></span><span class="turn-meta" data-turn-meta></span><form method="post" action="/robots/${esc(robot.id)}/queue/leave" data-turn-leave><button type="submit" class="quiet">Leave the queue</button></form></div>`;
+    if (robot.access_policy !== 'queue' || !['queue', 'owner', 'operator'].includes(role)) return '';
+    const leave = role === 'queue' ? `<form method="post" action="/robots/${esc(robot.id)}/queue/leave" data-turn-leave><button type="submit" class="quiet">Leave the queue</button></form>` : '';
+    const give = role === 'queue' ? '' : '<button type="button" class="quiet" data-turn-give hidden>Give back now</button>';
+    return `<div class="turn" data-turn hidden><span class="turn-state" data-turn-state></span><span class="turn-meta" data-turn-meta></span>${leave}${give}</div>`;
 }
 
 function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs = 150, mode = 'page', signedIn = true, streaming = null, people = null, signaling_url = null, profileForm = {}, tryIt = false, automation = null }) {

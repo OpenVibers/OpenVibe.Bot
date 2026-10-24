@@ -492,6 +492,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             case 'command': return onOperatorCommand(conn, msg);
             case 'estop': return onOperatorEstop(conn, true);
             case 'estop_clear': return onOperatorEstop(conn, false);
+            case 'give_back': return onGiveBack(conn);
             default: return sendError(conn, 'bot.unknown_message', `unknown type ${msg.type}`);
         }
     }
@@ -551,6 +552,12 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         if (!decision.ok) {
             await domain.audit.record({ robotId, deviceId: device ? device.device.id : null, subject: conn.subject, operatorKind: conn.principal.kind, role: decision.role || conn.role, kind: msg.kind, value: msg.value || {}, result: 'refused', reason: decision.code });
             return sendFrame(conn, 'command_result', { id, result: 'refused', code: decision.code, reason: decision.reason });
+        }
+        // A queue turn that ended while the gate was deciding (domain epochs): its halt is already out, so this command
+        // would follow it into the next turn. Checked here, with no await before the send.
+        if (decision.role === 'queue' && domain.queue.epoch(robotId) !== decision.epoch) {
+            await domain.audit.record({ robotId, deviceId: device ? device.device.id : null, subject: conn.subject, operatorKind: conn.principal.kind, role: decision.role, kind: decision.kind, value: decision.value, result: 'refused', reason: 'bot.turn_ended' });
+            return sendFrame(conn, 'command_result', { id, result: 'refused', code: 'bot.not_your_turn', reason: 'your turn ended before this command could be sent' });
         }
         const deviceCmdId = prefixedId('cmd', now());
         const frame = { v: 1, type: 'command', seq: nextSeq(device), ts: now(), id: deviceCmdId, ref: id, kind: decision.kind, value: decision.value, deadline_ms: decision.deadlineMs, operator: { subject: conn.subject, role: decision.role }, robot_id: robotId };
@@ -721,6 +728,16 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         } finally {
             if (inflight.get(key) === null) inflight.delete(key);
         }
+    }
+
+    /** `give_back`: an owner or operator who took over a queue turn hands it back now (it resumes with its time). */
+    async function onGiveBack(conn) {
+        if (!conn.robotId) return sendError(conn, 'bot.not_joined', 'join a robot first');
+        const role = await domain.members.roleOf(conn.robotId, conn.subject);
+        if (!['owner', 'operator'].includes(role)) return sendError(conn, 'bot.forbidden', 'only the owner or an operator takes over and gives back');
+        await domain.queue.giveBack(conn.robotId);
+        broadcast(conn.robotId);
+        return undefined;
     }
 
     async function onOperatorEstop(conn, latched) {
@@ -933,7 +950,14 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     for (const t of timers) if (t.unref) t.unref();
 
     return {
-        bindDomain(d) { domain = d; d.queue.onHandoff(haltForTurn); },
+        bindDomain(d) {
+            domain = d;
+            d.queue.onHandoff(haltForTurn);
+            // A turn that ends, is left or pauses for an owner takeover, and one that resumes, repaints every panel now
+            // (after the halt has gone), not at the next sweep.
+            d.queue.onHandoff((robotId) => setImmediate(() => broadcast(robotId)));
+            if (d.queue.onResume) d.queue.onResume((robotId) => setImmediate(() => broadcast(robotId)));
+        },
         bindJobs(j) { jobs = j; },
         handleUpgrade, attachSim, detachSim,
         /** A one-time ticket for the embedded panel's Drive (POST /panel/:id/ticket), or null. */
