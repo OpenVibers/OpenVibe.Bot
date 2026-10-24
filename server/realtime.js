@@ -560,7 +560,10 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             return sendFrame(conn, 'command_result', { id, result: 'refused', code: 'bot.not_your_turn', reason: 'your turn ended before this command could be sent' });
         }
         const deviceCmdId = prefixedId('cmd', now());
-        const frame = { v: 1, type: 'command', seq: nextSeq(device), ts: now(), id: deviceCmdId, ref: id, kind: decision.kind, value: decision.value, deadline_ms: decision.deadlineMs, operator: { subject: conn.subject, role: decision.role }, robot_id: robotId };
+        // turn_epoch (contracts 0.213.0): the robot's epoch now, which a queue command's check above proved is the one it
+        // was decided under; an owner's command that just took a turn over carries the epoch its own halt moved to.
+        const epoch = domain.queue.epoch(robotId);
+        const frame = { v: 1, type: 'command', seq: nextSeq(device), ts: now(), id: deviceCmdId, ref: id, kind: decision.kind, value: decision.value, deadline_ms: decision.deadlineMs, operator: { subject: conn.subject, role: decision.role }, robot_id: robotId, ...(epoch ? { turn_epoch: epoch } : {}) };
         if (!send(device.ws, frame)) {
             await domain.audit.record({ robotId, deviceId: device.device.id, subject: conn.subject, operatorKind: conn.principal.kind, role: decision.role, kind: decision.kind, value: decision.value, result: 'refused', reason: 'bot.device_offline' });
             return sendFrame(conn, 'command_result', { id, result: 'refused', code: 'bot.device_offline', reason: 'the device is offline' });
@@ -592,7 +595,9 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         const device = deviceForRobot(robotId);
         if (!device) return;
         const id = prefixedId('cmd', now());
-        if (!send(device.ws, { v: 1, type: 'command', seq: nextSeq(device), ts: now(), id, kind: 'halt', value: {}, operator: { subject: null, role: 'system' }, robot_id: robotId })) return;
+        // The halt carries the epoch the change moved to: a device refuses anything older after it (turn_epoch).
+        const epoch = domain.queue.epoch(robotId);
+        if (!send(device.ws, { v: 1, type: 'command', seq: nextSeq(device), ts: now(), id, kind: 'halt', value: {}, operator: { subject: null, role: 'system' }, robot_id: robotId, ...(epoch ? { turn_epoch: epoch } : {}) })) return;
         const p = { id, opId: id, key: `system|${id}`, deviceId: device.device.id, conn: SYSTEM_CONN, robotId, subject: null, operatorKind: 'system', role: null, kind: 'halt', value: { reason, turn_of: from || null }, at: now(), timer: null };
         pendingCmds.set(id, p);
         p.timer = setTimeout(() => expireCommand(id), 2500);
