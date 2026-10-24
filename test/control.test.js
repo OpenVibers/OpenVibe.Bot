@@ -244,9 +244,51 @@ const plugins = require('./helpers/plugins');
             assert.strictEqual(rc.result, 'refused', 'the expired turn no longer drives');
             cmd(d, { id: 'q3', kind: 'drive', value: { throttle: 0.2 } });
             assert.ok(await dev.waitFor((m) => m.type === 'command' && m.ref === 'q3'), 'the next waiting person is promoted');
+            const order = dev.messages.filter((m) => m.type === 'command').map((m) => (m.kind === 'halt' ? 'halt' : m.ref));
+            assert.deepStrictEqual(order, ['halt', 'q3'], 'the ended turn halts the robot before the next person drives');
+            const halt = dev.messages.find((m) => m.type === 'command' && m.kind === 'halt');
+            assert.deepStrictEqual(halt.operator, { subject: null, role: 'system' });
+            assert.deepStrictEqual(halt.value, {});
+            assert.strictEqual(halt.deadline_ms, undefined);
         } finally {
             t.clock.offset -= 120000;
         }
+        c.close(); d.close();
+    });
+
+    await check('the turn holder leaving halts the robot once, before the next person drives; the halt is audited as system', async () => {
+        const { robot, pairing } = await t.robot(alex, { access_policy: 'queue', limits: { turn_ms: 60000, turn_budget: 5 } });
+        const dev = await deviceFor(robot.id, pairing.code);
+        const c = await op(carol);
+        await joinResult(c, robot.id);
+        const d = await op(dave);
+        await joinResult(d, robot.id);
+        cmd(c, { id: 'l1', kind: 'drive', value: { throttle: 0.3 } });
+        const l1 = await dev.waitFor((m) => m.type === 'command' && m.ref === 'l1');
+        dev.send({ type: 'ack', id: l1.id });
+        await result(c, 'l1');
+        await t.domain.queue.leave(robot.id, dave.subject);   // a waiting person leaving changes no turn
+        await t.wait(50);
+        assert.ok(!dev.messages.some((m) => m.type === 'command' && m.kind === 'halt'), 'no halt while the turn holder stays');
+        await t.domain.queue.join(robot.id, dave.subject);
+        await t.domain.queue.leave(robot.id, carol.subject);
+        const halt = await dev.waitFor((m) => m.type === 'command' && m.kind === 'halt');
+        assert.deepStrictEqual(halt.operator, { subject: null, role: 'system' });
+        assert.strictEqual(halt.robot_id, robot.id);
+        dev.send({ type: 'ack', id: halt.id });
+        cmd(d, { id: 'l2', kind: 'drive', value: { throttle: 0.3 } });
+        const l2 = await dev.waitFor((m) => m.type === 'command' && m.ref === 'l2');
+        dev.send({ type: 'ack', id: l2.id });
+        await result(d, 'l2');
+        const order = dev.messages.filter((m) => m.type === 'command').map((m) => (m.kind === 'halt' ? 'halt' : m.ref));
+        assert.deepStrictEqual(order, ['l1', 'halt', 'l2']);
+        const audit = await t.domain.audit.list(robot.id, { limit: 5 });
+        const row = audit.find((x) => x.kind === 'halt');
+        assert.ok(row, 'the halt is audited');
+        assert.strictEqual(row.result, 'ack');
+        assert.strictEqual(row.operator_kind, 'system');
+        assert.strictEqual(row.operator_subject, null);
+        assert.deepStrictEqual(row.value, { reason: 'turn_left', turn_of: carol.subject });
         c.close(); d.close();
     });
 

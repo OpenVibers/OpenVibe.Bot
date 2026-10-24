@@ -576,6 +576,22 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         sendFrame(p.conn, 'command_result', { id: p.opId, result: 'expired', reason: 'no acknowledgement before the deadline' });
     }
 
+    // Bot's own halt when a queue turn ends or its holder leaves (domain.queue.onHandoff), sent before the next person's
+    // first command can pass the gate: a hold button, a drive still inside its deadline or firmware that keeps going
+    // on its own never runs into the next turn. Its operator is { subject: null, role: 'system' }; its ack or expiry is
+    // audited as operator_kind `system`, value { reason, turn_of }, like any command, and goes to no one.
+    const SYSTEM_CONN = { ws: { readyState: 3, send() {} }, seq: 0 };
+    function haltForTurn(robotId, { from, reason }) {
+        const device = deviceForRobot(robotId);
+        if (!device) return;
+        const id = prefixedId('cmd', now());
+        if (!send(device.ws, { v: 1, type: 'command', seq: nextSeq(device), ts: now(), id, kind: 'halt', value: {}, operator: { subject: null, role: 'system' }, robot_id: robotId })) return;
+        const p = { id, opId: id, key: `system|${id}`, deviceId: device.device.id, conn: SYSTEM_CONN, robotId, subject: null, operatorKind: 'system', role: null, kind: 'halt', value: { reason, turn_of: from || null }, at: now(), timer: null };
+        pendingCmds.set(id, p);
+        p.timer = setTimeout(() => expireCommand(id), 2500);
+        if (p.timer.unref) p.timer.unref();
+    }
+
     function cacheResult(key, r) { results.set(key, { ...r, at: now() }); if (results.size > 4096) results.delete(results.keys().next().value); }
 
     /**
@@ -917,7 +933,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     for (const t of timers) if (t.unref) t.unref();
 
     return {
-        bindDomain(d) { domain = d; },
+        bindDomain(d) { domain = d; d.queue.onHandoff(haltForTurn); },
         bindJobs(j) { jobs = j; },
         handleUpgrade, attachSim, detachSim,
         /** A one-time ticket for the embedded panel's Drive (POST /panel/:id/ticket), or null. */
