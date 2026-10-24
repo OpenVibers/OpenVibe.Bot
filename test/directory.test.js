@@ -27,6 +27,7 @@ const { loadProfiles } = require('../server/profiles');
         assert.ok(html.includes('<h1>Robots</h1>') && html.includes('navbar-mount') && html.includes('/directory.css'));
         for (const p of profiles) assert.ok(html.includes(`href="/models/${p.id}"`), p.id);
         assert.ok(html.includes('href="/try"') && html.includes('Sign in and add a robot'));
+        assert.ok(html.includes('href="/setup/sd-card"'), 'a signed-out visitor sees the blank microSD card path');
         assert.ok(!html.includes('Your robots') && !html.includes('Garage rover'), 'an unlisted robot is nobody else\'s business');
         assert.ok(html.includes('<a class="dir-card-link" href="/try"><span class="dir-card-head"><b>Simulated rover</b>'), 'the simulated rover is always the first robot to drive');
     });

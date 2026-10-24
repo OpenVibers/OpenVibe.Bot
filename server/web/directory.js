@@ -147,8 +147,8 @@ const DEMO_CARD = '<li class="dir-card"><a class="dir-card-link" href="/try"><sp
 // ── GET /robots ─────────────────────────────────────────────────────────────────────────────────────
 function renderDirectory({ config, listed = [], mine = null, models = [], signedIn = false }) {
     const yours = !signedIn ? `<section class="dir-sec dir-cta"><h2>Have a robot?</h2>
-<p class="muted">Sign in to add it and pair it with one pasted command, or drive a simulated rover first, no account needed.</p>
-<p class="dir-actions">${link('/try', 'Try the panel', 'dir-btn dir-primary')} ${link('/auth/login?next=%2Frobots%2Fnew', 'Sign in and add a robot', 'dir-btn')}</p></section>`
+<p class="muted">Sign in to add it and pair it with one pasted command. A Raspberry Pi robot can start from a blank microSD card, with nothing to type on the robot. Or drive a simulated rover first, no account needed.</p>
+<p class="dir-actions">${link('/try', 'Try the panel', 'dir-btn dir-primary')} ${link('/auth/login?next=%2Frobots%2Fnew', 'Sign in and add a robot', 'dir-btn')} ${link('/setup/sd-card', 'From a blank microSD card', 'dir-btn')}</p></section>`
         : `<section class="dir-sec" aria-labelledby="yours-h"><div class="dir-sec-head"><h2 id="yours-h">Your robots</h2>${link('/machines', 'Your machines', 'dir-btn')}${link('/robots/new', 'Add a robot', 'dir-btn dir-primary')}</div>
 ${mine && mine.length ? `<ul class="dir-list">${mine.map((r) => `<li class="dir-row"><a href="/panel/${esc(r.id)}"><b>${esc(r.name)}</b></a><span class="muted">${esc(r.model_name)}</span>`
         + `${r.listed ? `<a class="dir-pill" href="/r/${esc(r.id)}">Listed</a>` : '<span class="dir-pill dir-quiet">Not listed</span>'}`
