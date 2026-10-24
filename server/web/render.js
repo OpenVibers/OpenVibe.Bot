@@ -22,6 +22,7 @@
  */
 const { qrSvg } = require('./qr');
 const { stepHelp } = require('../routines');
+const social = require('openvibe-shared/social');
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ESC[c]);
 /** A data-* attribute's JSON, escaped for a double-quoted attribute. */
@@ -72,7 +73,10 @@ function page(title, body, { scripts = [], bodyClass = '', description = null, c
 <meta name="description" content="${esc(description)}">
 <meta property="og:title" content="${esc(title)} — OpenVibe.Bot">
 <meta property="og:description" content="${esc(description)}">` : ''}${canonical ? `
-<link rel="canonical" href="https://openvibe.bot${esc(canonical)}">` : ''}
+<link rel="canonical" href="https://openvibe.bot${esc(canonical)}">` : ''}${description && canonical ? `
+<meta property="og:url" content="https://openvibe.bot${esc(canonical)}">
+<meta property="og:image" content="https://openvibe.bot${esc(social.url('bot'))}">
+<meta name="twitter:card" content="summary_large_image">` : ''}
 <link rel="stylesheet" href="/panel/panel.css">
 </head>
 <body${bodyClass ? ` class="${esc(bodyClass)}"` : ''}>
