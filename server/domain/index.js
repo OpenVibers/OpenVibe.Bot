@@ -857,7 +857,9 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     const epochs = new Map();
     const epochOf = (robotId) => epochs.get(robotId) || 0;
     const handedOff = (robotId, from, reason) => {
-        epochs.set(robotId, epochOf(robotId) + 1);
+        // Milliseconds on Bot's clock (contracts 0.213.0 turn_epoch): it keeps rising across a restart, and two changes in
+        // one millisecond still differ.
+        epochs.set(robotId, Math.max(epochOf(robotId) + 1, now()));
         if (epochs.size > 10000) epochs.delete(epochs.keys().next().value);
         for (const fn of handoffListeners) { try { fn(robotId, { from, reason }); } catch { /* a listener never breaks the caller */ } }
     };

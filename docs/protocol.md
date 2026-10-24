@@ -116,10 +116,16 @@ queued"), `seq` starts again on each connection, and the device sees only server
 answers a repeated id from its dedup cache instead of running it again). A command in flight when the
 socket drops is lost, and its operator gets `expired`.
 
-Not carried to a driver today: the turn epoch, Bot's `seq` or `ts`. A plugin sees the command id, kind,
-value, the time left and `operator { subject, role }`, so it can tell turns apart only by the operator's
-subject. A per-turn epoch in the command frame, checked by Node and passed to plugins, is the planned next
-step.
+**`turn_epoch`** (contracts 0.213.0) is the robot's control epoch, in milliseconds on Bot's clock, so it keeps rising
+across a Bot restart:
+- It moves when a turn ends, is left or is taken over. The halt for that change carries the new value, and every
+  command carries the epoch current when it is sent. An owner's command right after a takeover carries the epoch its
+  halt moved to.
+- OpenVibe.Node (Node#55) keeps the newest epoch a halt carried per robot, nacks `expired` any command older than it,
+  and passes the epoch to drivers (`cmd.turn_epoch`), so a driver can check it too.
+- It is absent until a robot's first turn change since Bot started. A command without it runs as before.
+
+Bot's `seq` and `ts` are not passed to drivers: `seq` restarts on each connection and orders only that connection.
 
 **Owner takeover.** When the owner or an operator sends a command to a `queue` robot while someone holds
 the turn:

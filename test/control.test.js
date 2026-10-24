@@ -250,6 +250,8 @@ const plugins = require('./helpers/plugins');
             assert.deepStrictEqual(halt.operator, { subject: null, role: 'system' });
             assert.deepStrictEqual(halt.value, {});
             assert.strictEqual(halt.deadline_ms, undefined);
+            assert.ok(halt.turn_epoch > 0, 'the halt carries the new turn epoch');
+            assert.strictEqual(dev.messages.find((m) => m.type === 'command' && m.ref === 'q3').turn_epoch, halt.turn_epoch, 'the next person drives in it');
         } finally {
             t.clock.offset -= 120000;
         }
@@ -350,6 +352,11 @@ const plugins = require('./helpers/plugins');
         const halt = cmds.find((m) => m.kind === 'halt');
         dev.send({ type: 'ack', id: halt.id });
         assert.deepStrictEqual(halt.operator, { subject: null, role: 'system' });
+        // turn_epoch (contracts 0.213.0): the halt carries the epoch the takeover moved to, and the owner's command the same
+        // one, so a device that refuses commands older than its newest halt still runs the owner's.
+        assert.ok(halt.turn_epoch > 0, 'the takeover halt carries its epoch');
+        assert.strictEqual(cmds.find((m) => m.ref === 'o2').turn_epoch, halt.turn_epoch, 'the owner\'s command is of the new epoch');
+        assert.ok(!(cmds.find((m) => m.ref === 'o1').turn_epoch >= halt.turn_epoch), 'carol\'s earlier command is of an older epoch');
         await t.wait(30);
         const row = (await t.domain.audit.list(robot.id, { limit: 6 })).find((x) => x.kind === 'halt');
         assert.deepStrictEqual(row.value, { reason: 'owner_takeover', turn_of: carol.subject }, 'audited as an owner takeover of carol\'s turn');
