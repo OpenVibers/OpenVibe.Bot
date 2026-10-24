@@ -95,6 +95,12 @@ kinds its robot's profile declares (§1.1), with values in the shapes and ranges
 on every disconnect or crash path, without asking the network. `halt` (value `{}`, no deadline) stops
 everything at once and passes the gate even while the e-stop is latched.
 
+Bot sends a `halt` of its own when a `queue` robot's turn ends — the turn ran out, or its holder left —
+before the next person's first command can pass the gate, so a held button, a drive still inside its
+deadline or firmware that keeps going on its own never carries into the next turn. Its `operator` is
+`{ "subject": null, "role": "system" }`; the device acks it like any command. A waiting person leaving
+sends none.
+
 `status` of a Network-paired machine also says what it is: `device_kind` (`onboard` \| `bridge` \|
 `server`), `drivers` (an array of strings), `capabilities` (an object) and `agent_version` (a string of at
 most 40 characters), each optional. Bot stores them on the device row when they differ from it (the row
@@ -344,7 +350,8 @@ needs an explicit owner or operator role — a no-role caller is refused `bot.no
 `robot_state.queue` (only for a `queue` robot) is
 `{ robot_id, subject, active, turn_ends_at, position, budget, used }` — `subject` is the reader's own,
 never another person's, so a waiting person's `position` is 1-based (0 while they hold the turn) and no
-member ever learns the active driver's subject.
+member ever learns the active driver's subject. When a turn ends Bot halts the robot before the next
+turn starts (§1).
 
 ### Examples
 
@@ -499,7 +506,8 @@ the panel's owner-only forms `POST /robots/:id/operators` (body `username`, `rol
 
 Every command — allowed or refused — is written to `command_audit` (robot, device, the operator
 principal and its kind, role, kind, the clamped value summary, result `ack|nack|refused|expired`,
-reason, latency, time), kept 30 days. Changing a robot's streaming toggles writes one row per real change
+reason, latency, time), kept 30 days. Bot's own halt at the end of a queue turn (§1) is a row with
+`operator_kind` `system`, no subject and `value` `{ reason: "turn_ended" | "turn_left", turn_of }`. Changing a robot's streaming toggles writes one row per real change
 (`kind` `streaming.media` or `streaming.live`, `value` `{ on }`, role `owner`, result `ack`); an
 idempotent repeat writes none. The outbox publishes `bot.robot.online`, `bot.robot.offline`,
 `bot.estop.set`, `bot.estop.cleared` and `bot.command.refused` — small payloads of ids, kinds and

@@ -845,13 +845,22 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     // ── Turn queue (ADR-043 decision 8) ───────────────────────────────────────────────────────────
     const turnMs = (robot) => { const l = json(robot.limits, {}); return Number(l.turn_ms) > 0 ? Number(l.turn_ms) : config.control.queueTurnMs; };
     const turnBudget = (robot) => { const l = json(robot.limits, {}); return Number(l.turn_budget) > 0 ? Number(l.turn_budget) : config.control.queueTurnBudget; };
+    // Listeners told when a turn ends (it ran out, or its holder left) before the next one starts: the hub halts the
+    // robot (server/realtime.js), so nothing the last driver sent carries on into the next person's turn.
+    const handoffListeners = new Set();
+    const onHandoff = (fn) => { handoffListeners.add(fn); return () => handoffListeners.delete(fn); };
+    const handedOff = (robotId, from, reason) => { for (const fn of handoffListeners) { try { fn(robotId, { from, reason }); } catch { /* a listener never breaks the caller */ } } };
     /** The active turn for a robot, expiring it and promoting the oldest waiting row when it has ended. */
     async function currentTurn(robotId, q = db) {
         const robot = await q.maybe('SELECT * FROM robots WHERE id = $1', [robotId]);
         if (!robot) return null;
         let active = await q.maybe(`SELECT * FROM robot_queue WHERE robot_id = $1 AND state = 'active'`, [robotId]);
         if (active && new Date(active.turn_ends_at).getTime() > now()) return active;
-        if (active) await q.query(`UPDATE robot_queue SET state = 'done' WHERE robot_id = $1 AND subject = $2`, [robotId, active.subject]);
+        if (active) {
+            // Only the caller that ends the turn reports it (two at once both read it active).
+            const ended = await q.maybe(`UPDATE robot_queue SET state = 'done' WHERE robot_id = $1 AND subject = $2 AND state = 'active' RETURNING subject`, [robotId, active.subject]);
+            if (ended) handedOff(robotId, active.subject, 'turn_ended');
+        }
         const next = await q.maybe(`SELECT * FROM robot_queue WHERE robot_id = $1 AND state = 'waiting' ORDER BY joined_at LIMIT 1 FOR UPDATE`, [robotId]);
         if (!next) return null;
         const at = now();
@@ -873,7 +882,8 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     async function leaveQueue(robotId, subject) {
         const robot = await getRobot(robotId);
         if (!robot) fail(404, 'bot.robot_not_found', 'no such robot');
-        await db.query('DELETE FROM robot_queue WHERE robot_id = $1 AND subject = $2', [robotId, subject]);
+        const gone = await db.maybe('DELETE FROM robot_queue WHERE robot_id = $1 AND subject = $2 RETURNING state', [robotId, subject]);
+        if (gone && gone.state === 'active') handedOff(robotId, subject, 'turn_left');
         await currentTurn(robotId);
         return queueState(robotId, subject);
     }
@@ -1177,7 +1187,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         streaming: { get: streaming, set: setStreaming },
         video: { live: liveVideo },
         estop: { set: setEstop, clear: clearEstop },
-        queue: { join: joinQueue, leave: leaveQueue, state: queueState, currentTurn, consume: consumeTurn, sweep: sweepQueues },
+        queue: { join: joinQueue, leave: leaveQueue, state: queueState, currentTurn, consume: consumeTurn, sweep: sweepQueues, onHandoff },
         audit: { record: auditCommand, list: listAudit, listPage: listAuditPage, prune: pruneAudit },
         control: { prepare, allowedFor, effectiveLimits, deviceLimits, buildValue, DEFAULT_ALLOW, KINDS },
     };
