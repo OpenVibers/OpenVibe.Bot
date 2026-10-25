@@ -38,8 +38,11 @@ const WATCH_MAX_PAYLOAD = 4 * 1024;   // a watcher only ever sends join/leave
 // (OpenVibe.Node protocol.MaxAckData), so a device frame may be that large; ws closes a socket on a larger frame.
 const DEVICE_MAX_PAYLOAD = 640 * 1024;
 // The Node's computer plugin (plan T14/T17): the kinds a person's machine takes, the capability each needs in its
-// status, and the reply window (the owner's approval on the machine plus the program's own run).
-const COMPUTER_CAP = { exec: 'terminal', fs: 'files', screen: 'screen', probe: 'probe', input: 'input', browser: 'browser' };
+// status, and the reply window (the owner's approval on the machine plus the program's own run). `desk` (contracts
+// 0.214.0, Node v0.15.0) starts, stops or reports the machine's private desk; screen, input and browser (and the live
+// screen) act there with `desk: private`, never on the owner's own screen.
+const COMPUTER_CAP = { exec: 'terminal', fs: 'files', screen: 'screen', probe: 'probe', input: 'input', browser: 'browser', desk: 'desk' };
+const NO_DESK = 'this machine has no private desk: it needs OpenVibe Node v0.15.0 or newer on Linux, with Xvfb and allow_desk on';
 const COMPUTER_KINDS = Object.keys(COMPUTER_CAP);
 // The live screen (contracts 0.182.0): a device kind only Bot sends (machineScreen), with the machine's own private
 // stream filled in. It is not one of bot.command@1's kinds, so no operator, agent or service can send it.
@@ -48,19 +51,21 @@ const COMPUTER_DEFAULT_MS = 60000;
 const COMPUTER_MAX_MS = 600000;
 /** What an audit row keeps of a computer command: never a file's content, stdin or arguments (they may hold secrets). */
 function computerSummary(kind, value) {
+    const where = value.desk === 'private' ? { desk: 'private' } : {};
+    if (kind === 'desk') return { action: value.action, ...(Number.isInteger(value.width) && Number.isInteger(value.height) ? { width: value.width, height: value.height } : {}) };
     if (kind === 'exec') return { program: String(value.argv[0]).slice(0, 120), args: value.argv.length - 1 };
     if (kind === 'fs') return { op: value.op, path: String(value.path).slice(0, 300), ...(typeof value.content_b64 === 'string' ? { bytes: Math.floor((value.content_b64.length * 3) / 4) } : {}) };
     if (kind === 'probe') { try { const u = new URL(value.target); return { scheme: u.protocol.replace(':', ''), host: u.host }; } catch { return { scheme: null }; } }
     // Typed text can be anything (a password the person asked for): the audit keeps its length, never the text.
-    if (kind === 'input') return { action: value.action, ...(value.x != null ? { x: value.x, y: value.y } : {}), ...(typeof value.text === 'string' ? { chars: value.text.length } : {}), ...(value.keys ? { keys: value.keys } : {}), ...(value.dy ? { dy: value.dy } : {}) };
+    if (kind === 'input') return { action: value.action, ...(value.x != null ? { x: value.x, y: value.y } : {}), ...(typeof value.text === 'string' ? { chars: value.text.length } : {}), ...(value.keys ? { keys: value.keys } : {}), ...(value.dy ? { dy: value.dy } : {}), ...where };
     // The browser: where it went (the host only, never a path or query), what it clicked, how much was typed.
     if (kind === 'browser') {
         let host = null;
         if (typeof value.url === 'string') { try { host = new URL(value.url).host; } catch { host = null; } }
         return { action: value.action, ...(host ? { host } : {}), ...(typeof value.selector === 'string' ? { selector: value.selector.slice(0, 120) } : {}),
-            ...(value.action === 'fill' && typeof value.text === 'string' ? { chars: value.text.length } : {}), ...(value.key ? { key: value.key } : {}) };
+            ...(value.action === 'fill' && typeof value.text === 'string' ? { chars: value.text.length } : {}), ...(value.key ? { key: value.key } : {}), ...where };
     }
-    return { max_width: value.max_width || null };
+    return { max_width: value.max_width || null, ...where };
 }
 
 function parseCookies(header) {
@@ -708,7 +713,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
                 if (!check.valid) return refuse('bot.invalid_input', `invalid ${kind}: ${(check.errors && check.errors[0] && (check.errors[0].message || JSON.stringify(check.errors[0]))) || 'bad value'}`.slice(0, 300));
             }
             const summary = screen
-                ? { action: String(value.action), ...(Number.isInteger(value.seconds) ? { seconds: value.seconds } : {}), ...(Number.isInteger(value.fps) ? { fps: value.fps } : {}) }
+                ? { action: String(value.action), ...(Number.isInteger(value.seconds) ? { seconds: value.seconds } : {}), ...(Number.isInteger(value.fps) ? { fps: value.fps } : {}), ...(value.desk === 'private' ? { desk: 'private' } : {}) }
                 : computerSummary(kind, value);
             const device = deviceConns.get(deviceId);
             if (!device || !device.online) return refuse('bot.device_offline', 'the machine is offline', summary);
@@ -717,7 +722,10 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
                 if (value.action === 'start' && !(offered && offered.screen && offered.screen.stream === true)) {
                     return refuse('bot.computer_off', 'this machine does not show its screen live: it needs OpenVibe Node v0.12.0 or newer, with the computer plugin running in your graphical session', summary);
                 }
-            } else if (!offered || !offered[COMPUTER_CAP[kind]]) return refuse('bot.computer_off', `this machine does not offer ${COMPUTER_CAP[kind]}: its computer plugin is off (openvibe-node, --computer)`, summary);
+            } else if (!offered || !offered[COMPUTER_CAP[kind]]) {
+                return refuse('bot.computer_off', kind === 'desk' ? NO_DESK : `this machine does not offer ${COMPUTER_CAP[kind]}: its computer plugin is off (openvibe-node, --computer)`, summary);
+            }
+            if (value.desk === 'private' && !(offered && offered.desk)) return refuse('bot.computer_off', NO_DESK, summary);
             const requested = Number(msg.ms);
             const windowMs = Number.isInteger(requested) && requested > 0 ? Math.min(Math.max(requested, 1000), COMPUTER_MAX_MS) : COMPUTER_DEFAULT_MS;
             const deviceCmdId = prefixedId('cmd', now());

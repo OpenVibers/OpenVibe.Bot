@@ -4,9 +4,11 @@
  * stream. Used by the API (POST/GET/DELETE /api/v1/machines/:id/screen) and the web page (/machines/:id/screen), for
  * the owner signed in as themselves only — never an agent, a watch or another service.
  *
- *   start(device, subject, principal, { seconds, fps })  a new key for the machine's stream (domain.machines.screen),
+ *   start(device, subject, principal, { seconds, fps, desk })  a new key for the machine's stream (domain.machines.screen),
  *                                                         then screen_stream start to the machine with the WHIP URL
- *                                                         and key → { streaming, seconds, fps, until }
+ *                                                         and key → { streaming, seconds, fps, until, desk }; desk
+ *                                                         `private` shows the machine's private desk (contracts
+ *                                                         0.214.0, Node v0.15.0) instead of the owner's own screen
  *   state(device, subject)                                → { live, signaling_url, state, stream } (the session's viewer
  *                                                         URL once the machine is publishing; `state` the machine's own
  *                                                         telemetry: live or off)
@@ -35,14 +37,19 @@ function createMachineScreen({ domain, hub, now = () => Date.now() }) {
             if (!hub) throw unavailable();
             const seconds = whole(opts.seconds, SECONDS, 'seconds');
             const fps = whole(opts.fps, FPS, 'fps');
+            const desk = opts.desk == null || opts.desk === '' ? 'main' : String(opts.desk);
+            if (desk !== 'main' && desk !== 'private') throw new BotError(422, 'bot.invalid_input', 'desk is main or private');
             if (!hub.isOnline(device.id)) throw new BotError(409, 'bot.device_offline', 'the machine is offline');
             // Before any key is made: the machine says whether it can (Node v0.12.0's computer plugin, a capture tool).
             const offered = hub.computerOf(device.id);
             if (!(offered && offered.screen && offered.screen.stream === true)) {
                 throw new BotError(409, 'bot.computer_off', 'this machine does not show its screen live: it needs OpenVibe Node v0.12.0 or newer, with the computer plugin running in your graphical session');
             }
+            if (desk === 'private' && !(offered.desk && offered.desk.screen)) {
+                throw new BotError(409, 'bot.computer_off', 'this machine has no private desk to show: it needs OpenVibe Node v0.15.0 or newer on Linux, with Xvfb and allow_desk on');
+            }
             const key = await domain.machines.screen.key(device, subject);
-            const r = await hub.machineScreen(device.id, principal, subject, { action: 'start', whip_url: key.whipUrl, publish_key: key.key, seconds, fps });
+            const r = await hub.machineScreen(device.id, principal, subject, { action: 'start', whip_url: key.whipUrl, publish_key: key.key, seconds, fps, ...(desk === 'private' ? { desk } : {}) });
             if (r.result !== 'ack') {
                 const code = r.code || (r.result === 'expired' ? 'bot.device_timeout' : 'bot.device_refused');
                 const status = r.result === 'refused' ? (code === 'bot.computer_off' || code === 'bot.device_offline' ? 409 : 422) : r.result === 'expired' ? 504 : 409;
@@ -50,7 +57,7 @@ function createMachineScreen({ domain, hub, now = () => Date.now() }) {
             }
             const data = r.data && typeof r.data === 'object' ? r.data : {};
             const until = Number.isFinite(data.until_ms) ? new Date(data.until_ms).toISOString() : new Date(now() + seconds * 1000).toISOString();
-            return { streaming: true, seconds, fps, until };
+            return { streaming: true, seconds, fps, until, desk };
         },
         async state(device, subject) {
             const sensors = hub ? ((hub.deviceState(device.id).telemetry || {}).sensors || {}) : {};

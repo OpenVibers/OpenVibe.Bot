@@ -102,6 +102,28 @@ const { boot, check, done } = require('./helpers/app');
         assert.ok(!JSON.stringify(audit).includes('hello team'), 'typed text is not kept');
     });
 
+    await check('a desk link shows and drives the private desk, never the owner\'s screen', async () => {
+        let r = await fetch(`${t.base}/machines/${deviceId}/screen`, { headers: cookie(alex) });
+        assert.ok(!(await r.text()).includes('Show the private desk'), 'no desk, no desk button');
+        c.send(frame('status', { capabilities: { computer: { ...COMPUTER, desk: { level: 'trusted', window_manager: 'openbox', input: true, screen: true } } }, drivers: [], faults: [] }));
+        await poll(() => (t.hub.computerOf(deviceId) || {}).desk);
+        r = await fetch(`${t.base}/machines/${deviceId}/screen`, { headers: cookie(alex) });
+        const page = await r.text();
+        assert.ok(page.includes('Show the private desk') && page.includes('<option value="private">The private desk, where your agent works</option>'));
+        r = await form(`/machines/${deviceId}/shares`, alex, 'label=Agent+desk&days=1&control=1&desk=private');
+        const html = await r.text();
+        const desk = linkOf(html);
+        assert.ok(desk, 'a desk link');
+        assert.match(html, /Agent desk<\/strong> · the private desk · watch and use/);
+        assert.match(await (await fetch(`${t.base}/screen/${desk}`)).text(), /the private desk, where an agent works/);
+        assert.strictEqual((await json('GET', `/screen/${desk}/state.json`)).json.desk, 'private');
+        assert.strictEqual((await json('POST', `/screen/${desk}/start`)).status, 200);
+        assert.strictEqual(seen.filter((m) => m.kind === 'screen_stream').at(-1).value.desk, 'private', 'the live screen of the desk');
+        assert.strictEqual((await json('POST', `/screen/${desk}/input`, { action: 'click', x: 5, y: 5, width: 100, height: 100 })).status, 200);
+        assert.strictEqual(seen.filter((m) => m.kind === 'input').at(-1).value.desk, 'private', 'a click on the desk, never the owner\'s screen');
+        assert.strictEqual((await t.db.maybe("SELECT desk FROM machine_screen_shares WHERE label = 'Agent desk'")).desk, 'private');
+    });
+
     await check('a burst is slowed down; a revoked link stops at once', async () => {
         let limited = 0;
         for (let i = 0; i < 12; i++) { if ((await json('POST', `/screen/${use}/input`, { action: 'move', x: i, y: i, width: 100, height: 100 })).status === 429) limited++; }

@@ -13,7 +13,9 @@
  * the machine is removed. Nothing here lets a holder run programs, read files or point the screen elsewhere: only the
  * screen's start and stop, and the mouse and keyboard.
  *
- *   create(device, owner, { label, control, days })  → { share, token }
+ *   create(device, owner, { label, control, days, desk })  → { share, token }; desk `private`: the link shows and
+ *                                                   drives the machine's private desk (where an agent works), never the
+ *                                                   owner's own screen
  *   list(device, owner) / revoke(device, owner, id)
  *   open(token)                                     → { share, device } or null
  *   state(token) / start(token) / stop(token)        the screen, through the link
@@ -30,21 +32,23 @@ function createScreenShares({ db, domain, hub, machineScreen, now = () => Date.n
     const rate = new Map();     // share id → recent input timestamps (this process)
 
     const shape = (r) => ({
-        id: r.id, device_id: r.device_id, label: r.label || null, control: !!r.control,
+        id: r.id, device_id: r.device_id, label: r.label || null, control: !!r.control, desk: r.desk === 'private' ? 'private' : 'main',
         created_at: r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at,
         expires_at: r.expires_at ? (r.expires_at instanceof Date ? r.expires_at.toISOString() : r.expires_at) : null,
         last_used_at: r.last_used_at ? (r.last_used_at instanceof Date ? r.last_used_at.toISOString() : r.last_used_at) : null,
     });
 
-    async function create(device, owner, { label = null, control = false, days = DAYS.default } = {}) {
+    async function create(device, owner, { label = null, control = false, days = DAYS.default, desk = 'main' } = {}) {
         if (!device || device.owner_subject !== owner) throw new BotError(404, 'bot.device_not_found', 'no such machine of yours');
         const d = Number(days);
         if (!Number.isInteger(d) || d < DAYS.min || d > DAYS.max) throw new BotError(422, 'bot.invalid_input', `days is a whole number from ${DAYS.min} to ${DAYS.max}`);
+        const where = desk == null || desk === '' ? 'main' : String(desk);
+        if (where !== 'main' && where !== 'private') throw new BotError(422, 'bot.invalid_input', 'desk is main or private');
         const id = prefixedId('shr', now());
         const t = newToken(32);
         const l = label == null ? null : String(label).replace(/\s+/g, ' ').trim().slice(0, 80) || null;
-        await db.query(`INSERT INTO machine_screen_shares (id, device_id, owner_subject, token_hash, label, control, created_at, expires_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, [id, device.id, owner, sha256(t), l, !!control, new Date(now()), new Date(now() + d * 86400000)]);
+        await db.query(`INSERT INTO machine_screen_shares (id, device_id, owner_subject, token_hash, label, control, created_at, expires_at, desk)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, [id, device.id, owner, sha256(t), l, !!control, new Date(now()), new Date(now() + d * 86400000), where]);
         const row = await db.maybe('SELECT * FROM machine_screen_shares WHERE id = $1', [id]);
         return { share: shape(row), token: t };
     }
@@ -85,12 +89,12 @@ function createScreenShares({ db, domain, hub, machineScreen, now = () => Date.n
     async function state(t) {
         const s = await must(t);
         const st = await machineScreen.state(s.device, s.share.owner_subject);
-        return { ...st, name: s.device.name || 'A computer', control: !!s.share.control, label: s.share.label || null };
+        return { ...st, name: s.device.name || 'A computer', control: !!s.share.control, label: s.share.label || null, desk: s.share.desk === 'private' ? 'private' : 'main' };
     }
 
     async function start(t) {
         const s = await must(t, { control: true });
-        return await machineScreen.start(s.device, s.share.owner_subject, asShare(s), { seconds: 1800, fps: 4 });
+        return await machineScreen.start(s.device, s.share.owner_subject, asShare(s), { seconds: 1800, fps: 4, desk: s.share.desk === 'private' ? 'private' : 'main' });
     }
 
     async function stop(t) {
@@ -115,6 +119,7 @@ function createScreenShares({ db, domain, hub, machineScreen, now = () => Date.n
         if (v.action === 'scroll') out.dy = Math.max(-50, Math.min(50, Math.round(Number(v.dy) || 0)));
         if (v.action === 'type') out.text = String(v.text || '').slice(0, 500);
         if (v.action === 'key') out.keys = String(v.keys || '').slice(0, 40);
+        if (s.share.desk === 'private') out.desk = 'private';   // a desk link drives the desk, never the owner's screen
         const recent = (rate.get(s.share.id) || []).filter((x) => now() - x < 1000);
         if (recent.length >= PER_SECOND) throw new BotError(429, 'bot.rate_limited', 'slow down a little');
         recent.push(now());

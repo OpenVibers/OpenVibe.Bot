@@ -51,10 +51,19 @@ Sitemap entries use the release commit time for these code-backed pages.
   - **The viewer.** `GET` answers the session's viewer `signaling_url` once the machine publishes, and the page plays it with the panel's WebRTC viewer.
   - **Stop.** `DELETE` (or Stop) tells the machine to stop and retires the key. Removing a machine archives its stream.
   - **Refused** with `bot.computer_off` when the machine does not offer it (`screen.stream`), and no key is made.
+- **The private desk** (contracts 0.214.0 `bot.command@1` kind `desk`, OpenVibe.Node v0.15.0 on Linux): a screen of its
+  own on the machine (Xvfb with its own bus and window manager) where an agent works without touching the owner's.
+  - **Commands.** `desk` `{ action: start | stop | status, width?, height? }` reaches a machine whose status lists
+    `computer.desk`. `screen`, `input` and `browser` with `desk: "private"` act there. A machine without one answers
+    `bot.computer_off` ("no private desk"), so `desk: private` never falls back to the owner's own screen.
+  - **The audit** keeps the action and size, and marks `desk: private` on what acted there.
+  - **The live screen** of the desk: `POST /machines/:id/screen` with `desk: "private"` (or the page's "Show the
+    private desk" button) sends `screen_stream` with `desk: private`.
 - **Screen share links** (`server/screen-shares.js`, migration `0022_screen_shares.sql`; owner 2026-10-25: a screen a group
   watches and uses together). On the screen page the owner makes a link: **watch** (the live screen) or **watch and use**
   (also start or stop the screen, and the mouse and keyboard). It goes where the group works, such as a workspace room's
-  Screen on OpenVibe.Chat.
+  Screen on OpenVibe.Chat. A link shows the owner's own screen or, on a machine with one, the **private desk**
+  (migration `0023_screen_share_desk.sql`): a room watches the agent work there, and a use link's clicks go to the desk.
   - **The link** is shown once; Bot keeps its sha256. It lasts 1-365 days (30 by default), and stops at once when revoked
     or when the machine is removed. The owner's screen page lists the links (where each went, its kind, end date, last
     use) with a Stop button.
