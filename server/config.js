@@ -177,6 +177,9 @@ function loadConfig(env = process.env) {
             // A Network-paired machine's node token lives 300 s; with no valid `reauth` within 330 s of the
             // last token the socket closes 4002.
             nodeReauthMs: int(env.BOT_NODE_REAUTH_MS, 330 * 1000),
+            // A person's mouse, keyboard or browser action on a machine's screen (as its owner, or through a share
+            // link) holds that screen for them this long: an agent's acting command there waits it out (refused).
+            personTurnMs: int(env.BOT_PERSON_TURN_MS, 15 * 1000),
         },
         // Control gate (ADR-043 decision 5/6/8). maxCommandMs is the absolute deadline cap; the queue is
         // the only way a stranger drives a robot.

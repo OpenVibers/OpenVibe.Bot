@@ -43,6 +43,8 @@ const DEVICE_MAX_PAYLOAD = 640 * 1024;
 // screen) act there with `desk: private`, never on the owner's own screen.
 const COMPUTER_CAP = { exec: 'terminal', fs: 'files', screen: 'screen', probe: 'probe', input: 'input', browser: 'browser', desk: 'desk' };
 const NO_DESK = 'this machine has no private desk: it needs OpenVibe Node v0.15.0 or newer on Linux, with Xvfb and allow_desk on';
+/** A command that acts on a screen (the mouse and keyboard, or the browser doing more than reading it). */
+const actsOnScreen = (kind, value) => kind === 'input' || (kind === 'browser' && !['read', 'close'].includes(value.action));
 const COMPUTER_KINDS = Object.keys(COMPUTER_CAP);
 // The live screen (contracts 0.182.0): a device kind only Bot sends (machineScreen), with the machine's own private
 // stream filled in. It is not one of bot.command@1's kinds, so no operator, agent or service can send it.
@@ -111,6 +113,8 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     const pendingCmds = new Map();     // device-facing command id (server-minted) → pending
     const results = new Map();         // operator key (who + their id) → { result, reason, at }
     const inflight = new Map();        // operator key → device-facing id, while the command is pending
+    // The person always wins a screen (machines): `${device}|${main|private}` → until when a person's input holds it.
+    const personTurns = new Map();
     const timers = [];
     let closed = false;
 
@@ -726,6 +730,19 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
                 return refuse('bot.computer_off', kind === 'desk' ? NO_DESK : `this machine does not offer ${COMPUTER_CAP[kind]}: its computer plugin is off (openvibe-node, --computer)`, summary);
             }
             if (value.desk === 'private' && !(offered && offered.desk)) return refuse('bot.computer_off', NO_DESK, summary);
+            // Two hands, one screen: a person's input (the owner, or a share link's holder) holds the screen for a few
+            // seconds, and an agent's acting command there is refused meanwhile, so it never fights them for the mouse.
+            if (!screen && actsOnScreen(kind, value)) {
+                const turnKey = `${deviceId}|${value.desk === 'private' ? 'private' : 'main'}`;
+                const person = conn.principal.kind === 'user' || conn.principal.kind === 'share';
+                if (person) {
+                    if (personTurns.size > 5000) personTurns.clear();
+                    personTurns.set(turnKey, now() + config.device.personTurnMs);
+                } else if ((personTurns.get(turnKey) || 0) > now()) {
+                    const left = Math.ceil((personTurns.get(turnKey) - now()) / 1000);
+                    return refuse('bot.person_driving', `a person is using this screen right now: try again in ${left} s, after they stop`, summary);
+                }
+            }
             const requested = Number(msg.ms);
             const windowMs = Number.isInteger(requested) && requested > 0 ? Math.min(Math.max(requested, 1000), COMPUTER_MAX_MS) : COMPUTER_DEFAULT_MS;
             const deviceCmdId = prefixedId('cmd', now());

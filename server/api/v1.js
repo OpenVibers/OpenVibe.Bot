@@ -592,7 +592,7 @@ function commandRefusalStatus(code) {
     if (code === 'bot.robot_not_found') return 404;
     if (code === 'bot.not_an_operator' || code === 'bot.read_only' || code === 'bot.forbidden' || code === 'bot.not_your_turn') return 403;
     if (code === 'bot.cooldown' || code === 'bot.turn_budget') return 429;
-    if (code === 'bot.device_offline' || code === 'bot.estop_latched' || code === 'bot.command_pending' || code === 'bot.computer_off') return 409;
+    if (code === 'bot.device_offline' || code === 'bot.estop_latched' || code === 'bot.command_pending' || code === 'bot.computer_off' || code === 'bot.person_driving') return 409;
     return 422;   // unknown_command, command_not_allowed, unknown_actuator, invalid_input, text_too_long
 }
 

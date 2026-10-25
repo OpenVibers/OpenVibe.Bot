@@ -8,7 +8,7 @@ const assert = require('assert');
 const { boot, check, done } = require('./helpers/app');
 
 (async () => {
-    const t = await boot({ env: { BOT_ROUTINE_TICK_MS: '0', BOT_WEBHOOK_TICK_MS: '0' } });
+    const t = await boot({ env: { BOT_ROUTINE_TICK_MS: '0', BOT_WEBHOOK_TICK_MS: '0', BOT_PERSON_TURN_MS: '400' } });
     const alex = t.network.newUser('alex');
     const bob = t.network.newUser('bob');
     let seq = 0;
@@ -38,6 +38,9 @@ const { boot, check, done } = require('./helpers/app');
             else if (m.kind === 'screen' && m.value.desk === 'private') c.send(frame('ack', { id: m.id, data: { format: 'png', width: 1280, height: 800, content_b64: 'iVBORw0KGgo=' } }));
             else c.send(frame('nack', { id: m.id, fault_code: 'not_allowed', message: 'this machine allows observing only' }));
         });
+        // Beat like a real Node while the socket is open, so a longer check never sees its machine go offline.
+        const beat = setInterval(() => { try { c.send(frame('heartbeat', { t: Date.now() })); } catch { /* closed */ } }, Math.max(100, Math.floor(config.heartbeat_ms / 2)));
+        c.ws.on('close', () => clearInterval(beat));
         await poll(() => t.hub.computerOf(deviceId) !== null || !computer);
         return { c, deviceId, config };
     }
@@ -118,6 +121,22 @@ const { boot, check, done } = require('./helpers/app');
         assert.match(none.json.detail || none.json.reason || '', /no private desk/);
         const blind = await cmd(mine.deviceId, { kind: 'input', value: { action: 'click', x: 1, y: 1, width: 2, height: 2, desk: 'private' } }, { user: alex });
         assert.deepStrictEqual([blind.status, blind.json.code], [409, 'bot.computer_off'], 'desk: private on a machine without one never reaches its own screen');
+        // The person always wins: the owner just clicked on the desk, so their agent's click there waits; on the
+        // owner's own screen (another screen) and for reading the page it goes on.
+        const token = actor();
+        await t.call('POST', `/api/v1/machines/${withDesk.deviceId}/agent-computer`, { user: alex, body: { on: true } });
+        assert.strictEqual((await cmd(withDesk.deviceId, { kind: 'input', value: { action: 'move', x: 5, y: 5, width: 1280, height: 800, desk: 'private' } }, { user: alex })).json.result, 'ack');
+        const agentClick = await cmd(withDesk.deviceId, { kind: 'input', value: { action: 'click', x: 20, y: 20, width: 1280, height: 800, desk: 'private' } }, asActor(token, alex.subject));
+        assert.deepStrictEqual([agentClick.status, agentClick.json.code], [409, 'bot.person_driving']);
+        assert.match(agentClick.json.detail || agentClick.json.reason || '', /a person is using this screen right now/);
+        const agentRead = await cmd(withDesk.deviceId, { kind: 'browser', value: { action: 'read', desk: 'private' } }, asActor(token, alex.subject));
+        assert.strictEqual(agentRead.json.result, 'ack', 'reading never fights for the screen');
+        const elsewhere = await cmd(withDesk.deviceId, { kind: 'input', value: { action: 'move', x: 1, y: 1, width: 2, height: 2 } }, asActor(token, alex.subject));
+        assert.strictEqual(elsewhere.json.result, 'ack', 'the owner\'s own screen is another screen');
+        await t.wait(450);   // BOT_PERSON_TURN_MS is 400 in this boot
+        const later = await cmd(withDesk.deviceId, { kind: 'input', value: { action: 'click', x: 20, y: 20, width: 1280, height: 800, desk: 'private' } }, asActor(token, alex.subject));
+        assert.strictEqual(later.json.result, 'ack', 'once the person stops, the agent goes on');
+        await t.call('POST', `/api/v1/machines/${withDesk.deviceId}/agent-computer`, { user: alex, body: { on: false } });   // the checks below start with no machine open to the agent
         withDesk.c.close();
     });
 

@@ -57,6 +57,9 @@ Sitemap entries use the release commit time for these code-backed pages.
     `computer.desk`. `screen`, `input` and `browser` with `desk: "private"` act there. A machine without one answers
     `bot.computer_off` ("no private desk"), so `desk: private` never falls back to the owner's own screen.
   - **The audit** keeps the action and size, and marks `desk: private` on what acted there.
+  - **The person always wins.** A person's mouse, keyboard or browser action on a screen (the owner's, or through a
+    share link) holds that screen (main or the desk) for `BOT_PERSON_TURN_MS` (15 s). An agent's acting command there
+    meanwhile answers `409 bot.person_driving` ("a person is using this screen right now"); reading goes on.
   - **The live screen** of the desk: `POST /machines/:id/screen` with `desk: "private"` (or the page's "Show the
     private desk" button) sends `screen_stream` with `desk: private`.
 - **Screen share links** (`server/screen-shares.js`, migration `0022_screen_shares.sql`; owner 2026-10-25: a screen a group
