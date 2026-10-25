@@ -36,6 +36,7 @@
  *
  * With BOT_PAIRING_AUTHORITY=network the pairing codes are Network's and POST /pair answers 410 bot.pairing_moved.
  */
+const { validCallWord, DEFAULT_CALL_WORD } = require('../voice');
 const express = require('express');
 const { parseSteps, stepHelp, AGENT_MAX_STEPS, AGENT_MAX_S } = require('../routines');
 const { http } = require('openvibe-contracts');
@@ -404,6 +405,7 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         const pick = (cap) => (offered && offered[cap] && typeof offered[cap] === 'object' ? offered[cap] : null);
         return {
             id: device.id, name: device.name || null, online: !!st.online, agent_computer: !!device.agent_computer, watch_probe: !!device.watch_probe,
+            voice: { on: !!device.voice_on, call_word: device.call_word || DEFAULT_CALL_WORD },
             computer: offered ? {
                 level: typeof sensors.computer_level === 'string' ? sensors.computer_level : ((pick('files') || pick('terminal') || pick('screen') || {}).level || null),
                 terminal: pick('terminal'), files: pick('files'), screen: pick('screen'), probe: pick('probe'), input: pick('input'), browser: pick('browser'), desk: pick('desk'),
@@ -462,6 +464,17 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         const { device } = await computerMachine(req, { agentNeedsOptIn: false });
         if (typeof req.body?.on !== 'boolean') fail(422, 'bot.invalid_input', 'on is true or false');
         const updated = await domain.machines.setWatchProbe(device.id, req.body.on);
+        res.json({ machine: machineOut(updated) });
+    }));
+    // The owner lets Vibe answer their voice on the machine, with a call word, or stops it (never an agent or a service).
+    r.post('/machines/:id/voice', manage, wrap(async (req, res) => {
+        if (req.principal.kind !== 'user') fail(403, 'bot.forbidden', 'only the machine\'s owner turns this on or off');
+        const { device } = await computerMachine(req, { agentNeedsOptIn: false });
+        if (typeof req.body?.on !== 'boolean') fail(422, 'bot.invalid_input', 'on is true or false');
+        const word = req.body.call_word == null ? null : validCallWord(req.body.call_word);
+        if (req.body.call_word != null && !word) fail(422, 'bot.invalid_input', 'a call word is 1 to 4 words, 3 to 40 characters, with one word of three letters or more');
+        const updated = await domain.machines.setVoice(device.id, req.body.on, word);
+        if (hub && hub.machineChanged) await hub.machineChanged(updated);
         res.json({ machine: machineOut(updated) });
     }));
     // The owner turns their agent's use of the machine on or off (never the agent itself).

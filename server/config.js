@@ -240,6 +240,10 @@ function loadConfig(env = process.env) {
         // BOT_OPENRE_URL unset, or neither an operator token nor the Network client credentials
         // (OV_OAUTH_CLIENT_SECRET, OV_NETWORK_INTERNAL_URL): devices pair without video (no publish_key,
         // `video: "not_configured"`) and Bot mints no key of its own.
+        // OpenVibe.Chat (Vibe by voice, server/voice.js): Bot asks Vibe as a machine's owner at <internalUrl>/internal/chat/
+        // vibe/ask with its own Network service token (audience openvibe.chat, chat.vibe.ask). Empty turns voice off.
+        chat: { internalUrl: trim(env.BOT_CHAT_INTERNAL_URL ?? 'http://127.0.0.1:4400') },
+        voice: { perHour: Math.max(1, int(env.BOT_VOICE_PER_HOUR, 30)) },
         openre: {
             url: trim(env.BOT_OPENRE_URL || ''),
             token: String(env.BOT_OPENRE_TOKEN || '').trim(),

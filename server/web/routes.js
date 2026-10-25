@@ -28,6 +28,7 @@
  * Pages are never cached: a pairing page carries a live code. Adding a robot and minting a code count against
  * the signed-in person's `bot.robot.manage` limit, the same one /api/v1 applies.
  */
+const { validCallWord } = require('../voice');
 const path = require('path');
 const express = require('express');
 const seo = require('openvibe-shared/seo');
@@ -692,6 +693,19 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         const mine = (await domain.machines.list(me.subject)).find((d) => d.id === req.params.id);
         if (!mine) throw new BotError(404, 'bot.device_not_found', 'no such machine of yours');
         await domain.machines.setAgentComputer(mine.id, req.body && req.body.on === '1');
+        res.redirect(303, '/machines');
+    }));
+    // The owner lets Vibe answer their voice on this machine (OpenVibe Node's voice plugin), with a call word, or stops it.
+    r.post('/machines/:id/voice', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        const mine = (await domain.machines.list(me.subject)).find((d) => d.id === req.params.id);
+        if (!mine) throw new BotError(404, 'bot.device_not_found', 'no such machine of yours');
+        const on = req.body && req.body.on === '1';
+        const word = req.body && req.body.call_word ? validCallWord(req.body.call_word) : null;
+        if (on && req.body && req.body.call_word && !word) throw new BotError(422, 'bot.invalid_input', 'a call word is 1 to 4 words, 3 to 40 characters, with one word of three letters or more');
+        const row = await domain.machines.setVoice(mine.id, on, word);
+        if (hub && hub.machineChanged) await hub.machineChanged(row);
         res.redirect(303, '/machines');
     }));
     r.post('/machines/:id/remove', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {

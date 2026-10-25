@@ -744,6 +744,10 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         return true;
     }
     /** Let the owner's watches probe from this machine, or stop them (the owner check is the caller's). */
+    /** Vibe by voice on this machine, with its call word (the owner check is the caller's; null keeps the word). */
+    async function setVoice(deviceId, on, callWord = null) {
+        return db.maybe('UPDATE devices SET voice_on = $2, call_word = COALESCE($3, call_word), updated_at = $4 WHERE id = $1 AND revoked_at IS NULL RETURNING *', [deviceId, !!on, callWord, iso(now())]);
+    }
     async function setWatchProbe(deviceId, value) {
         return db.maybe('UPDATE devices SET watch_probe = $2, updated_at = $3 WHERE id = $1 AND revoked_at IS NULL RETURNING *', [deviceId, !!value, iso(now())]);
     }
@@ -1244,7 +1248,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         members: { roleOf, add: addOperator, remove: removeOperator, list: listOperators },
         pairing: { create: createPairingCode, redeem, prune: prunePairingCodes, installerCommand, driverForProfile, whipUrl, onPaired },
         devices: { byCredential, bindNode, issuePublishKey, revokeVideo, updateDeclared, revokeNode, ensureServerDevice, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, revokeByNode, touchSeen, setOnline, ownerOf, onChange },
-        machines: { mint: mintMachine, list: listMachines, workerRef, setAgentComputer, setWatchProbe,
+        machines: { mint: mintMachine, list: listMachines, workerRef, setAgentComputer, setWatchProbe, setVoice,
             screen: { key: screenKey, live: screenLive, end: screenEnd, archive: screenArchive } },
         streaming: { get: streaming, set: setStreaming },
         video: { live: liveVideo },

@@ -27,6 +27,7 @@ const { capabilities, ids, validate } = require('openvibe-contracts');
 const { json, iso, prefixedId } = require('./util');
 const { userPrincipal, verifyService, verifyNode, isNodeToken, PRINCIPAL_SUB, decodePayload } = require('./api/auth');
 const { getProfile } = require('./profiles');
+const { createVoice } = require('./voice');
 
 const OPEN = 1;
 const MAX_BACKLOG = 64;   // frames a device may send before its authentication completes
@@ -131,6 +132,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     const watchersByAddr = new Map();  // client address → open /watch sockets
     const offlineAfterMs = config.device.heartbeatMs * config.device.offlineMisses + config.device.offlineGraceMs;
     let jobs = null;                   // the jobs service (server/jobs/index.js), bound by server/app.js
+    const voice = createVoice({ config, now });   // Vibe by voice on a machine (server/voice.js)
 
     const nextSeq = (conn) => ++conn.seq;
     function send(ws, obj) { if (ws.readyState === OPEN) { ws.send(JSON.stringify(obj)); return true; } return false; }
@@ -316,6 +318,8 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         sendFrame(conn, 'config', {
             heartbeat_ms: config.device.heartbeatMs, limits, allowed_commands: allowed,
             estop_latched: robot ? !!robot.estop_latched : false,
+            // Vibe by voice: the machine listens for its call word only while its owner has voice on.
+            ...(conn.device.voice_on ? { voice: true, call_word: voice.callWordOf(conn.device) } : {}),
         });
     }
     /** Re-send `config` to the robot's connected devices (the owner changed its limits or allowlist, or the latch moved). */
@@ -377,10 +381,39 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             case 'reauth': if (conn.node) return onReauth(conn, msg); return sendError(conn, 'bot.unknown_message', `unknown type ${msg.type}`);
             case 'ack': case 'nack': return onAck(conn, msg);
             case 'estop_state': return onEstopState(conn, msg);
+            case 'voice_ask': return onVoiceAsk(conn, msg);
             // Jobs (platform.job-frame@1). Out: job, job_cancel, job_exit_ack (server/jobs/dispatch.js); in:
             case 'job_started': case 'job_stdout': case 'job_usage': case 'job_exit': return jobFrame(conn, msg);
             default: return sendError(conn, 'bot.unknown_message', `unknown type ${msg.type}`);
         }
+    }
+
+    /**
+     * voice_ask (contracts 0.214.0): what the machine's owner said after its call word, transcribed on the machine. Only
+     * with voice on for the machine (read fresh, not from the socket's start); `working` at once, then Vibe's answer as
+     * the owner (server/voice.js), both voice_answer frames with the device's id. The text is never stored here.
+     */
+    async function onVoiceAsk(conn, msg) {
+        const id = typeof msg.id === 'string' && /^[A-Za-z0-9_.:-]{1,64}$/.test(msg.id) ? msg.id : null;
+        const text = typeof msg.text === 'string' ? msg.text.trim() : '';
+        if (!id || !text || text.length > 2000) return sendError(conn, 'bot.bad_frame', 'voice_ask needs id and text (1 to 2000 characters)');
+        const lang = typeof msg.lang === 'string' && /^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8}){0,2}$/.test(msg.lang) ? msg.lang : null;
+        const answer = (state, fields = {}) => sendFrame(conn, 'voice_answer', { id, state, ...fields });
+        const device = conn.sim ? null : await domain.devices.get(conn.device.id);
+        const owner = device && !device.revoked_at ? await domain.devices.ownerOf(device) : null;
+        if (!device || !owner || !device.voice_on) return answer('refused', { text: `Voice is off for this machine. Its owner turns it on at ${config.baseUrl}/machines.` });
+        if (!voice.allow(device.id)) return answer('refused', { text: 'That is a lot of questions this hour. Ask again in a few minutes.' });
+        answer('working', { text: 'On it.' });
+        const r = await voice.ask({ device, owner, id, text, lang });
+        return answer(r.state, { ...(r.text ? { text: r.text } : {}), ...(r.url ? { url: r.url } : {}) });
+    }
+
+    /** The owner changed a machine's settings (voice): its socket gets the fresh row and a new config. */
+    async function machineChanged(row) {
+        const conn = row && deviceConns.get(row.id);
+        if (!conn || conn.sim) return;
+        conn.device = { ...conn.device, ...row };
+        if (conn.online) await sendConfig(conn);
     }
 
     async function handlePair(conn, msg) {
@@ -993,7 +1026,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         /** A one-time ticket for the embedded panel's Drive (POST /panel/:id/ticket), or null. */
         issueControlTicket(principal, robotId) { return tickets.issue(principal, robotId); },
         isOnline, deviceState, sendToDevice, sendToRobotDevices, broadcast, closeDevice, robotState, refreshConfig, pushEstop, closeWatchers, dropSubject, operatorCommand,
-        machineCommand, machineScreen, computerOf,
+        machineCommand, machineScreen, computerOf, machineChanged,
         // Real devices only: a simulator is not a machine anyone runs.
         onlineCount() { let n = 0; for (const c of deviceConns.values()) if (c.online && !c.sim) n++; return n; },
         devices() { return [...deviceConns.values()].filter((c) => !c.sim).map((c) => ({ device_id: c.device.id, online: c.online })); },
