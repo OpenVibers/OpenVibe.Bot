@@ -724,7 +724,46 @@ ${add}
  * /machines/:id/screen: the machine's screen, live, for its owner only (plan T14). The tile waits for the machine's
  * session (public/panel.js polls `stateUrl`) and plays it like a robot's camera; Stop ends it at once.
  */
-function renderMachineScreenPage({ machine, until = null, error = null, idle = false }) {
+/** The owner's links to this screen (server/screen-shares.js): make one to watch or use it, see and stop the others. */
+function sharesBlock(machine, shares, madeLink, madeShare) {
+    const rows = (shares || []).map((x) => `<li><strong>${esc(x.label || 'A link')}</strong> · ${x.control ? 'watch and use' : 'watch only'} · until <time datetime="${esc(x.expires_at || '')}" data-local-time>${esc(String(x.expires_at || '').slice(0, 10))}</time>${x.last_used_at ? ` · last opened <time datetime="${esc(x.last_used_at)}" data-local-time>${esc(String(x.last_used_at).slice(0, 16).replace('T', ' '))}</time>` : ''}
+<form method="post" action="/machines/${esc(machine.id)}/shares/${esc(x.id)}/revoke" class="inline-form"><button type="submit" class="button quiet">Stop this link</button></form></li>`).join('');
+    return `<section class="machine-shares" aria-labelledby="shares-h"><h2 id="shares-h">Share this screen</h2>
+<p class="muted">Make a link for a group: put it in a workspace room on OpenVibe.Chat (the staff room's Screen) or anywhere people work together. <strong>Watch</strong> shows the screen live. <strong>Watch and use</strong> also lets them start it and use the mouse and keyboard, at the level you set on this computer: at <code>ask</code> each action waits for your approval there, and at <code>observe</code> nothing happens. Nobody can run programs or read files through a link.</p>
+${madeLink ? `<p class="notice" role="status">Your new link${madeShare && madeShare.control ? ' (watch and use)' : ''}. Copy it now: it is not shown again.<br><input class="share-link" type="text" readonly value="${esc(madeLink)}" aria-label="The new screen link"></p>` : ''}
+<form method="post" action="/machines/${esc(machine.id)}/shares" class="share-form">
+<label class="field"><span class="field-label">Where it goes</span><input name="label" maxlength="80" placeholder="Staff room"></label>
+<label class="field"><span class="field-label">Lasts (days)</span><input name="days" type="number" min="1" max="365" value="30"></label>
+<label class="check"><input type="checkbox" name="control" value="1"> They may use the mouse and keyboard too</label>
+<button type="submit" class="primary">Make a link</button></form>
+${rows ? `<ul class="share-list">${rows}</ul>` : ''}</section>`;
+}
+
+/** A screen link that does not work (stopped, ended, never existed): one answer for every reason. */
+function renderShareGone() {
+    return page('Screen link', `<main class="page share-page"><h1>This screen link does not work</h1><p class="muted">It was stopped, it ended, or it never existed. Ask whoever shared it for a new one.</p></main>`, { description: 'A shared computer screen on OpenVibe.Bot.' });
+}
+
+/** /screen/:token: a shared screen, live, for a frame or a tab; with "use" links, the mouse and keyboard too. */
+function renderSharePage({ token, name, control, label }) {
+    const base = `/screen/${encodeURIComponent(token)}`;
+    const body = `<main class="page share-page" data-share="${esc(base)}" data-control="${control ? '1' : '0'}">
+<header class="share-head"><h1>${esc(name)}${label ? ` <span class="muted">· ${esc(label)}</span>` : ''}</h1>
+<p class="muted share-mode">${control ? 'Shared to watch and use' : 'Shared to watch'}</p></header>
+<figure class="camera machine-screen share-screen" data-screen-state="${esc(base)}/state.json" tabindex="${control ? '0' : '-1'}" aria-label="The shared screen${control ? ': turn on Use to click and type on it' : ''}">
+<div class="camera-screen" data-camera-screen>${icon('plug', 'icon camera-icon')}<p class="camera-title" data-screen-status role="status">Looking for the screen…</p>
+<p class="camera-sub">The picture comes from the computer itself, a few frames a second.</p></div>
+</figure>
+${control ? `<div class="share-controls">
+<button type="button" class="primary" data-share-start hidden>Start the screen</button>
+<label class="check share-use"><input type="checkbox" data-share-use> Use the mouse and keyboard</label>
+<button type="button" class="button quiet" data-share-stop>Stop the screen</button>
+<span class="muted small" data-share-note role="status"></span></div>` : ''}
+</main>`;
+    return page(`${name}: shared screen`, body, { scripts: ['/panel/panel.js', ...(control ? ['/panel/screen-share.js'] : [])], bodyClass: 'share-body', description: 'A shared computer screen on OpenVibe.Bot.' });
+}
+
+function renderMachineScreenPage({ machine, until = null, error = null, idle = false, shares = [], madeLink = null, madeShare = null }) {
     const name = machine.name || machine.id;
     const stateUrl = `/machines/${encodeURIComponent(machine.id)}/screen.json`;
     // Idle (nothing is shown, as from a link): a start button instead of waiting for a stream nobody started.
@@ -734,6 +773,7 @@ function renderMachineScreenPage({ machine, until = null, error = null, idle = f
 <h1>${esc(name)}: screen</h1>
 <p class="muted">Show this computer's screen here, live, to you only, for 10 minutes. Nothing is recorded, and the computer says on its desktop that its screen is live.</p>
 <form method="post" action="/machines/${esc(machine.id)}/screen"><button type="submit" class="primary">Show my screen</button></form>
+${sharesBlock(machine, shares, madeLink, madeShare)}
 </main>`;
         return page(`${name}: screen`, body, { description: 'Your machine\'s screen, live, for you only.', canonical: '/machines' });
     }
@@ -751,6 +791,7 @@ ${error ? `<p class="error" role="alert">${esc(error)}</p>` : ends}
 <form method="post" action="/machines/${esc(machine.id)}/screen"><button type="submit" class="button quiet">${error ? 'Try again' : 'Start again (10 more minutes)'}</button></form>
 </div>
 <p class="muted small">The machine says on its desktop that its screen is live. <code>openvibe-node stop</code> on the machine ends it at once, and it ends on its own after its time.</p>
+${sharesBlock(machine, shares, madeLink, madeShare)}
 </main>`;
     return page(`${name}: screen`, body, { scripts: ['/panel/panel.js'], description: 'Your machine\'s screen, live, for you only.', canonical: '/machines' });
 }
@@ -789,4 +830,4 @@ function renderPhonePage() {
     return page('This phone is a robot', body, { scripts: ['/panel/phone-device.js'], bodyClass: 'phone-page', description: 'Turn a phone into a robot on OpenVibe.Bot from its browser: its camera, voice and face, with nothing to install.', canonical: '/device/phone' });
 }
 
-module.exports = { page, renderPanel, renderPhonePage, renderMachinesPage, renderMachineScreenPage, panelScripts, isSim, TRY_DESCRIPTION, renderEmbedRefused, renderDrivePage, renderWidget, renderRobotsPage, renderPairingPage, renderLinkPage, renderClaimPage, renderClaimApproved, camerasOf, esc };
+module.exports = { page, renderPanel, renderPhonePage, renderMachinesPage, renderMachineScreenPage, renderSharePage, renderShareGone, panelScripts, isSim, TRY_DESCRIPTION, renderEmbedRefused, renderDrivePage, renderWidget, renderRobotsPage, renderPairingPage, renderLinkPage, renderClaimPage, renderClaimApproved, camerasOf, esc };
