@@ -51,6 +51,22 @@ Sitemap entries use the release commit time for these code-backed pages.
   - **The viewer.** `GET` answers the session's viewer `signaling_url` once the machine publishes, and the page plays it with the panel's WebRTC viewer.
   - **Stop.** `DELETE` (or Stop) tells the machine to stop and retires the key. Removing a machine archives its stream.
   - **Refused** with `bot.computer_off` when the machine does not offer it (`screen.stream`), and no key is made.
+- **Screen share links** (`server/screen-shares.js`, migration `0022_screen_shares.sql`; owner 2026-10-25: a screen a group
+  watches and uses together). On the screen page the owner makes a link: **watch** (the live screen) or **watch and use**
+  (also start or stop the screen, and the mouse and keyboard). It goes where the group works, such as a workspace room's
+  Screen on OpenVibe.Chat.
+  - **The link** is shown once; Bot keeps its sha256. It lasts 1-365 days (30 by default), and stops at once when revoked
+    or when the machine is removed. The owner's screen page lists the links (where each went, its kind, end date, last
+    use) with a Stop button.
+  - **The page** `/screen/:token` plays the screen like the owner's page. Its CSP lets it sit in a frame on
+    `openvibe.chat`, `openvibe.network` and `BOT_EMBED_ORIGINS`. It sends `Referrer-Policy: no-referrer` and is noindex.
+    `GET /screen/:token/state.json` is the state.
+  - **Using it** (use links only, `public/screen-share.js`): `POST /screen/:token/start|stop`, and `POST /screen/:token/input` with a
+    `bot.command@1` input value (click, double click, right click, move, scroll at a position in the picture, typed
+    text, or a key or chord by name). Each is an `input` command to the machine **as its owner**, judged by the level
+    the owner set there (`ask` waits for approval on the machine; `observe` refuses), 8 a second at most per link.
+    The audit keeps the action and position (typed text only as a character count) under the machine. Nothing else
+    passes: no programs, no files, no choice of where the screen goes.
 - A server-side ONVIF camera (`camera.onvif`) is not installed on a machine: it gets no `--driver` and Bot attaches it itself from `BOT_ONVIF_CAMERAS` (see Deploy), so its panel works as soon as the camera answers.
 - The robot's panel is `openvibe.bot/panel/<rob_…>` (`GET /panel/:id`, rendered from the profile; `docs/protocol.md` §3). The device-side bring-up steps for the Adeept ADR036 kit live with the driver, in OpenVibe.Node's `docs/hardware-adeept.md` (T15 step 1).
 - A robot can use its own `local.rob_…` profile, stored with that robot and validated against `bot.robot-profile@1` and Bot's capability, driver and widget registries. On the owner's robot page, the Buttons form adds or removes rows and saves each button's name, label, optional keyboard key, cooldown in milliseconds and hold setting. The Video click checkbox enables a separate point cooldown. Only the owner can save or return to the robot's catalogue profile; each change is audited.
