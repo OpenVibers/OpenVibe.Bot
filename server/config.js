@@ -177,6 +177,9 @@ function loadConfig(env = process.env) {
             // A Network-paired machine's node token lives 300 s; with no valid `reauth` within 330 s of the
             // last token the socket closes 4002.
             nodeReauthMs: int(env.BOT_NODE_REAUTH_MS, 330 * 1000),
+            // A person's mouse, keyboard or browser action on a machine's screen (as its owner, or through a share
+            // link) holds that screen for them this long: an agent's acting command there waits it out (refused).
+            personTurnMs: int(env.BOT_PERSON_TURN_MS, 15 * 1000),
         },
         // Control gate (ADR-043 decision 5/6/8). maxCommandMs is the absolute deadline cap; the queue is
         // the only way a stranger drives a robot.
@@ -237,6 +240,10 @@ function loadConfig(env = process.env) {
         // BOT_OPENRE_URL unset, or neither an operator token nor the Network client credentials
         // (OV_OAUTH_CLIENT_SECRET, OV_NETWORK_INTERNAL_URL): devices pair without video (no publish_key,
         // `video: "not_configured"`) and Bot mints no key of its own.
+        // OpenVibe.Chat (Vibe by voice, server/voice.js): Bot asks Vibe as a machine's owner at <internalUrl>/internal/chat/
+        // vibe/ask with its own Network service token (audience openvibe.chat, chat.vibe.ask). Empty turns voice off.
+        chat: { internalUrl: trim(env.BOT_CHAT_INTERNAL_URL ?? 'http://127.0.0.1:4400') },
+        voice: { perHour: Math.max(1, int(env.BOT_VOICE_PER_HOUR, 30)) },
         openre: {
             url: trim(env.BOT_OPENRE_URL || ''),
             token: String(env.BOT_OPENRE_TOKEN || '').trim(),

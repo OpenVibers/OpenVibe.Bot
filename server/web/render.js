@@ -676,6 +676,17 @@ function renderMachinesPage({ machines = [], pairing = null }) {
         return { level: LEVELS[level] ? level : null, terminal: !!c.terminal, files: !!c.files, screen: !!c.screen, probe: !!c.probe, input: !!c.input,
             screenStream: !!(c.screen && c.screen.stream === true) };
     };
+    // Vibe by voice: shown for a machine whose Node runs the voice plugin (capabilities.voice).
+    const voiceRow = (m) => {
+        const v = (m.capabilities && typeof m.capabilities === 'object' ? m.capabilities : {}).voice;
+        if (!v || typeof v !== 'object') return '';
+        const word = m.call_word || 'hey vibe';
+        return `<div class="machine-voice"><span class="pill">${m.voice_on ? `Voice: "${esc(word)}"` : 'Voice: off'}</span>`
+            + (m.voice_on
+                ? `<form method="post" action="/machines/${esc(m.id)}/voice"><input type="hidden" name="on" value="0"><button type="submit" class="button quiet" aria-pressed="true">Stop Vibe answering my voice here</button></form>`
+                : `<form method="post" action="/machines/${esc(m.id)}/voice" class="inline-form"><input type="hidden" name="on" value="1"><label class="sr-only" for="cw-${esc(m.id)}">Call word</label><input id="cw-${esc(m.id)}" name="call_word" maxlength="40" value="${esc(word)}" aria-label="Call word"><button type="submit" class="button quiet" aria-pressed="false">Let Vibe answer my voice here</button></form>`)
+            + '<span class="muted">The machine listens for its call word on its own; only what you say after it goes to Vibe, and the answer is spoken here and kept in your Vibe chats.</span></div>';
+    };
     const computerRow = (m) => {
         const c = computerOf(m);
         if (!c) return '';
@@ -694,7 +705,7 @@ function renderMachinesPage({ machines = [], pairing = null }) {
         ? `<ul class="robots">${machines.map((m) => `<li class="robot-card"><span class="robot-name">${icon('plug')}<span>${esc(m.name || m.id)}</span></span>`
             + `<span class="robot-meta"><span class="pill">${m.online ? 'Online' : 'Offline'}</span>${classesOf(m).map((c) => ` <span class="pill">${esc(c)} jobs</span>`).join('')}`
             + `${m.agent_version ? ` <span class="pill">Node ${esc(m.agent_version)}</span>` : ''}${m.robot ? ` <span class="pill">Serves ${esc(m.robot)}</span>` : ''}</span>`
-            + computerRow(m)
+            + computerRow(m) + voiceRow(m)
             + `<span class="robot-actions"><form method="post" action="/machines/${esc(m.id)}/remove"><button type="submit" class="button quiet">Remove</button></form></span></li>`).join('')}</ul>`
         : `<div class="empty">${icon('plug', 'icon empty-icon')}<p class="empty-title">No machines yet.</p><p>Add your computer or a server you own. It runs the jobs you start, such as a coding task on openvibe.codes, and nobody else's.</p></div>`;
     const add = pairing
@@ -725,8 +736,8 @@ ${add}
  * session (public/panel.js polls `stateUrl`) and plays it like a robot's camera; Stop ends it at once.
  */
 /** The owner's links to this screen (server/screen-shares.js): make one to watch or use it, see and stop the others. */
-function sharesBlock(machine, shares, madeLink, madeShare) {
-    const rows = (shares || []).map((x) => `<li><strong>${esc(x.label || 'A link')}</strong> · ${x.control ? 'watch and use' : 'watch only'} · until <time datetime="${esc(x.expires_at || '')}" data-local-time>${esc(String(x.expires_at || '').slice(0, 10))}</time>${x.last_used_at ? ` · last opened <time datetime="${esc(x.last_used_at)}" data-local-time>${esc(String(x.last_used_at).slice(0, 16).replace('T', ' '))}</time>` : ''}
+function sharesBlock(machine, shares, madeLink, madeShare, hasDesk = false) {
+    const rows = (shares || []).map((x) => `<li><strong>${esc(x.label || 'A link')}</strong> · ${x.desk === 'private' ? 'the private desk · ' : ''}${x.control ? 'watch and use' : 'watch only'} · until <time datetime="${esc(x.expires_at || '')}" data-local-time>${esc(String(x.expires_at || '').slice(0, 10))}</time>${x.last_used_at ? ` · last opened <time datetime="${esc(x.last_used_at)}" data-local-time>${esc(String(x.last_used_at).slice(0, 16).replace('T', ' '))}</time>` : ''}
 <form method="post" action="/machines/${esc(machine.id)}/shares/${esc(x.id)}/revoke" class="inline-form"><button type="submit" class="button quiet">Stop this link</button></form></li>`).join('');
     return `<section class="machine-shares" aria-labelledby="shares-h"><h2 id="shares-h">Share this screen</h2>
 <p class="muted">Make a link for a group: put it in a workspace room on OpenVibe.Chat (the staff room's Screen) or anywhere people work together. <strong>Watch</strong> shows the screen live. <strong>Watch and use</strong> also lets them start it and use the mouse and keyboard, at the level you set on this computer: at <code>ask</code> each action waits for your approval there, and at <code>observe</code> nothing happens. Nobody can run programs or read files through a link.</p>
@@ -734,6 +745,7 @@ ${madeLink ? `<p class="notice" role="status">Your new link${madeShare && madeSh
 <form method="post" action="/machines/${esc(machine.id)}/shares" class="share-form">
 <label class="field"><span class="field-label">Where it goes</span><input name="label" maxlength="80" placeholder="Staff room"></label>
 <label class="field"><span class="field-label">Lasts (days)</span><input name="days" type="number" min="1" max="365" value="30"></label>
+${hasDesk ? '<label class="field"><span class="field-label">Which screen</span><select name="desk"><option value="main">Your own screen</option><option value="private">The private desk, where your agent works</option></select></label>' : ''}
 <label class="check"><input type="checkbox" name="control" value="1"> They may use the mouse and keyboard too</label>
 <button type="submit" class="primary">Make a link</button></form>
 ${rows ? `<ul class="share-list">${rows}</ul>` : ''}</section>`;
@@ -745,11 +757,11 @@ function renderShareGone() {
 }
 
 /** /screen/:token: a shared screen, live, for a frame or a tab; with "use" links, the mouse and keyboard too. */
-function renderSharePage({ token, name, control, label }) {
+function renderSharePage({ token, name, control, label, desk = 'main' }) {
     const base = `/screen/${encodeURIComponent(token)}`;
     const body = `<main class="page share-page" data-share="${esc(base)}" data-control="${control ? '1' : '0'}">
 <header class="share-head"><h1>${esc(name)}${label ? ` <span class="muted">· ${esc(label)}</span>` : ''}</h1>
-<p class="muted share-mode">${control ? 'Shared to watch and use' : 'Shared to watch'}</p></header>
+<p class="muted share-mode">${control ? 'Shared to watch and use' : 'Shared to watch'}${desk === 'private' ? ': the private desk, where an agent works (never the owner\'s own screen)' : ''}</p></header>
 <figure class="camera machine-screen share-screen" data-screen-state="${esc(base)}/state.json" tabindex="${control ? '0' : '-1'}" aria-label="The shared screen${control ? ': turn on Use to click and type on it' : ''}">
 <div class="camera-screen" data-camera-screen>${icon('plug', 'icon camera-icon')}<p class="camera-title" data-screen-status role="status">Looking for the screen…</p>
 <p class="camera-sub">The picture comes from the computer itself, a few frames a second.</p></div>
@@ -763,7 +775,7 @@ ${control ? `<div class="share-controls">
     return page(`${name}: shared screen`, body, { scripts: ['/panel/panel.js', ...(control ? ['/panel/screen-share.js'] : [])], bodyClass: 'share-body', description: 'A shared computer screen on OpenVibe.Bot.' });
 }
 
-function renderMachineScreenPage({ machine, until = null, error = null, idle = false, shares = [], madeLink = null, madeShare = null }) {
+function renderMachineScreenPage({ machine, until = null, error = null, idle = false, shares = [], madeLink = null, madeShare = null, hasDesk = false }) {
     const name = machine.name || machine.id;
     const stateUrl = `/machines/${encodeURIComponent(machine.id)}/screen.json`;
     // Idle (nothing is shown, as from a link): a start button instead of waiting for a stream nobody started.
@@ -772,8 +784,10 @@ function renderMachineScreenPage({ machine, until = null, error = null, idle = f
 <main class="page">
 <h1>${esc(name)}: screen</h1>
 <p class="muted">Show this computer's screen here, live, to you only, for 10 minutes. Nothing is recorded, and the computer says on its desktop that its screen is live.</p>
-<form method="post" action="/machines/${esc(machine.id)}/screen"><button type="submit" class="primary">Show my screen</button></form>
-${sharesBlock(machine, shares, madeLink, madeShare)}
+<form method="post" action="/machines/${esc(machine.id)}/screen" class="inline-form"><button type="submit" class="primary">Show my screen</button></form>
+${hasDesk ? `<form method="post" action="/machines/${esc(machine.id)}/screen" class="inline-form"><input type="hidden" name="desk" value="private"><button type="submit" class="button">Show the private desk</button></form>
+<p class="muted">The private desk is a screen of its own on this computer, where your agent works without touching yours.</p>` : ''}
+${sharesBlock(machine, shares, madeLink, madeShare, hasDesk)}
 </main>`;
         return page(`${name}: screen`, body, { description: 'Your machine\'s screen, live, for you only.', canonical: '/machines' });
     }

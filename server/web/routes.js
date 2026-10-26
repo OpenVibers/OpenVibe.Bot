@@ -28,6 +28,7 @@
  * Pages are never cached: a pairing page carries a live code. Adding a robot and minting a code count against
  * the signed-in person's `bot.robot.manage` limit, the same one /api/v1 applies.
  */
+const { validCallWord } = require('../voice');
 const path = require('path');
 const express = require('express');
 const seo = require('openvibe-shared/seo');
@@ -585,17 +586,19 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         return mine;
     };
     const asUser = (me) => ({ kind: 'user', sub: me.subject });
+    // The machine has a private desk to show (Node v0.15.0 on Linux): its owner may show it, or share it, instead.
+    const hasDesk = (mine) => !!(hub && (hub.computerOf(mine.id) || {}).desk);
     r.post('/machines/:id/screen', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
         const me = requireUser(req);
         if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
         const mine = await myMachine(req, me);
         try {
-            const out = await machineScreen.start(mine, me.subject, asUser(me));
+            const out = await machineScreen.start(mine, me.subject, asUser(me), { desk: req.body && req.body.desk === 'private' ? 'private' : 'main' });
             res.redirect(303, `/machines/${encodeURIComponent(mine.id)}/screen?until=${encodeURIComponent(out.until)}`);
         } catch (e) {
             if (!(e instanceof BotError)) throw e;
             res.setHeader('Content-Security-Policy', PANEL_CSP);
-            res.status(e.status).type('html').send(renderMachineScreenPage({ machine: mine, error: e.detail || e.message }));
+            res.status(e.status).type('html').send(renderMachineScreenPage({ machine: mine, error: e.detail || e.message, hasDesk: hasDesk(mine) }));
         }
     }));
     r.get('/machines/:id/screen', page(async (req, res) => {
@@ -606,7 +609,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         const idle = !until && (await machineScreen.state(mine, me.subject)).state !== 'live';
         res.setHeader('Vary', 'Cookie');
         res.setHeader('Content-Security-Policy', PANEL_CSP);
-        res.type('html').send(renderMachineScreenPage({ machine: mine, until, idle, shares: await shares.list(mine, me.subject).catch(() => []) }));
+        res.type('html').send(renderMachineScreenPage({ machine: mine, until, idle, shares: await shares.list(mine, me.subject).catch(() => []), hasDesk: hasDesk(mine) }));
     }));
     r.get('/machines/:id/screen.json', page(async (req, res) => {
         const me = requireUser(req);
@@ -630,9 +633,9 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         const me = requireUser(req);
         if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
         const mine = await myMachine(req, me);
-        const made = await shares.create(mine, me.subject, { label: req.body && req.body.label, control: req.body && req.body.control === '1', days: (req.body && req.body.days) || 30 });
+        const made = await shares.create(mine, me.subject, { label: req.body && req.body.label, control: req.body && req.body.control === '1', days: (req.body && req.body.days) || 30, desk: req.body && req.body.desk === 'private' ? 'private' : 'main' });
         res.setHeader('Content-Security-Policy', PANEL_CSP);
-        res.type('html').send(renderMachineScreenPage({ machine: mine, idle: true, shares: await shares.list(mine, me.subject), madeLink: `${config.baseUrl}/screen/${made.token}`, madeShare: made.share }));
+        res.type('html').send(renderMachineScreenPage({ machine: mine, idle: true, shares: await shares.list(mine, me.subject), madeLink: `${config.baseUrl}/screen/${made.token}`, madeShare: made.share, hasDesk: hasDesk(mine) }));
     }));
     r.post('/machines/:id/shares/:share/revoke', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
         const me = requireUser(req);
@@ -656,7 +659,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         res.setHeader('Content-Security-Policy', shareCsp);
         const s = await shares.open(req.params.token).catch(() => null);
         if (!s) return res.status(404).type('html').send(renderShareGone());
-        res.type('html').send(renderSharePage({ token: req.params.token, name: s.device.name || 'A computer', control: !!s.share.control, label: s.share.label }));
+        res.type('html').send(renderSharePage({ token: req.params.token, name: s.device.name || 'A computer', control: !!s.share.control, label: s.share.label, desk: s.share.desk === 'private' ? 'private' : 'main' }));
     });
     r.get('/screen/:token/state.json', shareJson(async (req) => await shares.state(req.params.token)));
     r.post('/screen/:token/start', ...shareLimit, shareJson(async (req) => await shares.start(req.params.token)));
@@ -690,6 +693,19 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         const mine = (await domain.machines.list(me.subject)).find((d) => d.id === req.params.id);
         if (!mine) throw new BotError(404, 'bot.device_not_found', 'no such machine of yours');
         await domain.machines.setAgentComputer(mine.id, req.body && req.body.on === '1');
+        res.redirect(303, '/machines');
+    }));
+    // The owner lets Vibe answer their voice on this machine (OpenVibe Node's voice plugin), with a call word, or stops it.
+    r.post('/machines/:id/voice', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        const mine = (await domain.machines.list(me.subject)).find((d) => d.id === req.params.id);
+        if (!mine) throw new BotError(404, 'bot.device_not_found', 'no such machine of yours');
+        const on = req.body && req.body.on === '1';
+        const word = req.body && req.body.call_word ? validCallWord(req.body.call_word) : null;
+        if (on && req.body && req.body.call_word && !word) throw new BotError(422, 'bot.invalid_input', 'a call word is 1 to 4 words, 3 to 40 characters, with one word of three letters or more');
+        const row = await domain.machines.setVoice(mine.id, on, word);
+        if (hub && hub.machineChanged) await hub.machineChanged(row);
         res.redirect(303, '/machines');
     }));
     r.post('/machines/:id/remove', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {

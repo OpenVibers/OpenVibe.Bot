@@ -51,10 +51,32 @@ Sitemap entries use the release commit time for these code-backed pages.
   - **The viewer.** `GET` answers the session's viewer `signaling_url` once the machine publishes, and the page plays it with the panel's WebRTC viewer.
   - **Stop.** `DELETE` (or Stop) tells the machine to stop and retires the key. Removing a machine archives its stream.
   - **Refused** with `bot.computer_off` when the machine does not offer it (`screen.stream`), and no key is made.
+- **The private desk** (contracts 0.214.0 `bot.command@1` kind `desk`, OpenVibe.Node v0.15.0 on Linux): a screen of its
+  own on the machine (Xvfb with its own bus and window manager) where an agent works without touching the owner's.
+  - **Commands.** `desk` `{ action: start | stop | status, width?, height? }` reaches a machine whose status lists
+    `computer.desk`. `screen`, `input` and `browser` with `desk: "private"` act there. A machine without one answers
+    `bot.computer_off` ("no private desk"), so `desk: private` never falls back to the owner's own screen.
+  - **The audit** keeps the action and size, and marks `desk: private` on what acted there.
+  - **The person always wins.** A person's mouse, keyboard or browser action on a screen (the owner's, or through a
+    share link) holds that screen (main or the desk) for `BOT_PERSON_TURN_MS` (15 s). An agent's acting command there
+    meanwhile answers `409 bot.person_driving` ("a person is using this screen right now"); reading goes on.
+  - **The live screen** of the desk: `POST /machines/:id/screen` with `desk: "private"` (or the page's "Show the
+    private desk" button) sends `screen_stream` with `desk: private`.
+- **Vibe by voice** (`server/voice.js`, migration `0024_machine_voice.sql`, contracts 0.214.0 `voice_ask` /
+  `voice_answer`; consumer plan §8). On a machine whose Node runs the voice plugin (`capabilities.voice`), the owner
+  turns voice on and chooses a call word ("hey vibe" by default) on /machines or `POST /api/v1/machines/:id/voice`.
+  - **Config** then carries `voice: true` and `call_word`, and the machine listens for the word on its own. Only what
+    the person says after it comes as `voice_ask`.
+  - **Answers:** Bot answers `working` at once, then asks Vibe as the owner through Chat (`POST <BOT_CHAT_INTERNAL_URL>
+    /internal/chat/vibe/ask`, its own token for `openvibe.chat` with `chat.vibe.ask`, one source per machine, the
+    device id and question id as the idempotency key). Vibe's answer, or why not, comes back as `voice_answer`.
+  - **Limits:** with voice off or no owner, it's refused with where to turn it on. There are at most `BOT_VOICE_PER_HOUR`
+    questions a machine an hour. Bot never stores the text.
 - **Screen share links** (`server/screen-shares.js`, migration `0022_screen_shares.sql`; owner 2026-10-25: a screen a group
   watches and uses together). On the screen page the owner makes a link: **watch** (the live screen) or **watch and use**
   (also start or stop the screen, and the mouse and keyboard). It goes where the group works, such as a workspace room's
-  Screen on OpenVibe.Chat.
+  Screen on OpenVibe.Chat. A link shows the owner's own screen or, on a machine with one, the **private desk**
+  (migration `0023_screen_share_desk.sql`): a room watches the agent work there, and a use link's clicks go to the desk.
   - **The link** is shown once; Bot keeps its sha256. It lasts 1-365 days (30 by default), and stops at once when revoked
     or when the machine is removed. The owner's screen page lists the links (where each went, its kind, end date, last
     use) with a Stop button.

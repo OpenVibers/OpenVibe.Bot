@@ -36,6 +36,7 @@
  *
  * With BOT_PAIRING_AUTHORITY=network the pairing codes are Network's and POST /pair answers 410 bot.pairing_moved.
  */
+const { validCallWord, DEFAULT_CALL_WORD } = require('../voice');
 const express = require('express');
 const { parseSteps, stepHelp, AGENT_MAX_STEPS, AGENT_MAX_S } = require('../routines');
 const { http } = require('openvibe-contracts');
@@ -404,9 +405,10 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         const pick = (cap) => (offered && offered[cap] && typeof offered[cap] === 'object' ? offered[cap] : null);
         return {
             id: device.id, name: device.name || null, online: !!st.online, agent_computer: !!device.agent_computer, watch_probe: !!device.watch_probe,
+            voice: { on: !!device.voice_on, call_word: device.call_word || DEFAULT_CALL_WORD },
             computer: offered ? {
                 level: typeof sensors.computer_level === 'string' ? sensors.computer_level : ((pick('files') || pick('terminal') || pick('screen') || {}).level || null),
-                terminal: pick('terminal'), files: pick('files'), screen: pick('screen'), probe: pick('probe'), input: pick('input'), browser: pick('browser'),
+                terminal: pick('terminal'), files: pick('files'), screen: pick('screen'), probe: pick('probe'), input: pick('input'), browser: pick('browser'), desk: pick('desk'),
                 waiting: Number.isInteger(sensors.computer_waiting) ? sensors.computer_waiting : null,
             } : null,
         };
@@ -444,7 +446,7 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
     };
     r.post('/machines/:id/screen', manage, wrap(async (req, res) => {
         const { device, subject } = await screenOwner(req);
-        const out = await machineScreen.start(device, subject, req.principal, { seconds: req.body?.seconds, fps: req.body?.fps });
+        const out = await machineScreen.start(device, subject, req.principal, { seconds: req.body?.seconds, fps: req.body?.fps, desk: req.body?.desk });
         res.status(201).json({ machine_id: device.id, ...out });
     }));
     r.get('/machines/:id/screen', wrap(async (req, res) => {
@@ -462,6 +464,17 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         const { device } = await computerMachine(req, { agentNeedsOptIn: false });
         if (typeof req.body?.on !== 'boolean') fail(422, 'bot.invalid_input', 'on is true or false');
         const updated = await domain.machines.setWatchProbe(device.id, req.body.on);
+        res.json({ machine: machineOut(updated) });
+    }));
+    // The owner lets Vibe answer their voice on the machine, with a call word, or stops it (never an agent or a service).
+    r.post('/machines/:id/voice', manage, wrap(async (req, res) => {
+        if (req.principal.kind !== 'user') fail(403, 'bot.forbidden', 'only the machine\'s owner turns this on or off');
+        const { device } = await computerMachine(req, { agentNeedsOptIn: false });
+        if (typeof req.body?.on !== 'boolean') fail(422, 'bot.invalid_input', 'on is true or false');
+        const word = req.body.call_word == null ? null : validCallWord(req.body.call_word);
+        if (req.body.call_word != null && !word) fail(422, 'bot.invalid_input', 'a call word is 1 to 4 words, 3 to 40 characters, with one word of three letters or more');
+        const updated = await domain.machines.setVoice(device.id, req.body.on, word);
+        if (hub && hub.machineChanged) await hub.machineChanged(updated);
         res.json({ machine: machineOut(updated) });
     }));
     // The owner turns their agent's use of the machine on or off (never the agent itself).
@@ -592,7 +605,7 @@ function commandRefusalStatus(code) {
     if (code === 'bot.robot_not_found') return 404;
     if (code === 'bot.not_an_operator' || code === 'bot.read_only' || code === 'bot.forbidden' || code === 'bot.not_your_turn') return 403;
     if (code === 'bot.cooldown' || code === 'bot.turn_budget') return 429;
-    if (code === 'bot.device_offline' || code === 'bot.estop_latched' || code === 'bot.command_pending' || code === 'bot.computer_off') return 409;
+    if (code === 'bot.device_offline' || code === 'bot.estop_latched' || code === 'bot.command_pending' || code === 'bot.computer_off' || code === 'bot.person_driving') return 409;
     return 422;   // unknown_command, command_not_allowed, unknown_actuator, invalid_input, text_too_long
 }
 

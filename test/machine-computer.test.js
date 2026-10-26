@@ -8,7 +8,7 @@ const assert = require('assert');
 const { boot, check, done } = require('./helpers/app');
 
 (async () => {
-    const t = await boot({ env: { BOT_ROUTINE_TICK_MS: '0', BOT_WEBHOOK_TICK_MS: '0' } });
+    const t = await boot({ env: { BOT_ROUTINE_TICK_MS: '0', BOT_WEBHOOK_TICK_MS: '0', BOT_PERSON_TURN_MS: '400' } });
     const alex = t.network.newUser('alex');
     const bob = t.network.newUser('bob');
     let seq = 0;
@@ -34,8 +34,13 @@ const { boot, check, done } = require('./helpers/app');
             else if (m.kind === 'probe') c.send(frame('ack', { id: m.id, data: { status: 200, body: '{"up":true}', ms: 3 } }));
             else if (m.kind === 'input') c.send(frame('ack', { id: m.id, data: { done: true, action: m.value.action } }));
             else if (m.kind === 'browser') c.send(frame('ack', { id: m.id, data: { url: m.value.url || 'https://example.org/', title: 'Example', text: 'Example page', truncated: false, links: [] } }));
+            else if (m.kind === 'desk') c.send(frame('ack', { id: m.id, data: { running: m.value.action !== 'stop', display: ':91', width: 1280, height: 800 } }));
+            else if (m.kind === 'screen' && m.value.desk === 'private') c.send(frame('ack', { id: m.id, data: { format: 'png', width: 1280, height: 800, content_b64: 'iVBORw0KGgo=' } }));
             else c.send(frame('nack', { id: m.id, fault_code: 'not_allowed', message: 'this machine allows observing only' }));
         });
+        // Beat like a real Node while the socket is open, so a longer check never sees its machine go offline.
+        const beat = setInterval(() => { try { c.send(frame('heartbeat', { t: Date.now() })); } catch { /* closed */ } }, Math.max(100, Math.floor(config.heartbeat_ms / 2)));
+        c.ws.on('close', () => clearInterval(beat));
         await poll(() => t.hub.computerOf(deviceId) !== null || !computer);
         return { c, deviceId, config };
     }
@@ -88,6 +93,51 @@ const { boot, check, done } = require('./helpers/app');
         assert.deepStrictEqual(rows.map((r) => r.value), [{ action: 'open', host: 'example.org' }, { action: 'fill', selector: '#password', chars: 14 }],
             'the audit keeps the host (never the path or query) and how much was typed (never the text)');
         assert.ok(!JSON.stringify(rows).includes('hunter3') && !JSON.stringify(rows).includes('token=abc'));
+    });
+
+    await check('the private desk (contracts 0.214.0): start, stop and status reach a machine that has one, and desk: private acts there; one without says so', async () => {
+        const withDesk = await machine(alex, { ...COMPUTER, desk: { level: 'trusted', window_manager: 'openbox', input: true, screen: true } });
+        const listed = await t.call('GET', `/api/v1/machines/${withDesk.deviceId}/computer`, { user: alex });
+        assert.strictEqual(listed.json.machine.computer.desk.window_manager, 'openbox', 'the machine says it has a desk');
+        const start = await cmd(withDesk.deviceId, { kind: 'desk', value: { action: 'start', width: 1280, height: 800 } }, { user: alex });
+        assert.deepStrictEqual([start.status, start.json.result, start.json.data.display], [200, 'ack', ':91']);
+        assert.deepStrictEqual(seen.at(-1).value, { action: 'start', width: 1280, height: 800 });
+        const look = await cmd(withDesk.deviceId, { kind: 'screen', value: { desk: 'private', max_width: 1280 } }, { user: alex });
+        assert.deepStrictEqual([look.json.result, look.json.data.width], ['ack', 1280]);
+        const click = await cmd(withDesk.deviceId, { kind: 'input', value: { action: 'click', x: 10, y: 10, width: 1280, height: 800, desk: 'private' } }, { user: alex });
+        assert.strictEqual(click.json.result, 'ack');
+        assert.strictEqual(seen.at(-1).value.desk, 'private', 'the machine is told to act on the desk');
+        const open = await cmd(withDesk.deviceId, { kind: 'browser', value: { action: 'open', url: 'https://example.org/', desk: 'private' } }, { user: alex });
+        assert.strictEqual(open.json.result, 'ack');
+        const rows = await t.db.many("SELECT kind, value FROM command_audit WHERE robot_id = $1 AND result = 'ack' ORDER BY id", [withDesk.deviceId]);
+        assert.deepStrictEqual(rows.map((r) => [r.kind, r.value]), [
+            ['desk', { action: 'start', width: 1280, height: 800 }], ['screen', { max_width: 1280, desk: 'private' }],
+            ['input', { action: 'click', x: 10, y: 10, desk: 'private' }], ['browser', { action: 'open', host: 'example.org', desk: 'private' }],
+        ], 'the audit says where it acted');
+        const tiny = await cmd(withDesk.deviceId, { kind: 'desk', value: { action: 'start', width: 100, height: 100 } }, { user: alex });
+        assert.deepStrictEqual([tiny.status, tiny.json.code], [422, 'bot.invalid_input'], 'the contract\'s sizes');
+        const none = await cmd(mine.deviceId, { kind: 'desk', value: { action: 'status' } }, { user: alex });
+        assert.deepStrictEqual([none.status, none.json.code], [409, 'bot.computer_off']);
+        assert.match(none.json.detail || none.json.reason || '', /no private desk/);
+        const blind = await cmd(mine.deviceId, { kind: 'input', value: { action: 'click', x: 1, y: 1, width: 2, height: 2, desk: 'private' } }, { user: alex });
+        assert.deepStrictEqual([blind.status, blind.json.code], [409, 'bot.computer_off'], 'desk: private on a machine without one never reaches its own screen');
+        // The person always wins: the owner just clicked on the desk, so their agent's click there waits; on the
+        // owner's own screen (another screen) and for reading the page it goes on.
+        const token = actor();
+        await t.call('POST', `/api/v1/machines/${withDesk.deviceId}/agent-computer`, { user: alex, body: { on: true } });
+        assert.strictEqual((await cmd(withDesk.deviceId, { kind: 'input', value: { action: 'move', x: 5, y: 5, width: 1280, height: 800, desk: 'private' } }, { user: alex })).json.result, 'ack');
+        const agentClick = await cmd(withDesk.deviceId, { kind: 'input', value: { action: 'click', x: 20, y: 20, width: 1280, height: 800, desk: 'private' } }, asActor(token, alex.subject));
+        assert.deepStrictEqual([agentClick.status, agentClick.json.code], [409, 'bot.person_driving']);
+        assert.match(agentClick.json.detail || agentClick.json.reason || '', /a person is using this screen right now/);
+        const agentRead = await cmd(withDesk.deviceId, { kind: 'browser', value: { action: 'read', desk: 'private' } }, asActor(token, alex.subject));
+        assert.strictEqual(agentRead.json.result, 'ack', 'reading never fights for the screen');
+        const elsewhere = await cmd(withDesk.deviceId, { kind: 'input', value: { action: 'move', x: 1, y: 1, width: 2, height: 2 } }, asActor(token, alex.subject));
+        assert.strictEqual(elsewhere.json.result, 'ack', 'the owner\'s own screen is another screen');
+        await t.wait(450);   // BOT_PERSON_TURN_MS is 400 in this boot
+        const later = await cmd(withDesk.deviceId, { kind: 'input', value: { action: 'click', x: 20, y: 20, width: 1280, height: 800, desk: 'private' } }, asActor(token, alex.subject));
+        assert.strictEqual(later.json.result, 'ack', 'once the person stops, the agent goes on');
+        await t.call('POST', `/api/v1/machines/${withDesk.deviceId}/agent-computer`, { user: alex, body: { on: false } });   // the checks below start with no machine open to the agent
+        withDesk.c.close();
     });
 
     await check('the audit keeps what was asked in short, never stdin, arguments or content', async () => {
