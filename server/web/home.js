@@ -253,7 +253,7 @@ function sections({ signedIn = false, config, models = [], robots = [], kit = nu
         + docsSection()
         + jobsSection({ jobs })
         + faqSection(faq || faqItems({ models }))
-        + showcase.cta({
+        + showcase.network({ service: 'bot' }) + showcase.cta({
             title: 'Bring your robot online',
             text: 'Start with the simulated rover, then pair the real one with one command.',
             actions: signedIn ? [{ label: 'Add a robot', href: '/robots/new', primary: true }, { label: 'The directory', href: '/robots' }]
