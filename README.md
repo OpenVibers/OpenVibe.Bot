@@ -79,7 +79,7 @@ Sitemap entries use the release commit time for these code-backed pages.
 - OpenVibe.Network: user and service tokens, node tokens, pairing when the authority is `network`, and identity resolution (a `@username` to a subject, and subjects to names, for the panel's People card).
 - OpenRestream: the WHIP ingest base (`BOT_WHIP_BASE`) devices publish to.
 - OpenVibe.Billing: job usage readings go to `billing.usage.record` (`BOT_BILLING_URL`; Bot mints its own Network service token for audience `openvibe.billing` with `billing.usage.record`, and `BOT_BILLING_TOKEN` overrides it); unset, they wait in `run_usage_outbox`.
-- `openvibe-contracts` v0.129.0, `openvibe-sdk` v0.64.0 and `openvibe-shared` v4.13.0 (package.json).
+- `openvibe-contracts` v0.129.0, `openvibe-sdk` v0.65.0 and `openvibe-shared` v4.13.0 (package.json).
 - Account export and deletion (ADR-033): Network grants `events.subscription.manage` (openvibe.events) for the two
   subscriptions created at boot, then, last and once the release is live, `network.account.export.contribute` and
   `network.account.deletion.confirm` (openvibe.network).
@@ -166,6 +166,6 @@ OpenVibe.Sites no longer generates `deploy/nginx/openvibe.bot.conf` (sites.json 
 
 <!-- versions:start -->
 - openvibe-contracts: v0.214.0
-- openvibe-sdk: v0.64.0
+- openvibe-sdk: v0.65.0
 - openvibe-shared: v4.13.0
 <!-- versions:end -->
