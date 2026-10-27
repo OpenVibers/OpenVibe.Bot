@@ -39,7 +39,7 @@ const { getProfile, listProfiles, loadProfiles } = require('../profiles');
 const { frameAncestors } = require('../config');
 const { BotError } = require('../util');
 const kits = require('../kits');
-const { renderPanel, renderEmbedRefused, renderDrivePage, renderPairingPage, renderPhonePage, renderMachinesPage, renderMachineScreenPage, renderSharePage, renderShareGone, renderLinkPage, renderClaimPage, renderClaimApproved } = require('./render');
+const { renderPanel, renderEmbedRefused, renderDrivePage, renderPairingPage, renderPhonePage, renderMachinesPage, renderMachineDesksPage, renderMachineScreenPage, renderSharePage, renderShareGone, renderLinkPage, renderClaimPage, renderClaimApproved } = require('./render');
 const { createMachineScreen } = require('../machine-screen');
 const { createScreenShares } = require('../screen-shares');
 const { renderDocsIndex, renderDriversPage, renderProfilesPage, renderAutomationPage, renderComputersPage } = require('./docs');
@@ -579,6 +579,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
             computer_level: typeof sensors.computer_level === 'string' ? sensors.computer_level : null,
             computer_waiting: Number.isInteger(sensors.computer_waiting) ? sensors.computer_waiting : null,
             computer_screen_stream: sensors.computer_screen_stream === 'live' ? 'live' : 'off',
+            computer_desks: Number.isInteger(sensors.computer_desks) ? sensors.computer_desks : null,
         };
     }));
     // ── The live screen (plan T14): the owner watches their machine's screen on their own private stream ──
@@ -648,6 +649,40 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site requests are refused');
         const mine = await myMachine(req, me);
         res.json(await machineScreen.input(mine, me.subject, req.body || {}));
+    }));
+    // The desks running on the machine (Desks plan): asked of the machine when the owner opens the page, never on a
+    // schedule; each can be watched, taken over or stopped.
+    r.get('/machines/:id/desks', page(async (req, res) => {
+        const me = requireUser(req);
+        const mine = await myMachine(req, me);
+        res.setHeader('Vary', 'Cookie');
+        res.setHeader('Cache-Control', 'private, no-store');
+        let desks = [];
+        let maxDesks = null;
+        let error = null;
+        if (!hub || !hub.isOnline(mine.id)) error = 'The machine is offline: its desks stopped with it, or show here when it is back.';
+        else if (!(hub.computerOf(mine.id) || {}).desk) error = 'This machine runs no desks: it needs OpenVibe Node with the computer plugin (Linux with Xvfb, or Chromium for browser desks).';
+        else {
+            const r = await hub.machineCommand(mine.id, asUser(me), me.subject, { kind: 'desk', value: { action: 'list' }, ms: 8000 });
+            if (r && r.result === 'ack') {
+                const d = r.data || {};
+                desks = (Array.isArray(d.desks) ? d.desks : []).filter((x) => x && machineScreen.DESK.test(String(x.desk || '')) && x.desk !== 'main').slice(0, 50);
+                maxDesks = Number.isInteger(d.max_desks) ? d.max_desks : null;
+            } else error = `The machine did not list its desks: ${(r && (r.reason || r.result)) || 'no answer'}`.slice(0, 300);
+        }
+        const stopped = typeof req.query.stopped === 'string' && machineScreen.DESK.test(req.query.stopped) ? req.query.stopped : null;
+        res.type('html').send(renderMachineDesksPage({ machine: mine, desks, maxDesks, error, stopped }));
+    }));
+    r.post('/machines/:id/desks/stop', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        const mine = await myMachine(req, me);
+        const desk = req.body && typeof req.body.desk === 'string' ? req.body.desk : '';
+        if (!machineScreen.DESK.test(desk) || desk === 'main') throw new BotError(422, 'bot.invalid_input', 'desk is private or desk-<name>');
+        if (!hub || !hub.isOnline(mine.id)) throw new BotError(409, 'bot.device_offline', 'the machine is offline');
+        const r = await hub.machineCommand(mine.id, asUser(me), me.subject, { kind: 'desk', value: { action: 'stop', desk }, ms: 15000 });
+        if (!r || r.result !== 'ack') throw new BotError(409, 'bot.device_refused', `the machine did not stop it: ${(r && (r.reason || r.result)) || 'no answer'}`.slice(0, 300));
+        res.redirect(303, `/machines/${encodeURIComponent(mine.id)}/desks?stopped=${encodeURIComponent(desk)}`);
     }));
     r.get('/machines/:id/screen.json', page(async (req, res) => {
         const me = requireUser(req);
