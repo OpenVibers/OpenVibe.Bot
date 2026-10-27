@@ -394,6 +394,19 @@ ${code(COMPUTER_APPROVE)}
 <p>On ${inLink('/machines', 'Your machines')}, <b>Let my agent use this computer</b> is off until you turn it on. With it on, a task you give ${out('https://openvibe.actor', 'OpenVibe.Actor')}, such as "what changed in ~/site today?", can list and read files, run programs and write files there, as you and at your level. The ${out('https://openvibe.actor/console', 'Console')} shows what waits for you. Turning the switch off stops it at once.</p>
 <p><b>Let my watches check things from this computer</b> is a separate switch. It lets ${out('https://openvibe.watch', 'OpenVibe.Watch')} probe your own network from the computer for your watches, for example "tell me when my NAS stops answering". It allows only probes: one GET or one TCP connect, to private addresses only.</p></section>
 
+<section class="card" aria-labelledby="desks-h"><h2 id="desks-h">Desks: a computer of its own for each task</h2>
+<p>Your agent does not use your screen. Each task gets a <b>desk</b> on one of your machines: a screen, browser, files and sign-ins of its own, so several tasks work at once without touching each other or you.</p>
+<ul>
+<li><b>Two kinds.</b> A <b>browser desk</b> is a browser alone, with no screen to draw. It costs about half as much, so it is what most web work gets, and it runs on a Mac too. A <b>whole desk</b> is a full screen where the agent can also open programs, such as an office suite or a terminal (OpenVibe Node v0.26.0; Linux).</li>
+<li><b>Watch it, take it over.</b> A running task shows <b>Watch and take over</b> on its page in ${out('https://openvibe.actor', 'OpenVibe.Actor')}, and Vibe offers the same link in your chat. While you use the mouse and keyboard there, the agent waits; when you stop, it goes on.</li>
+<li><b>It hands you the steps that are yours.</b> For a sign-in, a code sent to your phone, a CAPTCHA or a payment, the agent gets the page ready and asks you to do that step on its desk ("Needs you"). It never types a password itself.</li>
+<li><b>Sign in once.</b> On OpenVibe Node v0.24.0 or newer, your agent's browser profile is kept on each machine: a site you signed in to on one task's desk is still signed in on the next.</li>
+<li><b>Never your own network.</b> Every page the agent's browser opens goes through a guard on the machine (Node v0.25.0): nothing on it can reach your router, printer or other computers at home, unless you set the machine to <b>full</b>.</li>
+<li><b>A spare computer as a desk host.</b> An old laptop or a mini PC can host desks for all your tasks: on ${inLink('/machines', 'Your machines')}, choose <b>Add a machine</b> and run the desk host command (Linux). It needs no screen, keyboard or sign-in, runs under an account of its own, and is used before your own computer when a task can work anywhere.</li>
+<li><b>See and stop them.</b> Each machine says how many desks run on it; <b>See its desks</b> lists them, to watch, take over or stop. A desk nobody uses for 15 minutes stops by itself, and the computer's kill switch (<code>openvibe-node stop</code>) stops them all.</li>
+</ul>
+<p>How many run at once depends on the machine's memory (one whole desk per 2 GB by default; a browser desk counts as half). The details are in ${out(`${BLOB}/docs/computer.md`, 'computer.md')}.</p></section>
+
 <section class="card" aria-labelledby="screen-c-h"><h2 id="screen-c-h">Watch your screen live</h2>
 <p>On ${inLink('/machines', 'Your machines')}, <b>Show my screen</b> shows the computer's screen live, to you only, for 10 minutes (30 seconds to 30 minutes through the API).</p>
 <ul>
@@ -421,11 +434,12 @@ ${code(COMPUTER_CALL)}
 </ul>
 The page answers with its URL, title, text and links. The browser is the agent's own, in a profile of its own on your computer; it never sees your browser's sessions. Reading, screenshots and closing run at every level; the rest are approved one by one at ask. Below full, <code>open</code> refuses an address on your own network. The audit keeps the host, the selector, the key and the number of characters filled, never the text.</li>
 <li><code>input</code>: <code>action</code> (<code>move</code>, <code>click</code>, <code>double_click</code>, <code>right_click</code> at <code>x</code>, <code>y</code>; <code>scroll</code> by <code>dy</code>; <code>type</code> a <code>text</code>; <code>key</code> one key or chord such as <code>ctrl+s</code>), with <code>width</code> and <code>height</code> of the screenshot the coordinates come from; the computer scales them to its real screen. It acts, so your level decides: never at observe, approved one by one at ask. xdotool on Linux (X11), cliclick on macOS. The audit keeps the action and the number of characters typed, never the text.</li>
+<li><code>desk</code>: <code>action</code> <code>start</code> (with <code>desk</code> <code>desk-&lt;name&gt;</code>, <code>kind</code> <code>browser</code> or <code>desktop</code>, and a kept <code>profile</code>), <code>stop</code>, <code>status</code> or <code>list</code>. <code>screen</code>, <code>input</code>, <code>browser</code> and <code>exec</code> then take the same <code>desk</code> to act there, never on your own screen; <code>exec</code> also takes <code>detach</code> to leave a program running on a whole desk until the desk stops.</li>
 <li><code>probe</code>: <code>target</code> (<code>http(s)://…</code> or <code>tcp://host:port</code> on the computer's own network) → the status and body of one GET, or whether the port is open. It is read-only and runs at every level.</li>
 </ul>
 <p class="muted"><code>GET /api/v1/machines</code> lists your machines with their level. A machine whose plugin is off answers <code>409 bot.computer_off</code>; a refusal on the computer answers <code>result: "nack"</code> with the reason. The audit keeps the program name or the file and path, never its content.</p></section>
 `;
-    return docsPage({ config, path: '/docs/computers', title: 'Your computer for your agents', description: 'Let your agents use your own computer through the OpenVibe Node: its terminal, files, screen, mouse and keyboard, at the level you set on the computer, with approvals there and a kill switch.', content });
+    return docsPage({ config, path: '/docs/computers', title: 'Your computer for your agents', description: 'Let your agents use your own computer through the OpenVibe Node: a desk of its own for each task (watch it and take it over), its terminal, files, screen, mouse and keyboard, at the level you set on the computer, with approvals there and a kill switch.', content });
 }
 
 module.exports = { renderDocsIndex, renderDriversPage, renderProfilesPage, renderAutomationPage, renderComputersPage, validationResult };

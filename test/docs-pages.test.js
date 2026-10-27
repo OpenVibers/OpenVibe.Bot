@@ -92,6 +92,16 @@ const { HOME_CSP: SITE_CSP } = require('../server/web/home');
         assert.ok(html.includes('id="navbar-mount"'), 'inside the OpenVibe Frame');
     });
 
+    await check('GET /docs/computers: desks in plain words (two kinds, watch and take over, hand-offs, sign in once, the network guard, desk hosts, stopping them) and the desk command', async () => {
+        const r = await get('/docs/computers');
+        assert.strictEqual(r.status, 200);
+        const html = await r.text();
+        assert.match(html, /<h2 id="desks-h">Desks: a computer of its own for each task<\/h2>/);
+        for (const word of ['browser desk', 'whole desk', 'Watch and take over', 'Needs you', 'Sign in once', 'Never your own network', 'desk host', 'See its desks', '<code>detach</code>']) {
+            assert.ok(html.includes(word), word);
+        }
+    });
+
     await check('POST /docs/profiles/validate: the shipped sim.rover profile is valid', async () => {
         const r = await form(JSON.stringify(sim));
         assert.strictEqual(r.status, 200);
