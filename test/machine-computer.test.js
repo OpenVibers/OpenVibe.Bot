@@ -362,10 +362,14 @@ const { boot, check, done } = require('./helpers/app');
     await check('a machine\'s desks page: its running desks to watch, take over or stop, for its owner only; stop is same-site only', async () => {
         const cookie = (user) => ({ Cookie: `ov_token=${t.network.signUser(user)}` });
         const host = await machine(alex, { ...COMPUTER, desk: { level: 'trusted', window_manager: 'openbox', input: true, screen: true, named: true, max_desks: 4, kinds: ['desktop', 'browser'] } });
+        // Telemetry samples are kept at most twice a second: this one comes after the machine's first.
+        await t.wait(600);
         host.c.send(frame('telemetry', { sensors: { computer_level: 'trusted', computer_waiting: 0, computer_running: 0, computer_desks: 2 } }));
-        await poll(async () => (await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text()).includes('2 desks running'));
+        assert.ok(await poll(async () => (await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text()).includes('2 desks running')), 'the card says how many run');
         const list = await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text();
         assert.ok(list.includes(`href="/machines/${host.deviceId}/desks"`), 'the card links its desks');
+        const api = await t.call('GET', '/api/v1/machines', { user: alex });
+        assert.strictEqual(api.json.machines.find((m) => m.id === host.deviceId).computer.desks_running, 2, 'the API says how many run, for placement');
         const page = await fetch(`${t.base}/machines/${host.deviceId}/desks`, { headers: cookie(alex) });
         assert.strictEqual(page.status, 200);
         const html = await page.text();

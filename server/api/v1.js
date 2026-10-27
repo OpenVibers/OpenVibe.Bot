@@ -429,6 +429,8 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
                 level: typeof sensors.computer_level === 'string' ? sensors.computer_level : ((pick('files') || pick('terminal') || pick('screen') || {}).level || null),
                 terminal: pick('terminal'), files: pick('files'), screen: pick('screen'), probe: pick('probe'), input: pick('input'), browser: pick('browser'), desk: pick('desk'),
                 waiting: Number.isInteger(sensors.computer_waiting) ? sensors.computer_waiting : null,
+                // Desks running now (the Node's telemetry): where an agent's next desk has room (Desks plan D6, placement).
+                desks_running: Number.isInteger(sensors.computer_desks) ? sensors.computer_desks : null,
             } : null,
         };
     };
