@@ -436,12 +436,19 @@ const { boot, check, done } = require('./helpers/app');
         assert.strictEqual((await cmd(own.deviceId, { kind: 'ai', value: { model: 'qwen2.5-1.5b-instruct', messages: [{ role: 'user', content: 'hi' }] } }, { user: alex })).json.result, 'ack');
         const noExec = await cmd(own.deviceId, { kind: 'exec', value: { argv: ['id'] } }, { user: alex });
         assert.strictEqual(noExec.json.code, 'bot.computer_off', 'no terminal without the computer plugin');
+        // Node v0.29.0's ai plugin says how fast its last model answered there (after the 2 Hz telemetry window).
+        await t.wait(600);
+        own.c.send(frame('telemetry', { sensors: { ai_busy: 0, ai_model: 'qwen2.5-1.5b-instruct', ai_tokens_per_s: 14.6 } }));
+        await t.wait(600);
+        const fast = (await t.call('GET', '/api/v1/machines', { user: alex })).json.machines.find((m) => m.id === own.deviceId);
+        assert.deepStrictEqual(fast.computer.ai_speed, { model: 'qwen2.5-1.5b-instruct', tokens_per_s: 14.6 }, 'its speed, in the API');
         let ownCard = '';
         for (let i = 0; i < 20 && !ownCard.includes('qwen2.5-1.5b-instruct'); i++) {
             if (i) await t.wait(100);
             ownCard = await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text();
         }
         assert.ok(ownCard.includes('qwen2.5-1.5b-instruct'), 'the card shows its models');
+        assert.ok(ownCard.includes('about 15 tokens a second'), 'and how fast they answer there');
         own.c.close();
         // The machines page: its models and the switch.
         const html = await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text();

@@ -438,6 +438,9 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
                 waiting: Number.isInteger(sensors.computer_waiting) ? sensors.computer_waiting : null,
                 // Desks running now (the Node's telemetry): where an agent's next desk has room (Desks plan D6, placement).
                 desks_running: Number.isInteger(sensors.computer_desks) ? sensors.computer_desks : null,
+                // How fast its last model answered there (Node v0.29.0's ai plugin): for choosing where a model runs.
+                ai_speed: typeof sensors.ai_tokens_per_s === 'number' && sensors.ai_tokens_per_s > 0 && typeof sensors.ai_model === 'string'
+                    ? { model: sensors.ai_model.slice(0, 120), tokens_per_s: sensors.ai_tokens_per_s } : null,
             } : null,
         };
     };

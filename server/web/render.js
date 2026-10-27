@@ -753,7 +753,10 @@ function renderMachinesPage({ machines = [], pairing = null }) {
     const computerRow = (m) => {
         const c = computerOf(m);
         if (!c) return '';
+        // "about 15 tokens a second" (with which model, when it offers several), measured there by the ai plugin.
+        const speed = m.ai_speed ? `about ${m.ai_speed.tokens_per_s >= 10 ? Math.round(m.ai_speed.tokens_per_s) : m.ai_speed.tokens_per_s} tokens a second${c.ai.models.length > 1 ? ` with ${m.ai_speed.model}` : ''}` : '';
         const aiRow = c.ai ? `<div class="machine-ai"><span class="pill">${c.ai.ready ? 'Models' : 'Models: no server answers'}</span>${c.ai.models.length ? `<span class="muted">${esc(c.ai.models.join(', '))}</span>` : ''}`
+            + (m.ai_busy ? ' <span class="pill">Answering now</span>' : '') + (speed ? `<span class="muted">${esc(speed)}</span>` : '')
             + `<form method="post" action="/machines/${esc(m.id)}/ai-models"><input type="hidden" name="on" value="${m.ai_models ? '0' : '1'}">`
             + `<button type="submit" class="button quiet" aria-pressed="${m.ai_models ? 'true' : 'false'}">${m.ai_models ? 'Stop my AI using this computer\'s models' : 'Let my AI use this computer\'s models'}</button></form>`
             // Turned on: OpenVibe.Chat's "Your AI key" comes filled in with this computer and its first model (saved only there).
