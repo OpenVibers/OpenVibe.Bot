@@ -421,6 +421,19 @@ const { boot, check, done } = require('./helpers/app');
         const rows = await t.db.many('SELECT value FROM command_audit WHERE robot_id = $1 AND kind = $2 AND result = $3', [gpu.deviceId, 'ai', 'ack']);
         assert.deepStrictEqual(rows[0].value, { model: 'llama3.1:8b', messages: 1, chars: 29 });
         assert.ok(!JSON.stringify(rows).includes('secret words'), 'never the text');
+        // A real Node reports the ai plugin under its own name, and a machine may run it with no computer plugin.
+        const own = await machine(alex, null);
+        own.c.send(frame('status', { capabilities: { ai: { ai: { models: ['qwen2.5-1.5b-instruct'], ready: true, max_tokens: 256 } } }, drivers: [], faults: [] }));
+        await t.wait(300);
+        const listed = (await t.call('GET', '/api/v1/machines', { user: alex })).json.machines.find((m) => m.id === own.deviceId);
+        assert.deepStrictEqual(listed.computer.ai.models, ['qwen2.5-1.5b-instruct'], 'its models, from the ai plugin');
+        assert.strictEqual(listed.computer.terminal, null, 'and nothing of a computer plugin');
+        assert.strictEqual((await cmd(own.deviceId, { kind: 'ai', value: { model: 'qwen2.5-1.5b-instruct', messages: [{ role: 'user', content: 'hi' }] } }, { user: alex })).json.result, 'ack');
+        const noExec = await cmd(own.deviceId, { kind: 'exec', value: { argv: ['id'] } }, { user: alex });
+        assert.strictEqual(noExec.json.code, 'bot.computer_off', 'no terminal without the computer plugin');
+        const ownCard = (await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text());
+        assert.ok(ownCard.includes('qwen2.5-1.5b-instruct'), 'the card shows its models');
+        own.c.close();
         // The machines page: its models and the switch.
         const html = await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text();
         assert.ok(html.includes('llama3.1:8b'), 'its models');
