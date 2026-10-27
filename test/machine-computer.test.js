@@ -140,6 +140,44 @@ const { boot, check, done } = require('./helpers/app');
         withDesk.c.close();
     });
 
+    await check('named desks (contracts 0.215.0, Node v0.19.0): one per agent task, each its own screen; an older Node runs one', async () => {
+        const multi = await machine(alex, { ...COMPUTER, desk: { level: 'trusted', window_manager: 'openbox', input: true, screen: true, named: true, max_desks: 4 } });
+        const single = await machine(alex, { ...COMPUTER, desk: { level: 'trusted', window_manager: 'openbox', input: true, screen: true } });
+        const start = await cmd(multi.deviceId, { kind: 'desk', value: { action: 'start', desk: 'desk-task-a' } }, { user: alex });
+        assert.strictEqual(start.json.result, 'ack');
+        assert.deepStrictEqual(seen.at(-1).value, { action: 'start', desk: 'desk-task-a' }, 'the machine is told which desk');
+        const open = await cmd(multi.deviceId, { kind: 'browser', value: { action: 'open', url: 'https://example.org/', desk: 'desk-task-a' } }, { user: alex });
+        assert.strictEqual(open.json.result, 'ack');
+        assert.strictEqual(seen.at(-1).value.desk, 'desk-task-a');
+        const listed = await cmd(multi.deviceId, { kind: 'desk', value: { action: 'list' } }, { user: alex });
+        assert.strictEqual(listed.json.result, 'ack');
+        const rows = await t.db.many("SELECT kind, value FROM command_audit WHERE robot_id = $1 AND result = 'ack' ORDER BY id", [multi.deviceId]);
+        assert.deepStrictEqual(rows.map((r) => [r.kind, r.value]), [
+            ['desk', { action: 'start', desk: 'desk-task-a' }], ['browser', { action: 'open', host: 'example.org', desk: 'desk-task-a' }], ['desk', { action: 'list' }],
+        ], 'the audit names the desk');
+        // A machine on an older Node runs its private desk only: a named one is refused there, never sent.
+        const sent = seen.length;
+        const old = await cmd(single.deviceId, { kind: 'desk', value: { action: 'start', desk: 'desk-task-a' } }, { user: alex });
+        assert.deepStrictEqual([old.status, old.json.code], [409, 'bot.computer_off']);
+        assert.match(old.json.detail || old.json.reason || '', /Node v0\.19\.0/);
+        assert.strictEqual((await cmd(single.deviceId, { kind: 'screen', value: { desk: 'desk-task-a' } }, { user: alex })).json.code, 'bot.computer_off');
+        assert.strictEqual(seen.length, sent, 'nothing reached the older machine');
+        // Names follow the contract.
+        const bad = await cmd(multi.deviceId, { kind: 'screen', value: { desk: 'desk-../x' } }, { user: alex });
+        assert.deepStrictEqual([bad.status, bad.json.code], [422, 'bot.invalid_input']);
+        // Each desk is its own screen: the owner driving desk-task-a never holds the agent off desk-task-b.
+        const token = actor();
+        await t.call('POST', `/api/v1/machines/${multi.deviceId}/agent-computer`, { user: alex, body: { on: true } });
+        assert.strictEqual((await cmd(multi.deviceId, { kind: 'input', value: { action: 'move', x: 5, y: 5, width: 1280, height: 800, desk: 'desk-task-a' } }, { user: alex })).json.result, 'ack');
+        const held = await cmd(multi.deviceId, { kind: 'input', value: { action: 'click', x: 9, y: 9, width: 1280, height: 800, desk: 'desk-task-a' } }, asActor(token, alex.subject));
+        assert.strictEqual(held.json.code, 'bot.person_driving', 'the desk the person drives waits');
+        const other = await cmd(multi.deviceId, { kind: 'input', value: { action: 'click', x: 9, y: 9, width: 1280, height: 800, desk: 'desk-task-b' } }, asActor(token, alex.subject));
+        assert.strictEqual(other.json.result, 'ack', 'another desk goes on');
+        await t.call('POST', `/api/v1/machines/${multi.deviceId}/agent-computer`, { user: alex, body: { on: false } });
+        multi.c.close();
+        single.c.close();
+    });
+
     await check('the audit keeps what was asked in short, never stdin, arguments or content', async () => {
         const rows = await t.db.many('SELECT * FROM command_audit WHERE robot_id = $1 ORDER BY id', [mine.deviceId]);
         assert.ok(rows.length >= 3);

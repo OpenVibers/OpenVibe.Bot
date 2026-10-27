@@ -44,6 +44,9 @@ const DEVICE_MAX_PAYLOAD = 640 * 1024;
 // screen) act there with `desk: private`, never on the owner's own screen.
 const COMPUTER_CAP = { exec: 'terminal', fs: 'files', screen: 'screen', probe: 'probe', input: 'input', browser: 'browser', desk: 'desk' };
 const NO_DESK = 'this machine has no private desk: it needs OpenVibe Node v0.15.0 or newer on Linux, with Xvfb and allow_desk on';
+const NO_NAMED_DESKS = 'this machine runs one desk only (private): several named desks need OpenVibe Node v0.19.0 or newer';
+/** The desk a command names: main (the person's own screen, the default), private or desk-<name> (contracts 0.215.0). */
+const deskOf = (value) => (typeof value.desk === 'string' && value.desk ? value.desk : 'main');
 /** A command that acts on a screen (the mouse and keyboard, or the browser doing more than reading it). */
 const actsOnScreen = (kind, value) => kind === 'input' || (kind === 'browser' && !['read', 'close'].includes(value.action));
 const COMPUTER_KINDS = Object.keys(COMPUTER_CAP);
@@ -54,8 +57,8 @@ const COMPUTER_DEFAULT_MS = 60000;
 const COMPUTER_MAX_MS = 600000;
 /** What an audit row keeps of a computer command: never a file's content, stdin or arguments (they may hold secrets). */
 function computerSummary(kind, value) {
-    const where = value.desk === 'private' ? { desk: 'private' } : {};
-    if (kind === 'desk') return { action: value.action, ...(Number.isInteger(value.width) && Number.isInteger(value.height) ? { width: value.width, height: value.height } : {}) };
+    const where = deskOf(value) !== 'main' ? { desk: deskOf(value) } : {};
+    if (kind === 'desk') return { action: value.action, ...(typeof value.desk === 'string' ? { desk: value.desk } : {}), ...(Number.isInteger(value.width) && Number.isInteger(value.height) ? { width: value.width, height: value.height } : {}) };
     if (kind === 'exec') return { program: String(value.argv[0]).slice(0, 120), args: value.argv.length - 1 };
     if (kind === 'fs') return { op: value.op, path: String(value.path).slice(0, 300), ...(typeof value.content_b64 === 'string' ? { bytes: Math.floor((value.content_b64.length * 3) / 4) } : {}) };
     if (kind === 'probe') { try { const u = new URL(value.target); return { scheme: u.protocol.replace(':', ''), host: u.host }; } catch { return { scheme: null }; } }
@@ -750,7 +753,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
                 if (!check.valid) return refuse('bot.invalid_input', `invalid ${kind}: ${(check.errors && check.errors[0] && (check.errors[0].message || JSON.stringify(check.errors[0]))) || 'bad value'}`.slice(0, 300));
             }
             const summary = screen
-                ? { action: String(value.action), ...(Number.isInteger(value.seconds) ? { seconds: value.seconds } : {}), ...(Number.isInteger(value.fps) ? { fps: value.fps } : {}), ...(value.desk === 'private' ? { desk: 'private' } : {}) }
+                ? { action: String(value.action), ...(Number.isInteger(value.seconds) ? { seconds: value.seconds } : {}), ...(Number.isInteger(value.fps) ? { fps: value.fps } : {}), ...(deskOf(value) !== 'main' ? { desk: deskOf(value) } : {}) }
                 : computerSummary(kind, value);
             const device = deviceConns.get(deviceId);
             if (!device || !device.online) return refuse('bot.device_offline', 'the machine is offline', summary);
@@ -762,11 +765,16 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             } else if (!offered || !offered[COMPUTER_CAP[kind]]) {
                 return refuse('bot.computer_off', kind === 'desk' ? NO_DESK : `this machine does not offer ${COMPUTER_CAP[kind]}: its computer plugin is off (openvibe-node, --computer)`, summary);
             }
-            if (value.desk === 'private' && !(offered && offered.desk)) return refuse('bot.computer_off', NO_DESK, summary);
+            // A desk other than the person's own screen needs a machine that has desks; one other than private (a named desk,
+            // one per agent task) needs a machine that runs several (Node v0.19.0: desk.named). Kind desk names its desk in
+            // value.desk too, private by default.
+            const desk = kind === 'desk' ? (typeof value.desk === 'string' ? value.desk : 'private') : deskOf(value);
+            if (desk !== 'main' && !(offered && offered.desk)) return refuse('bot.computer_off', NO_DESK, summary);
+            if (desk !== 'main' && desk !== 'private' && !(offered.desk && offered.desk.named === true)) return refuse('bot.computer_off', NO_NAMED_DESKS, summary);
             // Two hands, one screen: a person's input (the owner, or a share link's holder) holds the screen for a few
             // seconds, and an agent's acting command there is refused meanwhile, so it never fights them for the mouse.
             if (!screen && actsOnScreen(kind, value)) {
-                const turnKey = `${deviceId}|${value.desk === 'private' ? 'private' : 'main'}`;
+                const turnKey = `${deviceId}|${deskOf(value)}`;   // each desk is its own screen: a person on one never holds another
                 const person = conn.principal.kind === 'user' || conn.principal.kind === 'share';
                 if (person) {
                     if (personTurns.size > 5000) personTurns.clear();
