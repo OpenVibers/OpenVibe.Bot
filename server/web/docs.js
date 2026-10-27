@@ -64,7 +64,7 @@ function renderDocsIndex({ config }) {
 <section class="card"><h2>Automate a robot</h2>
 <p>${inLink('/docs/automation', 'Routines, webhooks and your agent')}: steps on a schedule, signed event deliveries to your server, and letting your OpenVibe.Actor agent drive.</p></section>
 <section class="card"><h2>Your computer for your agents</h2>
-<p>${inLink('/docs/computers', 'Your computer')}: the Node's computer plugin, its levels, approvals on the computer, and the API.</p></section>
+<p>${inLink('/docs/computers', 'Your computer')}: the Node's computer plugin, its levels, approvals on the computer, desks, your own models, and the API.</p></section>
 <section class="card"><h2>Robots</h2>
 <p>Add a robot and drive it from any browser. The <b>Simulated rover</b> runs inside Bot with no hardware, so you can see your profile's panel before anything is wired up.</p>
 <p>${inLink('/robots', 'Your robots')} · ${inLink('/install', 'Install a device')}</p></section>
@@ -407,6 +407,17 @@ ${code(COMPUTER_APPROVE)}
 </ul>
 <p>How many run at once depends on the machine's memory (one whole desk per 2 GB by default; a browser desk counts as half). The details are in ${out(`${BLOB}/docs/computer.md`, 'computer.md')}.</p></section>
 
+<section class="card" aria-labelledby="models-c-h"><h2 id="models-c-h">Your own models</h2>
+<p>If you run a model on your computer (Ollama, LM Studio or llama.cpp's server), your OpenVibe AI can think with it: free, private to you, and with no port opened.</p>
+<ul>
+<li><b>Set it up.</b> On ${inLink('/machines', 'Your machines')}, choose <b>Add a machine</b> and run the command under <b>Or use the models you run on it</b>, or add <code>--ai</code> to any other one (OpenVibe Node v0.28.0 or newer). The installer says which model server it finds.</li>
+<li><b>Turn it on.</b> The machine's card lists its models and how fast they answer there. <b>Let my AI use this computer's models</b> lets OpenVibe ask them for you; nothing reaches them before that.</li>
+<li><b>Use it.</b> <b>Use these models in OpenVibe.Chat</b> fills in "Your AI key" on OpenVibe.Chat. Your Vibe and the AI members you set up can then think with your computer. On OpenVibe.Live, a streamer's AI viewers can too: choose <b>A model on my own computer</b> as their AI source.</li>
+<li><b>Any of your computers.</b> Choose <b>any of my computers</b> instead of one, and OpenVibe asks the fastest of yours that is on and has the model, then the next when one is busy.</li>
+<li><b>Only yours, only for you.</b> A request goes to your computer only when it is your own work, and never to anyone else's computer. When your computer is off, it waits for you: it is never answered by another provider in its place. The machine's record on openvibe.bot keeps the model and how much was asked, never the text.</li>
+</ul>
+<p>The details are in ${out(`${BLOB}/docs/ai.md`, 'ai.md')}.</p></section>
+
 <section class="card" aria-labelledby="screen-c-h"><h2 id="screen-c-h">Watch your screen live</h2>
 <p>On ${inLink('/machines', 'Your machines')}, <b>Show my screen</b> shows the computer's screen live, to you only, for 10 minutes (30 seconds to 30 minutes through the API).</p>
 <ul>
@@ -435,11 +446,12 @@ ${code(COMPUTER_CALL)}
 The page answers with its URL, title, text and links. The browser is the agent's own, in a profile of its own on your computer; it never sees your browser's sessions. Reading, screenshots and closing run at every level; the rest are approved one by one at ask. Below full, <code>open</code> refuses an address on your own network. The audit keeps the host, the selector, the key and the number of characters filled, never the text.</li>
 <li><code>input</code>: <code>action</code> (<code>move</code>, <code>click</code>, <code>double_click</code>, <code>right_click</code> at <code>x</code>, <code>y</code>; <code>scroll</code> by <code>dy</code>; <code>type</code> a <code>text</code>; <code>key</code> one key or chord such as <code>ctrl+s</code>), with <code>width</code> and <code>height</code> of the screenshot the coordinates come from; the computer scales them to its real screen. It acts, so your level decides: never at observe, approved one by one at ask. xdotool on Linux (X11), cliclick on macOS. The audit keeps the action and the number of characters typed, never the text.</li>
 <li><code>desk</code>: <code>action</code> <code>start</code> (with <code>desk</code> <code>desk-&lt;name&gt;</code>, <code>kind</code> <code>browser</code> or <code>desktop</code>, and a kept <code>profile</code>), <code>stop</code>, <code>status</code> or <code>list</code>. <code>screen</code>, <code>input</code>, <code>browser</code> and <code>exec</code> then take the same <code>desk</code> to act there, never on your own screen; <code>exec</code> also takes <code>detach</code> to leave a program running on a whole desk until the desk stops.</li>
+<li><code>ai</code>: <code>model</code> (one of its models), <code>messages</code> (<code>role</code> and <code>content</code>), <code>max_tokens</code>, <code>temperature</code> → <code>message</code>, <code>usage</code> and <code>ms</code>, from the computer's own model server. <code>POST /api/v1/machines/:id/ai-models</code> with <code>on</code> is the switch above; OpenVibe's own AI uses the models only while it is on.</li>
 <li><code>probe</code>: <code>target</code> (<code>http(s)://…</code> or <code>tcp://host:port</code> on the computer's own network) → the status and body of one GET, or whether the port is open. It is read-only and runs at every level.</li>
 </ul>
 <p class="muted"><code>GET /api/v1/machines</code> lists your machines with their level. A machine whose plugin is off answers <code>409 bot.computer_off</code>; a refusal on the computer answers <code>result: "nack"</code> with the reason. The audit keeps the program name or the file and path, never its content.</p></section>
 `;
-    return docsPage({ config, path: '/docs/computers', title: 'Your computer for your agents', description: 'Let your agents use your own computer through the OpenVibe Node: a desk of its own for each task (watch it and take it over), its terminal, files, screen, mouse and keyboard, at the level you set on the computer, with approvals there and a kill switch.', content });
+    return docsPage({ config, path: '/docs/computers', title: 'Your computer for your agents', description: 'Let your agents use your own computer through the OpenVibe Node: a desk of its own for each task (watch it and take it over), its terminal, files, screen, mouse and keyboard, at the level you set on the computer, with approvals there and a kill switch; and let your AI think with the models you run on it.', content });
 }
 
 module.exports = { renderDocsIndex, renderDriversPage, renderProfilesPage, renderAutomationPage, renderComputersPage, validationResult };

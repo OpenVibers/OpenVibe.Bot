@@ -102,6 +102,14 @@ const { HOME_CSP: SITE_CSP } = require('../server/web/home');
         }
     });
 
+    await check('GET /docs/computers: your own models in plain words (set up, turn on, use, any of yours, only yours) and the ai command', async () => {
+        const html = await (await get('/docs/computers')).text();
+        assert.match(html, /<h2 id="models-c-h">Your own models<\/h2>/);
+        const words = ['Ollama, LM Studio or llama.cpp', '<code>--ai</code>', 'Let my AI use this computer\'s models', 'Use these models in OpenVibe.Chat',
+            'A model on my own computer', 'any of my computers', 'never answered by another provider', '<code>ai</code>: <code>model</code>'];
+        for (const word of words) assert.ok(html.includes(word), word);
+    });
+
     await check('POST /docs/profiles/validate: the shipped sim.rover profile is valid', async () => {
         const r = await form(JSON.stringify(sim));
         assert.strictEqual(r.status, 200);
