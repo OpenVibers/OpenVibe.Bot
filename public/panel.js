@@ -434,6 +434,7 @@
         for (const el of [...tones.keys()]) releaseTone(el);
         for (const [el, h] of [...buttonHolds]) for (const source of [...h.sources]) releaseProfileButton(el, source);
         for (const s of sticks) s.release();
+        for (const k of [...dirRepeats.keys()]) { const i = k.indexOf('|'); dirRelease(k.slice(0, i), k.slice(i + 1)); }
         pad.reset();
         for (const el of $$('.held')) el.classList.remove('held');
     }
@@ -512,6 +513,102 @@
         sticks.push({ release });
     }
 
+    // ── A robot made of buttons drives too (Maticus, 2026-10-27: "WASD keyboard AND game controller … that cool virtual
+    // joystick from the sim") ──────────────────────────────────────────────────────────────────────────────────
+    // A relay robot's direction buttons (forward, backward, turn_left, turn_right …; render.js DIRECTION_BUTTONS) are
+    // pressed from WASD and the arrows, its joystick, and a gamepad's stick and D-pad, when the robot has no drive of its
+    // own. A hold button is held while the input is; a plain one is pressed again every REPEAT_MS while it is.
+    const DIR_NAMES = { up: ['forward', 'drive_forward', 'up'], down: ['backward', 'back', 'reverse', 'down'], left: ['turn_left', 'left', 'rotate_left'], right: ['turn_right', 'right', 'rotate_right'] };
+    const KEY_DIR = { ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right' };
+    const REPEAT_MS = 300;
+    const dirButton = (dir) => (DIR_NAMES[dir] || []).map((n) => $(`[data-button-name="${n}"]`)).find(Boolean) || null;
+    const buttonDrive = !Object.keys(driveAxes).length && Object.keys(DIR_NAMES).filter(dirButton).length >= 2;
+    const dirRepeats = new Map();   // `${dir}|${source}` → the timer re-pressing a plain button
+    function dirPress(dir, source) {
+        const el = dirButton(dir);
+        if (!el || el.disabled || !joined || !allowed.includes('button')) return false;
+        if (el.dataset.buttonHold === 'true') { pressProfileButton(el, source); return true; }
+        const k = `${dir}|${source}`;
+        if (dirRepeats.has(k)) return true;
+        el.classList.add('held');
+        pressProfileButton(el, source);
+        dirRepeats.set(k, setInterval(() => pressProfileButton(el, source), REPEAT_MS));
+        return true;
+    }
+    function dirRelease(dir, source) {
+        const el = dirButton(dir);
+        if (!el) return;
+        if (el.dataset.buttonHold === 'true') { releaseProfileButton(el, source); return; }
+        const k = `${dir}|${source}`;
+        if (!dirRepeats.has(k)) return;
+        clearInterval(dirRepeats.get(k));
+        dirRepeats.delete(k);
+        if (![...dirRepeats.keys()].some((x) => x.startsWith(`${dir}|`))) el.classList.remove('held');
+    }
+    /** A stick position (x right, y up) → the direction it points in once past half way, or null. */
+    const stickDir = (x, y) => (Math.hypot(x, y) < 0.5 ? null : Math.abs(x) > Math.abs(y) ? (x > 0 ? 'right' : 'left') : (y > 0 ? 'up' : 'down'));
+    /** Where a pointer is on a stick: x right, y up, both -1…1, the knob drawn there. */
+    function stickAt(el, e) {
+        const r = el.getBoundingClientRect();
+        const radius = r.width / 2;
+        let x = (e.clientX - (r.left + radius)) / radius;
+        let y = -(e.clientY - (r.top + r.height / 2)) / radius;
+        const m = Math.hypot(x, y);
+        if (m > 1) { x /= m; y /= m; }
+        const knob = $('[data-knob]', el);
+        if (knob) knob.style.transform = `translate(${x * 75}%, ${-y * 75}%)`;
+        return { x, y };
+    }
+    /** A joystick other than the drive's: onMove({ x, y }) while dragged, onEnd() when let go of (or released). */
+    function extraStick(el, onMove, onEnd) {
+        let pointer = null;
+        const end = () => {
+            if (pointer == null) return;
+            pointer = null;
+            el.classList.remove('held', 'active');
+            const knob = $('[data-knob]', el);
+            if (knob) knob.style.transform = '';
+            onEnd();
+        };
+        el.addEventListener('pointerdown', (e) => {
+            if (el.getAttribute('aria-disabled') === 'true' || pointer != null) return;
+            e.preventDefault();
+            pointer = e.pointerId;
+            try { el.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+            el.classList.add('held', 'active');
+            onMove(stickAt(el, e));
+        });
+        el.addEventListener('pointermove', (e) => { if (e.pointerId === pointer) onMove(stickAt(el, e)); });
+        for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) el.addEventListener(ev, (e) => { if (e.pointerId === pointer) end(); });
+        el.addEventListener('contextmenu', (e) => e.preventDefault());
+        sticks.push({ release: end });
+    }
+    const buttonStick = $('[data-button-stick]');
+    if (buttonStick) {
+        let dir = null;
+        extraStick(buttonStick, ({ x, y }) => {
+            const d = stickDir(x, y);
+            if (d === dir) return;
+            if (dir) dirRelease(dir, 'bstick');
+            dir = d;
+            if (d) dirPress(d, 'bstick');
+        }, () => { if (dir) dirRelease(dir, 'bstick'); dir = null; });
+    }
+    // A camera's pan and tilt from a joystick (the PTZ widget): the stick's lean is the speed, let go stops it.
+    const ptzStick = $('[data-ptz-stick]');
+    if (ptzStick) {
+        const kind = kindOf(ptzStick) || 'ptz';
+        const axes = JSON.parse(ptzStick.dataset.axes || '{}');
+        const map = JSON.parse(ptzStick.dataset.ptzStick);
+        const at = (axis, u) => { const r = axes[axis]; return r ? round(u >= 0 ? u * r[1] : -u * r[0]) : 0; };
+        extraStick(ptzStick, ({ x, y }) => {
+            const r = Math.hypot(x, y);
+            const k = r <= STICK_DEADZONE ? 0 : Math.min(1, (r - STICK_DEADZONE) / (1 - STICK_DEADZONE)) / r;
+            if (!joined || !allowed.includes(kind)) return;
+            holdSet(kind, 'ptzstick', { [map.x]: at(map.x, x * k), [map.y]: at(map.y, y * k) });
+        }, () => holdRelease(kind, 'ptzstick'));
+    }
+
     // ── Keyboard: arrows (and WASD) drive; Q/E rotate; Space stops ────────────────────────────────────
     const KEYS = {
         ArrowUp: [['throttle', 'y'], 1], KeyW: [['throttle', 'y'], 1], ArrowDown: [['throttle', 'y'], 0], KeyS: [['throttle', 'y'], 0],
@@ -541,9 +638,10 @@
         holdRelease(DRIVE, source);
     }
     const typing = (e) => /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName);
-    const profileKey = (e) => main.contains(document.activeElement) &&
+    // A key from the page around the frame (e.remote) was already checked there: not while typing, only while driving.
+    const profileKey = (e) => (e.remote || main.contains(document.activeElement)) &&
         $$('[data-button-key]').find((el) => !el.disabled && (el.dataset.buttonKey === e.code || el.dataset.buttonKey.toLowerCase() === e.key.toLowerCase()));
-    document.addEventListener('keydown', (e) => {
+    function onKeyDown(e) {
         if (typing(e)) return;
         const focusedButton = e.target.closest && e.target.closest('[data-button-name]');
         if (focusedButton && (e.code === 'Enter' || e.code === 'Space')) {
@@ -552,13 +650,18 @@
         // Stop and the drive keys first: a button's key never shadows them.
         if (e.code === 'Space') { e.preventDefault(); stopDrive(); return; }
         if (keyValue(e.code)) { e.preventDefault(); if (!e.repeat) keyPress(e.code, `key:${e.code}`); return; }
+        // A robot made of buttons: the drive keys press its direction buttons.
+        if (buttonDrive && KEY_DIR[e.code] && dirButton(KEY_DIR[e.code])) { e.preventDefault(); if (!e.repeat) dirPress(KEY_DIR[e.code], `key:${e.code}`); return; }
         const button = profileKey(e);
         if (button) { e.preventDefault(); if (!e.repeat) pressProfileButton(button, `key:${e.code}`); }
-    });
-    document.addEventListener('keyup', (e) => {
+    }
+    function onKeyUp(e) {
         for (const [el, h] of buttonHolds) if (h.sources.has(`key:${e.code}`)) releaseProfileButton(el, `key:${e.code}`);
         if (KEYS[e.code]) keyRelease(e.code, `key:${e.code}`);
-    });
+        if (KEY_DIR[e.code]) dirRelease(KEY_DIR[e.code], `key:${e.code}`);
+    }
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('keyup', onKeyUp);
 
     function stopDrive() {
         const h = holds.get(DRIVE);
@@ -581,23 +684,61 @@
         // After a reset (blur, a hidden page, the e-stop) nothing is pressed again until the pad is let go of
         // entirely: a stick still pushed or a button still held does not undo a release.
         latched: false,
+        dir: null,            // the direction button the pad holds (a robot made of buttons)
         reset() {
             holdRelease(DRIVE, 'pad');
+            if (this.dir) { dirRelease(this.dir, 'pad'); this.dir = null; }
             for (const [b, code] of Object.entries(PAD_DPAD)) if (this.down.has(Number(b))) keyRelease(code, `pad:${b}`);
             if (this.tone) { releaseTone(this.tone); this.tone = null; }
             this.latched = true;
         },
     };
+    // The page around the frame (a Live channel) sends its gamepad while this panel drives and the page, not the frame,
+    // has the focus (Live public/js/bot-embed.js): { axes, buttons: [pressed] }, at most about 30 times a second.
+    let remotePad = null;
+    const REMOTE_PAD_MS = 500;
+    function gamepad() {
+        const local = [...(navigator.getGamepads ? navigator.getGamepads() : [])].find((g) => g && g.connected);
+        if (local && document.hasFocus()) return { pad: local, focused: true };
+        if (remotePad && performance.now() - remotePad.at < REMOTE_PAD_MS) {
+            return { pad: { axes: remotePad.axes, buttons: remotePad.buttons.map((b) => ({ pressed: !!b })), connected: true }, focused: true };
+        }
+        return local ? { pad: local, focused: document.hasFocus() } : null;
+    }
     function padPoll() {
         pad.loop = 0;
-        const p = [...(navigator.getGamepads ? navigator.getGamepads() : [])].find((g) => g && g.connected);
+        const g = gamepad();
+        const p = g && g.pad;
         if (!p) { pad.reset(); pad.down.clear(); return; }      // the last pad went: stop polling
         const ax = (i) => Number(p.axes[i]) || 0;
+        const now = new Set(p.buttons.map((b, i) => (b && b.pressed ? i : -1)).filter((i) => i >= 0));
+        if (buttonDrive) {
+            // A robot made of buttons: the left stick or the D-pad points at a direction, and its button is pressed.
+            // Like the drive: after a reset nothing is pressed again until the pad is let go of; B lets go; Start is the e-stop.
+            const ok = g.focused && !document.hidden && joined && allowed.includes('button');
+            let want = stickDir(dead(ax(0), PAD_DEADZONE), -dead(ax(1), PAD_DEADZONE));
+            if (!want) for (const [b, d] of Object.entries({ 12: 'up', 13: 'down', 14: 'left', 15: 'right' })) if (now.has(Number(b))) { want = d; break; }
+            if (!ok) {
+                if (!pad.latched) pad.reset();
+            } else if (pad.latched) {
+                if (!want && !now.size) pad.latched = false;
+            } else if (now.has(9) && !pad.down.has(9) && $('[data-estop]:not([hidden])')) {
+                estop();
+            } else if (now.has(1) && !pad.down.has(1)) {
+                pad.reset();
+            } else if (want !== pad.dir) {
+                if (pad.dir) dirRelease(pad.dir, 'pad');
+                pad.dir = want;
+                if (want) dirPress(want, 'pad');
+            }
+            pad.down = now;
+            pad.loop = requestAnimationFrame(padPoll);
+            return;
+        }
         const v = stickValue(ax(0), -ax(1), PAD_DEADZONE);
         if (ROTATE) v[ROTATE] = scale(ROTATE, dead(ax(2), PAD_DEADZONE));
         const moving = Object.values(v).some((x) => x !== 0);
-        const now = new Set(p.buttons.map((b, i) => (b && b.pressed ? i : -1)).filter((i) => i >= 0));
-        if (!document.hasFocus() || document.hidden || !driveEnabled()) {
+        if (!g.focused || document.hidden || !driveEnabled()) {
             if (!pad.latched) pad.reset();
         } else if (pad.latched) {
             if (!moving && !now.size) pad.latched = false;
@@ -695,7 +836,30 @@
         for (const section of $$('[data-command]')) {
             const ok = joined && allowed.includes(JSON.parse(section.dataset.command).kind);
             for (const el of $$('button, input, select', section)) el.disabled = !ok;
-            for (const el of $$('[data-joystick]', section)) { if (ok) el.removeAttribute('aria-disabled'); else el.setAttribute('aria-disabled', 'true'); }
+            for (const el of $$('[data-joystick], [data-button-stick], [data-ptz-stick]', section)) { if (ok) el.removeAttribute('aria-disabled'); else el.setAttribute('aria-disabled', 'true'); }
+        }
+        announceControls();
+    }
+    // Framed by an allowed page (a Live channel), this panel tells it while its controls are live and which keys they
+    // take, so the page sends those keys and its gamepad here when the person is on the page and not in the frame
+    // (Maticus, 2026-10-27: "WASD keyboard AND game controller" on the stream page). Live public/js/bot-embed.js.
+    let announced = '';
+    function controlKeys() {
+        const keys = new Set();
+        if (driveEnabled()) { for (const code of Object.keys(KEYS)) if (keyValue(code)) keys.add(code); keys.add('Space'); }
+        if (buttonDrive && joined && allowed.includes('button')) for (const [code, dir] of Object.entries(KEY_DIR)) if (dirButton(dir)) keys.add(code);
+        for (const el of $$('[data-button-key]')) if (!el.disabled) keys.add(el.dataset.buttonKey);
+        return [...keys];
+    }
+    function announceControls() {
+        if (!framed) return;
+        const keys = driving && joined ? controlKeys() : [];
+        const msg = { type: 'ov-bot-controls', robot_id: ROBOT_ID, active: keys.length > 0, keys, pad: keys.length > 0 };
+        const text = JSON.stringify(msg);
+        if (text === announced) return;
+        announced = text;
+        for (const origin of PARENTS) {
+            try { window.parent.postMessage(msg, origin); } catch { /* not that origin */ }
         }
     }
     // What a device's refusal means, in words (a nack's fault code). A deadline that passed in transit is not news.
@@ -905,6 +1069,7 @@
     // ── The embed's Drive ─────────────────────────────────────────────────────────────────────────────
     function stopDriving(text) {
         driving = false; watcher = true; ticket = null;
+        announceControls();
         for (const el of $$('[data-estop]')) el.hidden = true;
         const label = $('[data-role-label]');
         if (label) label.textContent = 'Watching';
@@ -942,6 +1107,23 @@
         const fromParent = framed && e.source === window.parent && PARENTS.includes(e.origin);
         if (!fromPopup && !fromParent) return;
         const d = e.data || {};
+        // The page's keys and gamepad while this panel drives (announceControls): the same handlers as this frame's own.
+        // A key's release always goes through, so nothing stays held when driving ends between press and release.
+        if (fromParent && d.robot_id === ROBOT_ID && d.type === 'ov-bot-key' && typeof d.code === 'string') {
+            if (d.down && !(driving && joined)) return;
+            const ev = { code: d.code.slice(0, 40), key: typeof d.key === 'string' ? d.key.slice(0, 20) : '', repeat: d.repeat === true,
+                remote: true, target: document.body, preventDefault() {} };
+            if (d.down) onKeyDown(ev); else onKeyUp(ev);
+            return;
+        }
+        if (fromParent && d.robot_id === ROBOT_ID && d.type === 'ov-bot-pad') {
+            if (!(driving && joined)) return;
+            const unit = (v) => (Number.isFinite(Number(v)) ? Math.max(-1, Math.min(1, Number(v))) : 0);
+            remotePad = { axes: (Array.isArray(d.axes) ? d.axes.slice(0, 8) : []).map(unit),
+                buttons: (Array.isArray(d.buttons) ? d.buttons.slice(0, 20) : []).map((b) => b === true), at: performance.now() };
+            padStart();
+            return;
+        }
         if (fromParent && d.type === 'ov-bot-ticket-none' && d.robot_id === ROBOT_ID) {
             clearTimeout(asked);
             notice(typeof d.message === 'string' ? d.message.slice(0, 200) : 'You cannot drive this robot from here.');

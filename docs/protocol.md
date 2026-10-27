@@ -369,6 +369,21 @@ a spent or expired one closes **4002**. A panel on another site gets one in two 
   takes an answer only from `window.parent` on one of them: `{ type: "ov-bot-ticket", robot_id, ticket }`, or
   `{ type: "ov-bot-ticket-none", robot_id, message }` (shown as is: sign in, or the owner decides who drives).
   With no answer in 2.5 s the next Drive opens the popup.
+
+While a framed panel drives, the page around it can drive with its own keyboard and gamepad. This is for when the
+person is on the page and not in the frame (a Live channel's player).
+- The panel tells each `BOT_EMBED_ORIGINS` origin when its controls go live, change or end:
+  `{ type: "ov-bot-controls", robot_id, active, keys, pad }`.
+  - `keys` lists the `KeyboardEvent.code`s it takes: the drive keys, WASD and the arrows on a robot made of buttons
+    (they press its forward/back/left/right buttons), and the profile's button keys.
+  - `active: false`, with no keys, ends it.
+- The page sends those keys as `{ type: "ov-bot-key", robot_id, code, key, down, repeat }`, never while the person
+  types.
+- It sends its gamepad at most about 30 times a second as `{ type: "ov-bot-pad", robot_id, axes, buttons }`: axes
+  -1…1 and buttons true while pressed. Pad input that has not arrived for 500 ms counts as let go.
+- The panel takes these messages only from `window.parent` on an allowed origin, for its own robot, and a press only
+  while it drives. They go through the same handlers and the same gate as its own input. A key's release always
+  goes through.
 The gate then applies the **acted-for subject's** role — a service acting for a viewer is a viewer.
 The same gate is reachable over HTTP as `POST /robots/:id/commands` (§3), so a bound channel's chat can
 forward commands without holding a socket. The HTTP gate is the same gate but not the same join: a caller
