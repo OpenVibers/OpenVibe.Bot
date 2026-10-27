@@ -234,6 +234,25 @@ const { boot, check, done } = require('./helpers/app');
         old.c.close();
     });
 
+    await check('programs on a desk (contracts 0.218.0, Node v0.26.0): sent to a Node that runs them, audited with the desk; an older Node never gets one', async () => {
+        const desk = { level: 'trusted', window_manager: 'openbox', input: true, screen: true, named: true, max_desks: 4, kinds: ['desktop', 'browser'] };
+        const now = await machine(alex, { ...COMPUTER, terminal: { ...COMPUTER.terminal, desks: true }, desk });
+        const old = await machine(alex, { ...COMPUTER, desk });
+        const run = await cmd(now.deviceId, { kind: 'exec', value: { argv: ['libreoffice', '--writer', 'notes.odt'], desk: 'desk-task-a', detach: true } }, { user: alex });
+        assert.strictEqual(run.json.result, 'ack', run.text);
+        assert.deepStrictEqual([seen.at(-1).kind, seen.at(-1).value.desk, seen.at(-1).value.detach], ['exec', 'desk-task-a', true]);
+        const row = await t.db.one('SELECT value FROM command_audit WHERE robot_id = $1 AND kind = $2 ORDER BY id DESC LIMIT 1', [now.deviceId, 'exec']);
+        assert.deepStrictEqual(row.value, { program: 'libreoffice', args: 2, desk: 'desk-task-a', detach: true }, 'never the arguments');
+        const before = seen.length;
+        const refused = await cmd(old.deviceId, { kind: 'exec', value: { argv: ['xterm'], desk: 'desk-task-a' } }, { user: alex });
+        assert.deepStrictEqual([refused.status, refused.json.code], [409, 'bot.computer_off']);
+        assert.match(refused.json.detail || refused.json.reason || '', /Node v0\.26\.0/);
+        assert.strictEqual(seen.length, before, 'never sent');
+        assert.strictEqual((await cmd(old.deviceId, { kind: 'exec', value: { argv: ['echo', 'hi'] } }, { user: alex })).json.result, 'ack', 'its own session as before');
+        now.c.close();
+        old.c.close();
+    });
+
     await check('a desk host (Node v0.20.0 --desk-host): no screen of its own, yet its desks are seen and driven', async () => {
         // Nobody is signed in to a desk host: it offers no screen or input of its own, only its desks' (desk.screen, desk.input).
         const { screen: _s, input: _i, ...headless } = COMPUTER;
