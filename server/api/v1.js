@@ -446,8 +446,11 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         const subject = actedFor(req, req.query.owner);
         const svc = req.principal.kind === 'service' ? MACHINE_SERVICES[req.principal.sub] : null;
         if (req.principal.kind === 'service') {
-            if (!svc) fail(403, 'bot.forbidden', 'machines are listed for their owner, their agent and their watches');
-            if (!apiAuth.granted(req.principal, CAP.computer)) fail(403, 'capability.denied', `${CAP.computer} not granted`);
+            if (!svc) fail(403, 'bot.forbidden', 'machines are listed for their owner, their agent, their watches and their AI');
+            // Each service with its own capability: OpenVibe.AI lists those whose models the owner's AI may use
+            // (a node credential with machine `any`, contracts 0.221.0).
+            const cap = svc.cap || CAP.computer;
+            if (!apiAuth.granted(req.principal, cap)) fail(403, 'capability.denied', `${cap} not granted`);
         }
         const rows = await domain.machines.list(subject);
         const mine = svc ? rows.filter((d) => d[svc.flag]) : rows;

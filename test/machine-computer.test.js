@@ -411,9 +411,13 @@ const { boot, check, done } = require('./helpers/app');
         const asAi = (subject) => ({ token: ai, headers: { 'X-OV-Subject': subject } });
         const before = await cmd(gpu.deviceId, ask, asAi(alex.subject));
         assert.deepStrictEqual([before.status, before.json.code], [403, 'bot.agent_not_allowed'], 'off until the owner turns it on');
+        const listAi = async () => (await t.call('GET', '/api/v1/machines', asAi(alex.subject))).json.machines.map((m) => m.id);
+        assert.ok(!(await listAi()).includes(gpu.deviceId), 'OpenVibe.AI lists only machines whose models it may use');
         const on = await t.call('POST', `/api/v1/machines/${gpu.deviceId}/ai-models`, { user: alex, body: { on: true } });
         assert.strictEqual(on.json.machine.ai_models, true);
         assert.deepStrictEqual(on.json.machine.computer.ai.models, ['llama3.1:8b']);
+        assert.deepStrictEqual(await listAi(), [gpu.deviceId], 'once on, it is listed to OpenVibe.AI (a node credential with machine any)');
+        assert.strictEqual((await t.call('GET', '/api/v1/machines', { token: t.network.signService({ sub: 'svc:ai', cap: ['bot.computer.control'] }), headers: { 'X-OV-Subject': alex.subject } })).status, 403, 'with its own capability only');
         const viaAi = await cmd(gpu.deviceId, ask, asAi(alex.subject));
         assert.strictEqual(viaAi.json.result, 'ack', viaAi.text);
         // Nobody else: another person through OpenVibe.AI, a service without the capability, another service, another kind.
