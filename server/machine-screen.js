@@ -67,10 +67,12 @@ function createMachineScreen({ domain, hub, now = () => Date.now() }) {
             if (!hub.isOnline(device.id)) throw new BotError(409, 'bot.device_offline', 'the machine is offline');
             // Before any key is made: the machine says whether it can (Node v0.12.0's computer plugin, a capture tool).
             const offered = hub.computerOf(device.id);
-            if (!(offered && offered.screen && offered.screen.stream === true)) {
+            // The person's own screen needs a live capture of it; a desk's is the desk's own (desk.screen, below): a desk
+            // host has no screen of its own to show, only its desks.
+            if (desk === 'main' && !(offered && offered.screen && offered.screen.stream === true)) {
                 throw new BotError(409, 'bot.computer_off', 'this machine does not show its screen live: it needs OpenVibe Node v0.12.0 or newer, with the computer plugin running in your graphical session');
             }
-            if (desk !== 'main' && !(offered.desk && offered.desk.screen)) {
+            if (desk !== 'main' && !(offered && offered.desk && offered.desk.screen)) {
                 throw new BotError(409, 'bot.computer_off', 'this machine has no private desk to show: it needs OpenVibe Node v0.15.0 or newer on Linux, with Xvfb and allow_desk on');
             }
             if (desk !== 'main' && desk !== 'private' && offered.desk.named !== true) {
