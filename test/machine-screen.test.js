@@ -33,6 +33,7 @@ const { boot, check, done } = require('./helpers/app');
             if (m.kind === 'screen_stream' && m.value.action === 'start') {
                 c.send(frame('ack', { id: m.id, data: { streaming: true, sid: 'abc', seconds: m.value.seconds, fps: m.value.fps, until_ms: Date.now() + m.value.seconds * 1000 } }));
             } else if (m.kind === 'screen_stream') c.send(frame('ack', { id: m.id, data: { streaming: false, stopped: true } }));
+            else if (m.kind === 'input') c.send(frame('ack', { id: m.id, data: { done: true, action: m.value.action } }));
             else c.send(frame('nack', { id: m.id, fault_code: 'unsupported' }));
         });
         // Heartbeats keep it online, as a real Node's do.
@@ -171,6 +172,38 @@ const { boot, check, done } = require('./helpers/app');
         assert.deepStrictEqual([bad.status, bad.json.code], [422, 'bot.invalid_input']);
         multi.c.close();
         single.c.close();
+    });
+
+    await check('watch and take over an agent\'s desk (Desks plan D4): a task\'s link opens its desk; the owner\'s mouse and keyboard go to the desk shown, as the owner; same site only', async () => {
+        const desk = { level: 'trusted', window_manager: 'openbox', input: true, screen: true, named: true, max_desks: 4 };
+        const m = await machine(alex, { ...SCREEN, input: { level: 'trusted', tool: 'xdotool' }, desk });
+        const idle = await (await fetch(`${t.base}/machines/${m.deviceId}/screen?desk=desk-task-a`, { headers: cookie(alex) })).text();
+        assert.ok(idle.includes('Watch your agent&#39;s desk') || idle.includes("Watch your agent's desk"), 'a task\'s link offers its desk first');
+        assert.ok(idle.includes('name="desk" value="desk-task-a"'));
+        const bad = await (await fetch(`${t.base}/machines/${m.deviceId}/screen?desk=desk-../x`, { headers: cookie(alex) })).text();
+        assert.ok(!bad.includes('name="desk" value="desk-../x"'), 'a bad name is never offered');
+        const started = await fetch(`${t.base}/machines/${m.deviceId}/screen`, { method: 'POST', redirect: 'manual', body: 'desk=desk-task-a', headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...cookie(alex) } });
+        assert.strictEqual(started.status, 303);
+        assert.match(started.headers.get('location'), /&desk=desk-task-a$/);
+        assert.strictEqual(seen.at(-1).value.desk, 'desk-task-a', 'the machine streams that desk');
+        const html = await (await fetch(t.base + started.headers.get('location'), { headers: cookie(alex) })).text();
+        assert.ok(html.includes('data-owner="1"') && html.includes('/panel/screen-share.js') && html.includes('Take over: use the mouse and keyboard'), 'the page offers Take over');
+        const st = await (await fetch(`${t.base}/machines/${m.deviceId}/screen/state.json`, { headers: cookie(alex) })).json();
+        assert.strictEqual(st.desk, 'desk-task-a');
+        const json = (body, headers = {}) => ({ method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json', ...cookie(alex), ...headers } });
+        const click = await fetch(`${t.base}/machines/${m.deviceId}/screen/input`, json({ action: 'click', x: 10, y: 20, width: 100, height: 100 }));
+        assert.strictEqual(click.status, 200, await click.clone().text());
+        assert.deepStrictEqual(await click.json(), { done: true, desk: 'desk-task-a' });
+        const sent = seen.at(-1);
+        assert.deepStrictEqual([sent.kind, sent.value.desk, sent.value.action, sent.value.x], ['input', 'desk-task-a', 'click', 10], 'on the desk shown, never the owner\'s own screen');
+        assert.strictEqual(sent.operator && sent.operator.subject, alex.subject, 'as the owner');
+        assert.strictEqual((await fetch(`${t.base}/machines/${m.deviceId}/screen/input`, json({ action: 'click', x: 1, y: 1, width: 2, height: 2 }, { Origin: 'https://evil.test' }))).status, 403, 'no cross-site input');
+        assert.strictEqual((await fetch(`${t.base}/machines/${m.deviceId}/screen/input`, json({ action: 'reboot' }))).status, 422);
+        const bobInput = await fetch(`${t.base}/machines/${m.deviceId}/screen/input`, { method: 'POST', body: '{"action":"click"}', headers: { 'Content-Type': 'application/json', ...cookie(bob) } });
+        assert.strictEqual(bobInput.status, 404, 'only the owner');
+        const stop = await fetch(`${t.base}/machines/${m.deviceId}/screen/stop`, json({}));
+        assert.deepStrictEqual([stop.status, (await stop.json()).stopped !== undefined], [200, true], 'the page\'s own Stop answers JSON');
+        m.c.close();
     });
 
     await check('removing the machine archives its screen stream', async () => {

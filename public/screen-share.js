@@ -7,6 +7,9 @@
     const main = document.querySelector('main[data-share]');
     if (!main || main.dataset.control !== '1') return;
     const base = main.dataset.share;
+    // The owner's own screen page (data-owner): signed in by cookie, same site; a share link: the token only.
+    const credentials = main.dataset.owner === '1' ? 'same-origin' : 'omit';
+    const desk = new URLSearchParams(location.search).get('desk');
     const fig = main.querySelector('[data-screen-state]');
     const use = main.querySelector('[data-share-use]');
     const startBtn = main.querySelector('[data-share-start]');
@@ -15,7 +18,7 @@
     const say = (t) => { if (note) note.textContent = t || ''; };
 
     async function post(path, body) {
-        const r = await fetch(base + path, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body || {}), credentials: 'omit' });
+        const r = await fetch(base + path, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body || {}), credentials });
         const j = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(j.detail || ('the computer answered ' + r.status));
         return j;
@@ -24,7 +27,7 @@
     // Start when the screen is off; the state comes from the same JSON panel.js reads.
     async function refresh() {
         try {
-            const r = await fetch(base + '/state.json', { headers: { Accept: 'application/json' }, cache: 'no-store', credentials: 'omit' });
+            const r = await fetch(base + '/state.json', { headers: { Accept: 'application/json' }, cache: 'no-store', credentials });
             const s = r.ok ? await r.json() : null;
             if (startBtn) startBtn.hidden = !s || s.live || !s.online;
             if (s && !s.online) say('The computer is offline.');
@@ -34,7 +37,7 @@
     setInterval(refresh, 5000);
     if (startBtn) startBtn.addEventListener('click', async () => {
         startBtn.disabled = true; say('Starting the screen…');
-        try { await post('/start'); say('Starting: the picture appears in a few seconds.'); } catch (e) { say(e.message); } finally { startBtn.disabled = false; refresh(); }
+        try { await post('/start', desk ? { desk } : {}); say('Starting: the picture appears in a few seconds.'); } catch (e) { say(e.message); } finally { startBtn.disabled = false; refresh(); }
     });
     if (stopBtn) stopBtn.addEventListener('click', async () => {
         try { await post('/stop'); say('The screen is stopped.'); } catch (e) { say(e.message); } finally { refresh(); }

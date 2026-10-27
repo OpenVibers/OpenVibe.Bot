@@ -20,6 +20,26 @@
 const { BotError } = require('./util');
 
 const SECONDS = { min: 30, max: 1800, default: 600 };
+const DESK = /^(main|private|desk-[a-z0-9][a-z0-9-]{0,23})$/;
+const ACTIONS = new Set(['click', 'double_click', 'right_click', 'move', 'scroll', 'type', 'key']);
+
+/** A person's mouse or keyboard action on a shown screen, as bot.command@1 input takes it (share links and the owner). */
+function inputValue(value) {
+    const v = value && typeof value === 'object' ? value : {};
+    if (!ACTIONS.has(v.action)) throw new BotError(422, 'bot.invalid_input', `action is one of ${[...ACTIONS].join(', ')}`);
+    const out = { action: v.action };
+    if (['click', 'double_click', 'right_click', 'move', 'scroll'].includes(v.action) && v.x != null) {
+        for (const k of ['x', 'y', 'width', 'height']) {
+            const n = Math.round(Number(v[k]));
+            if (!Number.isFinite(n) || n < 0 || n > 10000) throw new BotError(422, 'bot.invalid_input', `${k} is a position in the picture`);
+            out[k] = n;
+        }
+    }
+    if (v.action === 'scroll') out.dy = Math.max(-50, Math.min(50, Math.round(Number(v.dy) || 0)));
+    if (v.action === 'type') out.text = String(v.text || '').slice(0, 500);
+    if (v.action === 'key') out.keys = String(v.keys || '').slice(0, 40);
+    return out;
+}
 const FPS = { min: 1, max: 5, default: 2 };
 
 function whole(v, { min, max, default: dflt }, name) {
@@ -31,14 +51,19 @@ function whole(v, { min, max, default: dflt }, name) {
 
 function createMachineScreen({ domain, hub, now = () => Date.now() }) {
     const unavailable = () => new BotError(503, 'bot.unavailable', 'machines are not connected here');
+    // The desk each machine's live screen shows (this process): the owner's input goes there, never to another screen.
+    const shown = new Map();
+    const owner = (subject) => ({ kind: 'user', sub: subject });
+    const rate = new Map();
     return {
+        DESK,
         limits: { SECONDS, FPS },
         async start(device, subject, principal, opts = {}) {
             if (!hub) throw unavailable();
             const seconds = whole(opts.seconds, SECONDS, 'seconds');
             const fps = whole(opts.fps, FPS, 'fps');
             const desk = opts.desk == null || opts.desk === '' ? 'main' : String(opts.desk);
-            if (desk !== 'main' && !/^(private|desk-[a-z0-9][a-z0-9-]{0,23})$/.test(desk)) throw new BotError(422, 'bot.invalid_input', 'desk is main, private or desk-<name>');
+            if (!DESK.test(desk)) throw new BotError(422, 'bot.invalid_input', 'desk is main, private or desk-<name>');
             if (!hub.isOnline(device.id)) throw new BotError(409, 'bot.device_offline', 'the machine is offline');
             // Before any key is made: the machine says whether it can (Node v0.12.0's computer plugin, a capture tool).
             const offered = hub.computerOf(device.id);
@@ -60,13 +85,32 @@ function createMachineScreen({ domain, hub, now = () => Date.now() }) {
             }
             const data = r.data && typeof r.data === 'object' ? r.data : {};
             const until = Number.isFinite(data.until_ms) ? new Date(data.until_ms).toISOString() : new Date(now() + seconds * 1000).toISOString();
+            shown.set(device.id, desk);
             return { streaming: true, seconds, fps, until, desk };
         },
         async state(device, subject) {
             const sensors = hub ? ((hub.deviceState(device.id).telemetry || {}).sensors || {}) : {};
             const state = sensors.computer_screen_stream === 'live' ? 'live' : 'off';
             const url = state === 'live' ? await domain.machines.screen.live(device, subject) : null;
-            return { live: !!url, signaling_url: url, state, online: !!(hub && hub.isOnline(device.id)) };
+            return { live: !!url, signaling_url: url, state, online: !!(hub && hub.isOnline(device.id)), desk: shown.get(device.id) || 'main' };
+        },
+        /**
+         * The owner's own mouse or keyboard on the screen shown now (Desks plan D4, "Take over"): sent as the owner, so
+         * Bot's person-first rule holds an agent off that screen while they use it, and it goes on when they stop.
+         */
+        async input(device, subject, value) {
+            if (!hub) throw unavailable();
+            const out = inputValue(value);
+            const desk = shown.get(device.id) || 'main';
+            if (desk !== 'main') out.desk = desk;
+            const recent = (rate.get(device.id) || []).filter((x) => now() - x < 1000);
+            if (recent.length >= 8) throw new BotError(429, 'bot.rate_limited', 'slow down a little');
+            recent.push(now());
+            rate.set(device.id, recent);
+            const r = await hub.machineCommand(device.id, owner(subject), subject, { kind: 'input', value: out, ms: 15000 });
+            if (r && r.result === 'ack') return { done: true, desk };
+            const code = (r && r.code) || 'bot.device_refused';
+            throw new BotError(r && r.result === 'expired' ? 504 : 409, code.startsWith('bot.') ? code : 'bot.device_refused', `the computer did not do it: ${(r && (r.reason || r.result)) || 'no answer'}`.slice(0, 300));
         },
         async stop(device, subject, principal) {
             let told = false;
@@ -75,9 +119,10 @@ function createMachineScreen({ domain, hub, now = () => Date.now() }) {
                 told = r.result === 'ack';
             }
             const ended = await domain.machines.screen.end(device, subject);
+            shown.delete(device.id);
             return { stopped: told || ended };
         },
     };
 }
 
-module.exports = { createMachineScreen, SECONDS, FPS };
+module.exports = { createMachineScreen, inputValue, ACTIONS, SECONDS, FPS, DESK };
