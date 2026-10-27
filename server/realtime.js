@@ -65,7 +65,7 @@ const COMPUTER_MAX_MS = 600000;
 /** What an audit row keeps of a computer command: never a file's content, stdin or arguments (they may hold secrets). */
 function computerSummary(kind, value) {
     const where = deskOf(value) !== 'main' ? { desk: deskOf(value) } : {};
-    if (kind === 'desk') return { action: value.action, ...(typeof value.desk === 'string' ? { desk: value.desk } : {}), ...(typeof value.kind === 'string' ? { kind: value.kind } : {}), ...(Number.isInteger(value.width) && Number.isInteger(value.height) ? { width: value.width, height: value.height } : {}) };
+    if (kind === 'desk') return { action: value.action, ...(typeof value.desk === 'string' ? { desk: value.desk } : {}), ...(typeof value.kind === 'string' ? { kind: value.kind } : {}), ...(typeof value.profile === 'string' ? { profile: value.profile } : {}), ...(Number.isInteger(value.width) && Number.isInteger(value.height) ? { width: value.width, height: value.height } : {}) };
     if (kind === 'exec') return { program: String(value.argv[0]).slice(0, 120), args: value.argv.length - 1 };
     if (kind === 'fs') return { op: value.op, path: String(value.path).slice(0, 300), ...(typeof value.content_b64 === 'string' ? { bytes: Math.floor((value.content_b64.length * 3) / 4) } : {}) };
     if (kind === 'probe') { try { const u = new URL(value.target); return { scheme: u.protocol.replace(':', ''), host: u.host }; } catch { return { scheme: null }; } }

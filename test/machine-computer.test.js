@@ -222,6 +222,13 @@ const { boot, check, done } = require('./helpers/app');
         assert.strictEqual((await cmd(old.deviceId, { kind: 'desk', value: { action: 'start', desk: 'desk-task-a' } }, { user: alex })).json.result, 'ack');
         const audit = await t.db.many('SELECT value FROM command_audit WHERE robot_id = $1 AND kind = $2 AND result = $3 ORDER BY id', [both.deviceId, 'desk', 'ack']);
         assert.deepStrictEqual(audit.map((r) => r.value.kind), ['browser', 'desktop'], 'the audit names the kind');
+        // A kept profile (contracts 0.217.0, Node v0.24.0) reaches the machine and the audit names it.
+        const kept = await cmd(both.deviceId, { kind: 'desk', value: { action: 'start', desk: 'desk-task-k', kind: 'browser', profile: 'agent' } }, { user: alex });
+        assert.strictEqual(kept.json.result, 'ack', kept.text);
+        assert.strictEqual(seen.at(-1).value.profile, 'agent');
+        const keptRow = await t.db.one('SELECT value FROM command_audit WHERE robot_id = $1 AND kind = $2 ORDER BY id DESC LIMIT 1', [both.deviceId, 'desk']);
+        assert.strictEqual(keptRow.value.profile, 'agent');
+        assert.strictEqual((await cmd(both.deviceId, { kind: 'desk', value: { action: 'start', desk: 'desk-task-k', profile: '../x' } }, { user: alex })).status, 422, 'a bad profile name is refused');
         both.c.close();
         mac.c.close();
         old.c.close();
