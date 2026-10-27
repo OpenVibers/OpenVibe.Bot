@@ -346,7 +346,12 @@ const { boot, check, done } = require('./helpers/app');
         const desk = { level: 'trusted', window_manager: 'openbox', input: true, screen: true, named: true };
         const host = await machine(alex, { files: COMPUTER.files, desk: { ...desk, max_desks: 4, kinds: ['desktop', 'browser'], profiles: true } });
         const mac = await machine(alex, { ...COMPUTER, desk: { ...desk, window_manager: null, max_desks: 2, kinds: ['browser'] } });
-        const html = await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text();
+        // A machine's declared capabilities are saved as its status arrives: wait until both machines' are.
+        let html = '';
+        for (let i = 0; i < 20 && !(html.includes('sign-ins kept') && html.includes('browser desks at once')); i++) {
+            if (i) await t.wait(100);
+            html = await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text();
+        }
         assert.ok(html.includes('Desks for your agents: 4 at once, or twice as many browser desks, sign-ins kept'), 'a desk host');
         assert.ok(html.includes('Desks for your agents: 4 browser desks at once'), 'a Mac: browser desks only');
         const add = await fetch(`${t.base}/machines`, { method: 'POST', redirect: 'manual', body: '', headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...cookie(alex) } });
@@ -431,7 +436,11 @@ const { boot, check, done } = require('./helpers/app');
         assert.strictEqual((await cmd(own.deviceId, { kind: 'ai', value: { model: 'qwen2.5-1.5b-instruct', messages: [{ role: 'user', content: 'hi' }] } }, { user: alex })).json.result, 'ack');
         const noExec = await cmd(own.deviceId, { kind: 'exec', value: { argv: ['id'] } }, { user: alex });
         assert.strictEqual(noExec.json.code, 'bot.computer_off', 'no terminal without the computer plugin');
-        const ownCard = (await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text());
+        let ownCard = '';
+        for (let i = 0; i < 20 && !ownCard.includes('qwen2.5-1.5b-instruct'); i++) {
+            if (i) await t.wait(100);
+            ownCard = await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text();
+        }
         assert.ok(ownCard.includes('qwen2.5-1.5b-instruct'), 'the card shows its models');
         own.c.close();
         // The machines page: its models and the switch.
