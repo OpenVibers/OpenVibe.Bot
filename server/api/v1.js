@@ -55,6 +55,7 @@ const CAP = {
     connect: 'bot.device.connect',
     dispatch: 'bot.job.dispatch',
     computer: 'bot.computer.control',
+    ai: 'bot.machine.ai',
 };
 
 /** Services that act as a person's agent (plan T15/T17): they drive a robot only where its owner turned agent_control on. */
@@ -66,7 +67,11 @@ const AGENT_SERVICES = new Set(['svc:actor']);
 const MACHINE_SERVICES = {
     'svc:actor': { kinds: null, flag: 'agent_computer', off: 'the owner has not let their agent use this computer' },
     'svc:watch': { kinds: new Set(['probe']), flag: 'watch_probe', off: 'the owner has not let their watches check things from this computer' },
+    // AI on your own machines (contracts 0.219.0): OpenVibe.AI runs a model on the owner's own model server, nothing else.
+    'svc:ai': { kinds: new Set(['ai']), flag: 'ai_models', off: 'the owner has not let their AI use this computer\'s models', cap: 'bot.machine.ai' },
 };
+// A model on a person's machine is OpenVibe.AI's and the owner's only: no other service sends kind ai.
+const AI_KIND = 'ai';
 
 function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, submissions = null, routines = null, webhooks = null, claims = null }) {
     const r = express.Router();
@@ -408,8 +413,10 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         const svc = req.principal.kind === 'service' ? MACHINE_SERVICES[req.principal.sub] : null;
         if (req.principal.kind === 'service') {
             if (!svc) fail(403, 'bot.forbidden', 'a machine is used by its owner, their agent and their watches only');
-            if (!apiAuth.granted(req.principal, CAP.computer)) fail(403, 'capability.denied', `${CAP.computer} not granted`);
+            const cap = svc.cap || CAP.computer;
+            if (!apiAuth.granted(req.principal, cap)) fail(403, 'capability.denied', `${cap} not granted`);
             if (kind != null && svc.kinds && !svc.kinds.has(String(kind))) fail(403, 'bot.forbidden', `${req.principal.sub} may send ${[...svc.kinds].join(', ')} only`);
+            if (String(kind) === AI_KIND && !(svc.kinds && svc.kinds.has(AI_KIND))) fail(403, 'bot.forbidden', 'a model on a person\'s machine runs for OpenVibe.AI and the owner only');
         }
         const device = await domain.devices.get(String(req.params.id || '').slice(0, 64));
         const ownerSubject = device && !device.revoked_at ? await domain.devices.ownerOf(device) : null;
@@ -423,11 +430,11 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         const sensors = st.telemetry && st.telemetry.sensors && typeof st.telemetry.sensors === 'object' ? st.telemetry.sensors : {};
         const pick = (cap) => (offered && offered[cap] && typeof offered[cap] === 'object' ? offered[cap] : null);
         return {
-            id: device.id, name: device.name || null, online: !!st.online, agent_computer: !!device.agent_computer, watch_probe: !!device.watch_probe,
+            id: device.id, name: device.name || null, online: !!st.online, agent_computer: !!device.agent_computer, ai_models: !!device.ai_models, watch_probe: !!device.watch_probe,
             voice: { on: !!device.voice_on, call_word: device.call_word || DEFAULT_CALL_WORD },
             computer: offered ? {
                 level: typeof sensors.computer_level === 'string' ? sensors.computer_level : ((pick('files') || pick('terminal') || pick('screen') || {}).level || null),
-                terminal: pick('terminal'), files: pick('files'), screen: pick('screen'), probe: pick('probe'), input: pick('input'), browser: pick('browser'), desk: pick('desk'),
+                terminal: pick('terminal'), files: pick('files'), screen: pick('screen'), probe: pick('probe'), input: pick('input'), browser: pick('browser'), desk: pick('desk'), ai: pick('ai'),
                 waiting: Number.isInteger(sensors.computer_waiting) ? sensors.computer_waiting : null,
                 // Desks running now (the Node's telemetry): where an agent's next desk has room (Desks plan D6, placement).
                 desks_running: Number.isInteger(sensors.computer_desks) ? sensors.computer_desks : null,
@@ -505,6 +512,14 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         if (req.body.call_word != null && !word) fail(422, 'bot.invalid_input', 'a call word is 1 to 4 words, 3 to 40 characters, with one word of three letters or more');
         const updated = await domain.machines.setVoice(device.id, req.body.on, word);
         if (hub && hub.machineChanged) await hub.machineChanged(updated);
+        res.json({ machine: machineOut(updated) });
+    }));
+    // The owner lets their AI run models on this machine, or stops it (never the AI itself).
+    r.post('/machines/:id/ai-models', manage, wrap(async (req, res) => {
+        if (req.principal.kind !== 'user') fail(403, 'bot.forbidden', 'only the machine\'s owner turns this on or off');
+        const { device } = await computerMachine(req, { agentNeedsOptIn: false });
+        if (typeof req.body?.on !== 'boolean') fail(422, 'bot.invalid_input', 'on is true or false');
+        const updated = await domain.machines.setAiModels(device.id, req.body.on);
         res.json({ machine: machineOut(updated) });
     }));
     // The owner turns their agent's use of the machine on or off (never the agent itself).

@@ -42,7 +42,7 @@ const DEVICE_MAX_PAYLOAD = 640 * 1024;
 // status, and the reply window (the owner's approval on the machine plus the program's own run). `desk` (contracts
 // 0.214.0, Node v0.15.0) starts, stops or reports the machine's private desk; screen, input and browser (and the live
 // screen) act there with `desk: private`, never on the owner's own screen.
-const COMPUTER_CAP = { exec: 'terminal', fs: 'files', screen: 'screen', probe: 'probe', input: 'input', browser: 'browser', desk: 'desk' };
+const COMPUTER_CAP = { exec: 'terminal', fs: 'files', screen: 'screen', probe: 'probe', input: 'input', browser: 'browser', desk: 'desk', ai: 'ai' };
 const NO_DESK = 'this machine has no private desk: it needs OpenVibe Node v0.15.0 or newer on Linux, with Xvfb and allow_desk on';
 const NO_NAMED_DESKS = 'this machine runs one desk only (private): several named desks need OpenVibe Node v0.19.0 or newer';
 const NO_DESK_PROGRAMS = 'running a program on a desk needs OpenVibe Node v0.26.0 or newer (an older one would run it on the person\'s own screen)';
@@ -68,6 +68,8 @@ function computerSummary(kind, value) {
     const where = deskOf(value) !== 'main' ? { desk: deskOf(value) } : {};
     if (kind === 'desk') return { action: value.action, ...(typeof value.desk === 'string' ? { desk: value.desk } : {}), ...(typeof value.kind === 'string' ? { kind: value.kind } : {}), ...(typeof value.profile === 'string' ? { profile: value.profile } : {}), ...(Number.isInteger(value.width) && Number.isInteger(value.height) ? { width: value.width, height: value.height } : {}) };
     if (kind === 'exec') return { program: String(value.argv[0]).slice(0, 120), args: value.argv.length - 1, ...where, ...(value.detach === true ? { detach: true } : {}) };
+    // A model's prompt is the person's own words: the audit keeps the model, how many messages and how long, never the text.
+    if (kind === 'ai') return { model: String(value.model).slice(0, 120), messages: value.messages.length, chars: value.messages.reduce((n, m) => n + String(m.content || '').length, 0) };
     if (kind === 'fs') return { op: value.op, path: String(value.path).slice(0, 300), ...(typeof value.content_b64 === 'string' ? { bytes: Math.floor((value.content_b64.length * 3) / 4) } : {}) };
     if (kind === 'probe') { try { const u = new URL(value.target); return { scheme: u.protocol.replace(':', ''), host: u.host }; } catch { return { scheme: null }; } }
     // Typed text can be anything (a password the person asked for): the audit keeps its length, never the text.

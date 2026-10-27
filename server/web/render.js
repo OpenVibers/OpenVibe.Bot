@@ -724,7 +724,9 @@ function renderMachinesPage({ machines = [], pairing = null }) {
         return { level: LEVELS[level] ? level : null, terminal: !!c.terminal, files: !!c.files, screen: !!c.screen, probe: !!c.probe, input: !!c.input,
             screenStream: !!(c.screen && c.screen.stream === true),
             // Desks for its agents (Desks plan): how many at once, which kinds, and whether sign-ins carry over.
-            desks: d ? { max: Number.isInteger(d.max_desks) ? d.max_desks : 1, kinds: Array.isArray(d.kinds) ? d.kinds : ['desktop'], keeps: d.profiles === true } : null };
+            desks: d ? { max: Number.isInteger(d.max_desks) ? d.max_desks : 1, kinds: Array.isArray(d.kinds) ? d.kinds : ['desktop'], keeps: d.profiles === true } : null,
+            // Its own models (OpenVibe Node's ai plugin): what it offers, and whether a model server answers.
+            ai: c.ai && typeof c.ai === 'object' ? { models: Array.isArray(c.ai.models) ? c.ai.models.slice(0, 20).map(String) : [], ready: c.ai.ready === true } : null };
     };
     // Vibe by voice: shown for a machine whose Node runs the voice plugin (capabilities.voice).
     const voiceRow = (m) => {
@@ -759,6 +761,9 @@ function renderMachinesPage({ machines = [], pairing = null }) {
             + `<form method="post" action="/machines/${esc(m.id)}/agent-computer"><input type="hidden" name="on" value="${m.agent_computer ? '0' : '1'}">`
             + `<button type="submit" class="button quiet" aria-pressed="${m.agent_computer ? 'true' : 'false'}">${m.agent_computer ? 'Stop my agent using this computer' : 'Let my agent use this computer'}</button></form>`
             + (c.screenStream && m.online ? `<form method="post" action="/machines/${esc(m.id)}/screen"><button type="submit" class="button quiet">${m.computer_screen_stream === 'live' ? 'Watch my screen' : 'Show my screen'}</button></form>` : '')
+            + (c.ai ? `<div class="machine-ai"><span class="pill">${c.ai.ready ? 'Models' : 'Models: no server answers'}</span>${c.ai.models.length ? `<span class="muted">${esc(c.ai.models.join(', '))}</span>` : ''}`
+                + `<form method="post" action="/machines/${esc(m.id)}/ai-models"><input type="hidden" name="on" value="${m.ai_models ? '0' : '1'}">`
+                + `<button type="submit" class="button quiet" aria-pressed="${m.ai_models ? 'true' : 'false'}">${m.ai_models ? 'Stop my AI using this computer\'s models' : 'Let my AI use this computer\'s models'}</button></form></div>` : '')
             + (c.probe ? `<form method="post" action="/machines/${esc(m.id)}/watch-probe"><input type="hidden" name="on" value="${m.watch_probe ? '0' : '1'}">`
                 + `<button type="submit" class="button quiet" aria-pressed="${m.watch_probe ? 'true' : 'false'}">${m.watch_probe ? 'Stop my watches checking from here' : 'Let my watches check things from this computer'}</button></form>` : '')
             + '</div>';
