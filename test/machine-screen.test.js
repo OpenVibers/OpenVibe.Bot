@@ -181,6 +181,8 @@ const { boot, check, done } = require('./helpers/app');
         assert.ok(!idle.includes('Show my screen'), 'no screen of its own to show');
         assert.ok(idle.includes('no screen of its own'));
         assert.ok(idle.includes('Show the private desk'));
+        assert.ok(!idle.includes('<option value="main">Your own screen</option>'), 'a link never offers a screen it does not have');
+        assert.ok(idle.includes('<input type="hidden" name="desk" value="private">'), 'a link here shares the private desk');
         // A Mac runs browser desks only: no private desk (a whole desk) to show.
         const mac = await machine(alex, { ...SCREEN, desk: { level: 'trusted', window_manager: null, input: true, screen: true, named: true, max_desks: 2, kinds: ['browser'] } });
         const macPage = await (await fetch(`${t.base}/machines/${mac.deviceId}/screen`, { headers: cookie(alex) })).text();

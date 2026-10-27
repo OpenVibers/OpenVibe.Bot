@@ -801,7 +801,13 @@ ${add}
  * session (public/panel.js polls `stateUrl`) and plays it like a robot's camera; Stop ends it at once.
  */
 /** The owner's links to this screen (server/screen-shares.js): make one to watch or use it, see and stop the others. */
-function sharesBlock(machine, shares, madeLink, madeShare, hasDesk = false) {
+function sharesBlock(machine, shares, madeLink, madeShare, hasDesk = false, hasScreen = true) {
+    // Only screens the machine has: a desk host has none of its own (its private desk is what a link shares), and a
+    // machine with neither has nothing to share.
+    if (!hasScreen && !hasDesk) return '';
+    const which = !hasScreen
+        ? '<input type="hidden" name="desk" value="private"><p class="muted small">A link here shares the private desk: this computer has no screen of its own.</p>'
+        : hasDesk ? '<label class="field"><span class="field-label">Which screen</span><select name="desk"><option value="main">Your own screen</option><option value="private">The private desk, where your agent works</option></select></label>' : '';
     const rows = (shares || []).map((x) => `<li><strong>${esc(x.label || 'A link')}</strong> · ${x.desk === 'private' ? 'the private desk · ' : ''}${x.control ? 'watch and use' : 'watch only'} · until <time datetime="${esc(x.expires_at || '')}" data-local-time>${esc(String(x.expires_at || '').slice(0, 10))}</time>${x.last_used_at ? ` · last opened <time datetime="${esc(x.last_used_at)}" data-local-time>${esc(String(x.last_used_at).slice(0, 16).replace('T', ' '))}</time>` : ''}
 <form method="post" action="/machines/${esc(machine.id)}/shares/${esc(x.id)}/revoke" class="inline-form"><button type="submit" class="button quiet">Stop this link</button></form></li>`).join('');
     return `<section class="machine-shares" aria-labelledby="shares-h"><h2 id="shares-h">Share this screen</h2>
@@ -810,7 +816,7 @@ ${madeLink ? `<p class="notice" role="status">Your new link${madeShare && madeSh
 <form method="post" action="/machines/${esc(machine.id)}/shares" class="share-form">
 <label class="field"><span class="field-label">Where it goes</span><input name="label" maxlength="80" placeholder="Staff room"></label>
 <label class="field"><span class="field-label">Lasts (days)</span><input name="days" type="number" min="1" max="365" value="30"></label>
-${hasDesk ? '<label class="field"><span class="field-label">Which screen</span><select name="desk"><option value="main">Your own screen</option><option value="private">The private desk, where your agent works</option></select></label>' : ''}
+${which}
 <label class="check"><input type="checkbox" name="control" value="1"> They may use the mouse and keyboard too</label>
 <button type="submit" class="primary">Make a link</button></form>
 ${rows ? `<ul class="share-list">${rows}</ul>` : ''}</section>`;
@@ -890,7 +896,7 @@ ${hasScreen ? `<p class="muted">Show this computer's screen here, live, to you o
 <form method="post" action="/machines/${esc(machine.id)}/screen" class="inline-form"><button type="submit" class="${agentDesk ? 'button' : 'primary'}">Show my screen</button></form>` : '<p class="muted">This computer has no screen of its own to show (a desk host): only its desks, where your agents work. A task\'s Watch link opens its desk.</p>'}
 ${hasDesk ? `<form method="post" action="/machines/${esc(machine.id)}/screen" class="inline-form"><input type="hidden" name="desk" value="private"><button type="submit" class="button">Show the private desk</button></form>
 <p class="muted">The private desk is a screen of its own on this computer, where your agent works without touching yours.</p>` : ''}
-${sharesBlock(machine, shares, madeLink, madeShare, hasDesk)}
+${sharesBlock(machine, shares, madeLink, madeShare, hasDesk, hasScreen)}
 </main>`;
         return page(`${name}: screen`, body, { description: 'Your machine\'s screen, live, for you only.', canonical: '/machines' });
     }
@@ -916,7 +922,7 @@ ${takeOver}
 <form method="post" action="/machines/${esc(machine.id)}/screen">${desk !== 'main' ? `<input type="hidden" name="desk" value="${esc(desk)}">` : ''}<button type="submit" class="button quiet">${error ? 'Try again' : 'Start again (10 more minutes)'}</button></form>
 </div>
 <p class="muted small">${desk === 'main' ? 'The machine says on its desktop that its screen is live. ' : 'Nothing of your own screen is shown: this is the desk\'s own. '}<code>openvibe-node stop</code> on the machine ends it at once, and it ends on its own after its time.</p>
-${sharesBlock(machine, shares, madeLink, madeShare)}
+${sharesBlock(machine, shares, madeLink, madeShare, hasDesk, hasScreen)}
 </main>`;
     return page(`${name}: screen`, body, { scripts: ['/panel/panel.js', '/panel/screen-share.js'], description: 'Your machine\'s screen, live, for you only.', canonical: '/machines' });
 }
