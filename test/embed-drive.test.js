@@ -38,7 +38,9 @@ const { renderPanel } = require('../server/web/render');
         assert.ok(html.includes('data-drive>') && html.includes('data-drive-bar'));
         assert.ok(html.includes('data-estop hidden>'), 'the e-stop waits for an owner or operator join');
         const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'panel.js'), 'utf8');
-        assert.match(js, /if \(e\.origin !== location\.origin \|\| !popup \|\| e\.source !== popup\) return;/);
+        // Only its own popup, or the allowed page around the frame (stream-buttons.test.js), hands it a ticket.
+        assert.match(js, /const fromPopup = e\.origin === location\.origin && popup && e\.source === popup;/);
+        assert.match(js, /if \(!fromPopup && !fromParent\) return;/);
         assert.match(js, /new WebSocket\(wsUrl\(path\), \['ov\.ticket', `ov\.ticket\.\$\{ticket\}`\]\)/);
         assert.match(js, /\$\('\[data-estop\]:not\(\[hidden\]\)'\)\) estop\(\);/, 'a gamepad never e-stops through a hidden button');
         const popupJs = fs.readFileSync(path.join(__dirname, '..', 'public', 'drive.js'), 'utf8');

@@ -912,18 +912,43 @@
         if (bar) bar.hidden = false;
         if (text) notice(text);
     }
+    // Framed by an allowed page (a Live channel the robot is bound to, data-parent-origins), Drive first asks that page:
+    // the person is signed in there, so it gets the ticket for them with no popup or second sign-in. It answers with
+    // the ticket, or with why not (`ov-bot-ticket-none`: sign in, or the owner decides who drives). No answer in time
+    // and the next Drive opens the popup as before.
+    const PARENTS = String(main.dataset.parentOrigins || '').split(' ').filter(Boolean);
+    const framed = window.parent !== window && PARENTS.length > 0;
+    let parentSilent = false;
+    let asked = null;
     let popup = null;
+    const openPopup = () => {
+        popup = window.open(`/panel/${encodeURIComponent(ROBOT_ID)}/drive`, 'ov-bot-drive', 'popup,width=440,height=560');
+        if (!popup) window.open(`/panel/${encodeURIComponent(ROBOT_ID)}`, '_blank', 'noopener');
+    };
     for (const btn of $$('[data-drive]')) {
         btn.addEventListener('click', () => {
-            popup = window.open(`/panel/${encodeURIComponent(ROBOT_ID)}/drive`, 'ov-bot-drive', 'popup,width=440,height=560');
-            if (!popup) window.open(`/panel/${encodeURIComponent(ROBOT_ID)}`, '_blank', 'noopener');
+            if (!framed || parentSilent) return openPopup();
+            for (const origin of PARENTS) {
+                try { window.parent.postMessage({ type: 'ov-bot-ticket-request', robot_id: ROBOT_ID }, origin); } catch { /* not that origin */ }
+            }
+            notice('Asking for the controls…');
+            clearTimeout(asked);
+            asked = setTimeout(() => { parentSilent = true; notice('Press Drive again to sign in on openvibe.bot.'); }, 2500);
         });
     }
     window.addEventListener('message', (e) => {
-        // Only the popup this panel opened, on this origin, for this robot.
-        if (e.origin !== location.origin || !popup || e.source !== popup) return;
+        // The popup this panel opened (this origin), or the allowed page around the frame; for this robot only.
+        const fromPopup = e.origin === location.origin && popup && e.source === popup;
+        const fromParent = framed && e.source === window.parent && PARENTS.includes(e.origin);
+        if (!fromPopup && !fromParent) return;
         const d = e.data || {};
+        if (fromParent && d.type === 'ov-bot-ticket-none' && d.robot_id === ROBOT_ID) {
+            clearTimeout(asked);
+            notice(typeof d.message === 'string' ? d.message.slice(0, 200) : 'You cannot drive this robot from here.');
+            return;
+        }
         if (d.type !== 'ov-bot-ticket' || d.robot_id !== ROBOT_ID || typeof d.ticket !== 'string') return;
+        clearTimeout(asked);
         ticket = d.ticket; driving = true; watcher = false; gone = false;
         const bar = $('[data-drive-bar]');
         if (bar) bar.hidden = true;

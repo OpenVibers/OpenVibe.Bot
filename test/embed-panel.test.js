@@ -84,7 +84,7 @@ const { renderPanel } = require('../server/web/render');
         assert.strictEqual(r.headers.get('set-cookie'), null);
         const html = await r.text();
         assert.ok(!html.includes('Private rover') && !html.includes('data-robot-id'));
-        assert.match(html, /href="\/panel\/rob_[0-9A-Za-z]+" target="_blank" rel="noopener">Open on openvibe\.bot</);
+        assert.match(html, /href="\/panel\/rob_[0-9A-Za-z]+#on-stream" target="_blank" rel="noopener">Open on openvibe\.bot</, 'to the owner\'s "On your stream" card');
         assert.strictEqual((await get(`/panel/${closed.id}/embed`, bob)).status, 403);
         assert.strictEqual((await get('/panel/rob_nothing/embed')).status, 404);
         const owner = await get(`/panel/${closed.id}/embed`, alex);

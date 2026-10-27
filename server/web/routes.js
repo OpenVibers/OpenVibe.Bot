@@ -15,6 +15,8 @@
  *                          otherwise 403 with a link out. Never redirects to sign in; framed only by the
  *                          BOT_EMBED_ORIGINS allow-list (CSP frame-ancestors), every other page by itself
  *   POST /robots/:id/embed the owner only: allow (embed_public=on) or stop (off) anonymous read-only embedding → 303 to its panel
+ *   POST /robots/:id/on-stream the owner only: show the panel where it is embedded, then 303 to their Live channel's bind prompt
+ *   POST /robots/:id/access the owner only: who may drive (private | invite | queue) → 303 to its panel
  *   POST /robots/:id/operators            the owner only: add a person by @username with a role → 303 to its panel
  *   POST /robots/:id/operators/:subject/remove   the owner only: remove a person (never the owner row) → 303
  *   POST /robots/:id/queue/leave          any signed-in person: leave the robot's turn queue → 303
@@ -199,6 +201,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     r.get('/panel/panel.css', asset('panel.css', 'text/css'));
     r.get('/panel/screen-share.js', asset('screen-share.js', 'application/javascript'));
     r.get('/panel/drive.js', asset('drive.js', 'application/javascript'));
+    r.get('/panel/refused.js', asset('refused.js', 'application/javascript'));
     r.get('/panel/sim-world.js', asset('sim-world.js', 'application/javascript'));
     r.get('/panel/sim-view.js', asset('sim-view.js', 'application/javascript'));
     r.get('/panel/try-device.js', asset('try-device.js', 'application/javascript'));
@@ -811,6 +814,36 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         res.redirect(303, `/panel/${robot.id}`);
     }));
 
+    // "Put the buttons under my OpenVibe.Live stream": show the panel where it is embedded, then open the owner's own Live
+    // channel with ?bind_robot=, where Live asks them to confirm the binding (Live's bot-bind.js). The username is the
+    // same on every site.
+    r.post('/robots/:id/on-stream', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        const robot = await domain.robots.get(req.params.id);
+        if (!robot) throw new BotError(404, 'bot.robot_not_found', 'no such robot');
+        if (robot.owner_subject !== me.subject) throw new BotError(403, 'bot.forbidden', 'only the owner may put it on a stream');
+        if (!robot.embed_public) await domain.robots.setEmbedPublic(robot.id, true);
+        const liveOrigin = (config.embed && config.embed.origins && config.embed.origins[0]) || null;
+        const username = req.viewerClaims && typeof req.viewerClaims.username === 'string' ? req.viewerClaims.username : '';
+        if (!liveOrigin || !username) return res.redirect(303, `/panel/${robot.id}#on-stream`);
+        return res.redirect(303, `${liveOrigin}/@${encodeURIComponent(username)}?bind_robot=${encodeURIComponent(robot.id)}`);
+    }));
+
+    // Who may drive (the robot's access policy), from the owner's page: it was only settable when a robot was made.
+    r.post('/robots/:id/access', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        const robot = await domain.robots.get(req.params.id);
+        if (!robot) throw new BotError(404, 'bot.robot_not_found', 'no such robot');
+        if (robot.owner_subject !== me.subject) throw new BotError(403, 'bot.forbidden', 'only the owner may choose who drives');
+        const policy = String((req.body && req.body.access_policy) || '');
+        if (!['private', 'invite', 'queue'].includes(policy)) throw new BotError(422, 'bot.invalid_policy', 'choose who may drive');
+        await domain.robots.update(robot.id, { access_policy: policy });
+        if (hub) hub.broadcast(robot.id);
+        res.redirect(303, `/panel/${robot.id}#on-stream`);
+    }));
+
     r.post('/robots/:id/embed', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
         const me = requireUser(req);
         if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
@@ -927,9 +960,14 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
             for (const h of hooks) { const d = (await webhooks.recent(h.id))[0]; h.last = d ? `${d.state}${d.last_status ? ` (${d.last_status})` : ''}` : null; }
             automation = { routines: await routines.list(robot.id), hooks, events: webhooks.EVENTS, describe: (t) => routines.describeTrigger(typeof t === 'string' ? JSON.parse(t) : t), ...(profileForm.automation || {}) };
         }
+        const liveOrigin = (config.embed && config.embed.origins && config.embed.origins[0]) || null;
         res.type('html').send(renderPanel({
             robot: presentForPage(robot), profile, role, mode, signedIn, streaming, people, signaling_url,
             profileForm, automation,
+            // The page that frames the embed may hand it a Drive ticket (public/panel.js); the owner's page offers to put
+            // the panel under their Live stream.
+            parentOrigins: mode === 'embed' ? ((config.embed && config.embed.origins) || []) : [],
+            liveUrl: role === 'owner' && mode === 'page' ? liveOrigin : null,
             allowed_commands: role === 'watcher' ? [] : domain.control.allowedFor(robot, role, profile),
             // A held control is re-sent well inside the device's deadline, so it never stops between two frames.
             holdResendMs: Math.max(50, Math.min(HOLD_RESEND_MS, Math.floor(maxCommandMs / 2))),
@@ -1057,7 +1095,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         if (!robot) throw new BotError(404, 'bot.robot_not_found', 'no such robot');
         let role = req.viewer ? await memberRole(robot, req.viewer) : null;
         if (!role && robot.embed_public) role = 'watcher';
-        if (!role) return res.status(403).type('html').send(renderEmbedRefused({ robotId: robot.id }));
+        if (!role) return res.status(403).type('html').send(renderEmbedRefused({ robotId: robot.id, parentOrigins: (config.embed && config.embed.origins) || [] }));
         const profile = await profileOf(robot);
         if (!profile) throw new BotError(404, 'bot.profile_not_found', 'this robot has no profile');
         return sendPanel(res, robot, profile, role, 'embed', !!req.viewer);
