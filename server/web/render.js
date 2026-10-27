@@ -720,8 +720,11 @@ function renderMachinesPage({ machines = [], pairing = null }) {
         const c = (m.capabilities && typeof m.capabilities === 'object' ? m.capabilities : {}).computer;
         if (!c || typeof c !== 'object') return null;
         const level = m.computer_level || ((c.files || c.terminal || c.screen || {}).level) || null;
+        const d = c.desk && typeof c.desk === 'object' ? c.desk : null;
         return { level: LEVELS[level] ? level : null, terminal: !!c.terminal, files: !!c.files, screen: !!c.screen, probe: !!c.probe, input: !!c.input,
-            screenStream: !!(c.screen && c.screen.stream === true) };
+            screenStream: !!(c.screen && c.screen.stream === true),
+            // Desks for its agents (Desks plan): how many at once, which kinds, and whether sign-ins carry over.
+            desks: d ? { max: Number.isInteger(d.max_desks) ? d.max_desks : 1, kinds: Array.isArray(d.kinds) ? d.kinds : ['desktop'], keeps: d.profiles === true } : null };
     };
     // Vibe by voice: shown for a machine whose Node runs the voice plugin (capabilities.voice).
     const voiceRow = (m) => {
@@ -734,13 +737,21 @@ function renderMachinesPage({ machines = [], pairing = null }) {
                 : `<form method="post" action="/machines/${esc(m.id)}/voice" class="inline-form"><input type="hidden" name="on" value="1"><label class="sr-only" for="cw-${esc(m.id)}">Call word</label><input id="cw-${esc(m.id)}" name="call_word" maxlength="40" value="${esc(word)}" aria-label="Call word"><button type="submit" class="button quiet" aria-pressed="false">Let Vibe answer my voice here</button></form>`)
             + '<span class="muted">The machine listens for its call word on its own; only what you say after it goes to Vibe, and the answer is spoken here and kept in your Vibe chats.</span></div>';
     };
+    // "Desks for your agents: 4 at once (browser desks count as half), sign-ins kept"
+    const deskWords = (d) => {
+        const browser = d.kinds.includes('browser');
+        const whole = d.kinds.includes('desktop');
+        const kinds = browser && whole ? `${d.max} at once, or twice as many browser desks` : browser ? `${d.max * 2} browser desks at once` : `${d.max} at once`;
+        return `Desks for your agents: ${kinds}${d.keeps ? ', sign-ins kept' : ''}`;
+    };
     const computerRow = (m) => {
         const c = computerOf(m);
         if (!c) return '';
         const can = [c.terminal && 'terminal', c.files && 'files', c.screen && 'screen', c.input && 'mouse and keyboard'].filter(Boolean).join(', ');
+        const desks = c.desks ? `<span class="muted">${esc(deskWords(c.desks))}</span>` : '';
         const waiting = Number.isInteger(m.computer_waiting) && m.computer_waiting > 0
             ? ` <span class="pill warn">${m.computer_waiting} waiting for you on the machine</span>` : '';
-        return `<div class="machine-computer"><span class="pill">Computer: ${esc(c.level ? LEVELS[c.level] : 'on')}</span><span class="muted">${esc(can)}</span>${waiting}`
+        return `<div class="machine-computer"><span class="pill">Computer: ${esc(c.level ? LEVELS[c.level] : 'on')}</span><span class="muted">${esc(can)}</span>${desks}${waiting}`
             + `<form method="post" action="/machines/${esc(m.id)}/agent-computer"><input type="hidden" name="on" value="${m.agent_computer ? '0' : '1'}">`
             + `<button type="submit" class="button quiet" aria-pressed="${m.agent_computer ? 'true' : 'false'}">${m.agent_computer ? 'Stop my agent using this computer' : 'Let my agent use this computer'}</button></form>`
             + (c.screenStream && m.online ? `<form method="post" action="/machines/${esc(m.id)}/screen"><button type="submit" class="button quiet">${m.computer_screen_stream === 'live' ? 'Watch my screen' : 'Show my screen'}</button></form>` : '')
@@ -763,6 +774,9 @@ function renderMachinesPage({ machines = [], pairing = null }) {
 <li class="card"><h2>Or let your agents use this computer</h2>
 <pre tabindex="0" class="installer"><code>${esc(pairing.installer.replace(/ --worker$/, ' --computer ask'))}</code></pre>
 <p class="muted">Instead of running jobs, the machine's terminal, files and screen become usable by your agents, at the level you set on the machine: <code>ask</code> waits for <code>openvibe-node approve</code> there before anything runs or changes. The Node runs as your own account, never root. <a href="https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/computer.md">How it works</a>.</p></li>
+<li class="card"><h2>Or make a spare computer a desk host</h2>
+<pre tabindex="0" class="installer"><code>${esc(pairing.installer.replace(/ --worker$/, ' --desk-host'))}</code></pre>
+<p class="muted">An old laptop, a mini PC or a spare workstation becomes a place where your agents work: each task gets a desk of its own, with its own browser, and you can watch any desk and take it over. No screen, keyboard or sign-in needed on it. It runs as its own account and only for your agents; the installer adds what desks need and sizes them to its memory. Linux. <a href="https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/computer.md#desk-hosts---desk-host-node-v0200">How it works</a>.</p></li>
 <li class="card"><h2>Or enter the pairing code</h2><p><strong class="code">${esc(pairing.code)}</strong></p>
 <p class="muted">Valid until <time datetime="${esc(pairing.expires_at)}">${esc(pairing.expires_at)}</time>. It works once.</p></li></ol>
 <p class="muted">Reload this page once the installer says it is paired: the machine shows up above.</p>`

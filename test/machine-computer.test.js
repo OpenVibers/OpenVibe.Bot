@@ -313,6 +313,25 @@ const { boot, check, done } = require('./helpers/app');
         assert.strictEqual((await t.db.maybe('SELECT agent_computer FROM devices WHERE id = $1', [mine.deviceId])).agent_computer, false);
     });
 
+    await check('the machines page says what desks each machine runs, and offers to make a spare computer a desk host', async () => {
+        const cookie = (user) => ({ Cookie: `ov_token=${t.network.signUser(user)}` });
+        const desk = { level: 'trusted', window_manager: 'openbox', input: true, screen: true, named: true };
+        const host = await machine(alex, { files: COMPUTER.files, desk: { ...desk, max_desks: 4, kinds: ['desktop', 'browser'], profiles: true } });
+        const mac = await machine(alex, { ...COMPUTER, desk: { ...desk, window_manager: null, max_desks: 2, kinds: ['browser'] } });
+        const html = await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text();
+        assert.ok(html.includes('Desks for your agents: 4 at once, or twice as many browser desks, sign-ins kept'), 'a desk host');
+        assert.ok(html.includes('Desks for your agents: 4 browser desks at once'), 'a Mac: browser desks only');
+        const add = await fetch(`${t.base}/machines`, { method: 'POST', redirect: 'manual', body: '', headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...cookie(alex) } });
+        assert.strictEqual(add.status, 201);
+        const page = await add.text();
+        assert.ok(page.includes('Or make a spare computer a desk host'));
+        const hostCmd = /<code>(curl -fsSL [^<]+ --desk-host)<\/code>/.exec(page);
+        assert.ok(hostCmd, 'the desk host install command');
+        assert.ok(!hostCmd[1].includes('--worker'), 'a desk host never runs the job worker too');
+        host.c.close();
+        mac.c.close();
+    });
+
     await check('Watch sends only probes, only where the owner let their watches use the computer', async () => {
         const watch = t.network.signService({ sub: 'svc:watch', cap: ['bot.computer.control'] });
         const asWatch = { token: watch, headers: { 'X-OV-Subject': alex.subject } };
