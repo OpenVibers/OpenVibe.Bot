@@ -28,6 +28,7 @@ const { json, iso, prefixedId } = require('./util');
 const { userPrincipal, verifyService, verifyNode, isNodeToken, PRINCIPAL_SUB, decodePayload } = require('./api/auth');
 const { getProfile } = require('./profiles');
 const { createVoice } = require('./voice');
+const { computerCaps } = require('./machine-ai');
 
 const OPEN = 1;
 const MAX_BACKLOG = 64;   // frames a device may send before its authentication completes
@@ -695,11 +696,13 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         });
     }
 
-    /** What a machine's computer plugin offers, from its last status: { terminal?, files?, screen? }, or null. */
+    /**
+     * What a machine's computer plugin offers, from its last status: { terminal?, files?, screen?, … }, with its own
+     * models (ai) from the ai plugin (server/machine-ai.js), or null.
+     */
     function computerOf(deviceId) {
         const c = deviceConns.get(deviceId);
-        const caps = c && c.status && c.status.capabilities && c.status.capabilities.computer;
-        return caps && typeof caps === 'object' && !Array.isArray(caps) ? caps : null;
+        return computerCaps(c && c.status && c.status.capabilities);
     }
 
     /**
@@ -775,7 +778,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
                     return refuse('bot.computer_off', 'this machine does not show its screen live: it needs OpenVibe Node v0.12.0 or newer, with the computer plugin running in your graphical session', summary);
                 }
             } else if (!offered || !(onDeskOnly(kind, value) ? (offered.desk && offered.desk[kind] === true) : offered[COMPUTER_CAP[kind]])) {
-                return refuse('bot.computer_off', kind === 'desk' ? NO_DESK : `this machine does not offer ${COMPUTER_CAP[kind]}: its computer plugin is off (openvibe-node, --computer)`, summary);
+                return refuse('bot.computer_off', kind === 'desk' ? NO_DESK : kind === 'ai' ? 'this machine offers no models: it needs OpenVibe Node v0.27.0 or newer with the ai plugin (install.sh --ai) and a model server (Ollama, LM Studio or llama.cpp)' : `this machine does not offer ${COMPUTER_CAP[kind]}: its computer plugin is off (openvibe-node, --computer)`, summary);
             }
             // A desk other than the person's own screen needs a machine that has desks; one other than private (a named desk,
             // one per agent task) needs a machine that runs several (Node v0.19.0: desk.named). Kind desk names its desk in

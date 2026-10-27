@@ -22,6 +22,7 @@
  */
 const { qrSvg } = require('./qr');
 const { stepHelp } = require('../routines');
+const { aiOf } = require('../machine-ai');
 const social = require('openvibe-shared/social');
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ESC[c]);
@@ -717,16 +718,19 @@ function renderMachinesPage({ machines = [], pairing = null }) {
     // The computer plugin (Node docs/computer.md): the level its owner set on the machine, and whether their agent may use it.
     const LEVELS = { observe: 'Observe', ask: 'Ask first', trusted: 'Trusted', full: 'Full control' };
     const computerOf = (m) => {
-        const c = (m.capabilities && typeof m.capabilities === 'object' ? m.capabilities : {}).computer;
-        if (!c || typeof c !== 'object') return null;
+        const caps = m.capabilities && typeof m.capabilities === 'object' ? m.capabilities : {};
+        // Its own models (OpenVibe Node's ai plugin, server/machine-ai.js): what it offers, and whether a model server answers.
+        const models = aiOf(caps);
+        const ai = models ? { models: Array.isArray(models.models) ? models.models.slice(0, 20).map(String) : [], ready: models.ready === true } : null;
+        const c = caps.computer;
+        if (!c || typeof c !== 'object') return ai ? { on: false, ai } : null;
         const level = m.computer_level || ((c.files || c.terminal || c.screen || {}).level) || null;
         const d = c.desk && typeof c.desk === 'object' ? c.desk : null;
-        return { level: LEVELS[level] ? level : null, terminal: !!c.terminal, files: !!c.files, screen: !!c.screen, probe: !!c.probe, input: !!c.input,
+        return { on: true, level: LEVELS[level] ? level : null, terminal: !!c.terminal, files: !!c.files, screen: !!c.screen, probe: !!c.probe, input: !!c.input,
             screenStream: !!(c.screen && c.screen.stream === true),
             // Desks for its agents (Desks plan): how many at once, which kinds, and whether sign-ins carry over.
             desks: d ? { max: Number.isInteger(d.max_desks) ? d.max_desks : 1, kinds: Array.isArray(d.kinds) ? d.kinds : ['desktop'], keeps: d.profiles === true } : null,
-            // Its own models (OpenVibe Node's ai plugin): what it offers, and whether a model server answers.
-            ai: c.ai && typeof c.ai === 'object' ? { models: Array.isArray(c.ai.models) ? c.ai.models.slice(0, 20).map(String) : [], ready: c.ai.ready === true } : null };
+            ai };
     };
     // Vibe by voice: shown for a machine whose Node runs the voice plugin (capabilities.voice).
     const voiceRow = (m) => {
@@ -749,6 +753,14 @@ function renderMachinesPage({ machines = [], pairing = null }) {
     const computerRow = (m) => {
         const c = computerOf(m);
         if (!c) return '';
+        const aiRow = c.ai ? `<div class="machine-ai"><span class="pill">${c.ai.ready ? 'Models' : 'Models: no server answers'}</span>${c.ai.models.length ? `<span class="muted">${esc(c.ai.models.join(', '))}</span>` : ''}`
+            + `<form method="post" action="/machines/${esc(m.id)}/ai-models"><input type="hidden" name="on" value="${m.ai_models ? '0' : '1'}">`
+            + `<button type="submit" class="button quiet" aria-pressed="${m.ai_models ? 'true' : 'false'}">${m.ai_models ? 'Stop my AI using this computer\'s models' : 'Let my AI use this computer\'s models'}</button></form>`
+            // Turned on: OpenVibe.Chat's "Your AI key" comes filled in with this computer and its first model (saved only there).
+            + (m.ai_models && c.ai.models.length ? `<a class="button quiet" href="https://openvibe.chat/settings?own=node&amp;machine=${encodeURIComponent(m.id)}&amp;model=${encodeURIComponent(c.ai.models[0])}#oc-ai-key">Use these models in OpenVibe.Chat</a>` : '')
+            + '</div>' : '';
+        // A machine that offers only its models (the ai plugin, no computer plugin): just them.
+        if (!c.on) return `<div class="machine-computer">${aiRow}</div>`;
         const can = [c.terminal && 'terminal', c.files && 'files', c.screen && 'screen', c.input && 'mouse and keyboard'].filter(Boolean).join(', ');
         const desks = c.desks ? `<span class="muted">${esc(deskWords(c.desks))}</span>` : '';
         // The desks running now (the Node's telemetry), and the page that lists them, to watch or stop one.
@@ -761,9 +773,7 @@ function renderMachinesPage({ machines = [], pairing = null }) {
             + `<form method="post" action="/machines/${esc(m.id)}/agent-computer"><input type="hidden" name="on" value="${m.agent_computer ? '0' : '1'}">`
             + `<button type="submit" class="button quiet" aria-pressed="${m.agent_computer ? 'true' : 'false'}">${m.agent_computer ? 'Stop my agent using this computer' : 'Let my agent use this computer'}</button></form>`
             + (c.screenStream && m.online ? `<form method="post" action="/machines/${esc(m.id)}/screen"><button type="submit" class="button quiet">${m.computer_screen_stream === 'live' ? 'Watch my screen' : 'Show my screen'}</button></form>` : '')
-            + (c.ai ? `<div class="machine-ai"><span class="pill">${c.ai.ready ? 'Models' : 'Models: no server answers'}</span>${c.ai.models.length ? `<span class="muted">${esc(c.ai.models.join(', '))}</span>` : ''}`
-                + `<form method="post" action="/machines/${esc(m.id)}/ai-models"><input type="hidden" name="on" value="${m.ai_models ? '0' : '1'}">`
-                + `<button type="submit" class="button quiet" aria-pressed="${m.ai_models ? 'true' : 'false'}">${m.ai_models ? 'Stop my AI using this computer\'s models' : 'Let my AI use this computer\'s models'}</button></form></div>` : '')
+            + aiRow
             + (c.probe ? `<form method="post" action="/machines/${esc(m.id)}/watch-probe"><input type="hidden" name="on" value="${m.watch_probe ? '0' : '1'}">`
                 + `<button type="submit" class="button quiet" aria-pressed="${m.watch_probe ? 'true' : 'false'}">${m.watch_probe ? 'Stop my watches checking from here' : 'Let my watches check things from this computer'}</button></form>` : '')
             + '</div>';
@@ -786,6 +796,9 @@ function renderMachinesPage({ machines = [], pairing = null }) {
 <li class="card"><h2>Or make a spare computer a desk host</h2>
 <pre tabindex="0" class="installer"><code>${esc(pairing.installer.replace(/ --worker$/, ' --desk-host'))}</code></pre>
 <p class="muted">An old laptop, a mini PC or a spare workstation becomes a place where your agents work: each task gets a desk of its own, with its own browser, and you can watch any desk and take it over. No screen, keyboard or sign-in needed on it. It runs as its own account and only for your agents; the installer adds what desks need and sizes them to its memory. Linux. <a href="https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/computer.md#desk-hosts---desk-host-node-v0200">How it works</a>.</p></li>
+<li class="card"><h2>Or use the models you run on it</h2>
+<pre tabindex="0" class="installer"><code>${esc(pairing.installer.replace(/ --worker$/, ' --ai'))}</code></pre>
+<p class="muted">If this computer runs Ollama, LM Studio or llama.cpp's server, your Vibe and your AI members can think with its models: free, and no port is opened. The installer says which server it finds. Add <code>--ai</code> to any command above to do both. Once it is paired, turn on "Let my AI use this computer's models" for it here. Node v0.28.0 or newer. <a href="https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/ai.md">How it works</a>.</p></li>
 <li class="card"><h2>Or enter the pairing code</h2><p><strong class="code">${esc(pairing.code)}</strong></p>
 <p class="muted">Valid until <time datetime="${esc(pairing.expires_at)}">${esc(pairing.expires_at)}</time>. It works once.</p></li></ol>
 <p class="muted">Reload this page once the installer says it is paired: the machine shows up above.</p>`

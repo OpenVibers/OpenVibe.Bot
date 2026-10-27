@@ -346,7 +346,12 @@ const { boot, check, done } = require('./helpers/app');
         const desk = { level: 'trusted', window_manager: 'openbox', input: true, screen: true, named: true };
         const host = await machine(alex, { files: COMPUTER.files, desk: { ...desk, max_desks: 4, kinds: ['desktop', 'browser'], profiles: true } });
         const mac = await machine(alex, { ...COMPUTER, desk: { ...desk, window_manager: null, max_desks: 2, kinds: ['browser'] } });
-        const html = await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text();
+        // A machine's declared capabilities are saved as its status arrives: wait until both machines' are.
+        let html = '';
+        for (let i = 0; i < 20 && !(html.includes('sign-ins kept') && html.includes('browser desks at once')); i++) {
+            if (i) await t.wait(100);
+            html = await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text();
+        }
         assert.ok(html.includes('Desks for your agents: 4 at once, or twice as many browser desks, sign-ins kept'), 'a desk host');
         assert.ok(html.includes('Desks for your agents: 4 browser desks at once'), 'a Mac: browser desks only');
         const add = await fetch(`${t.base}/machines`, { method: 'POST', redirect: 'manual', body: '', headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...cookie(alex) } });
@@ -356,6 +361,9 @@ const { boot, check, done } = require('./helpers/app');
         const hostCmd = /<code>(curl -fsSL [^<]+ --desk-host)<\/code>/.exec(page);
         assert.ok(hostCmd, 'the desk host install command');
         assert.ok(!hostCmd[1].includes('--worker'), 'a desk host never runs the job worker too');
+        assert.ok(page.includes('Or use the models you run on it'), 'AI on your own machines (Node v0.28.0 --ai)');
+        const aiCmd = /<code>(curl -fsSL [^<]+ --ai)<\/code>/.exec(page);
+        assert.ok(aiCmd && !aiCmd[1].includes('--worker'), 'the models install command');
         host.c.close();
         mac.c.close();
     });
@@ -418,10 +426,30 @@ const { boot, check, done } = require('./helpers/app');
         const rows = await t.db.many('SELECT value FROM command_audit WHERE robot_id = $1 AND kind = $2 AND result = $3', [gpu.deviceId, 'ai', 'ack']);
         assert.deepStrictEqual(rows[0].value, { model: 'llama3.1:8b', messages: 1, chars: 29 });
         assert.ok(!JSON.stringify(rows).includes('secret words'), 'never the text');
+        // A real Node reports the ai plugin under its own name, and a machine may run it with no computer plugin.
+        const own = await machine(alex, null);
+        own.c.send(frame('status', { capabilities: { ai: { ai: { models: ['qwen2.5-1.5b-instruct'], ready: true, max_tokens: 256 } } }, drivers: [], faults: [] }));
+        await t.wait(300);
+        const listed = (await t.call('GET', '/api/v1/machines', { user: alex })).json.machines.find((m) => m.id === own.deviceId);
+        assert.deepStrictEqual(listed.computer.ai.models, ['qwen2.5-1.5b-instruct'], 'its models, from the ai plugin');
+        assert.strictEqual(listed.computer.terminal, null, 'and nothing of a computer plugin');
+        assert.strictEqual((await cmd(own.deviceId, { kind: 'ai', value: { model: 'qwen2.5-1.5b-instruct', messages: [{ role: 'user', content: 'hi' }] } }, { user: alex })).json.result, 'ack');
+        const noExec = await cmd(own.deviceId, { kind: 'exec', value: { argv: ['id'] } }, { user: alex });
+        assert.strictEqual(noExec.json.code, 'bot.computer_off', 'no terminal without the computer plugin');
+        let ownCard = '';
+        for (let i = 0; i < 20 && !ownCard.includes('qwen2.5-1.5b-instruct'); i++) {
+            if (i) await t.wait(100);
+            ownCard = await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text();
+        }
+        assert.ok(ownCard.includes('qwen2.5-1.5b-instruct'), 'the card shows its models');
+        own.c.close();
         // The machines page: its models and the switch.
         const html = await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text();
         assert.ok(html.includes('llama3.1:8b'), 'its models');
         assert.ok(html.includes("Stop my AI using this computer's models"), 'and the switch, on');
+        assert.ok(html.includes(`href="https://openvibe.chat/settings?own=node&amp;machine=${gpu.deviceId}&amp;model=llama3.1%3A8b#oc-ai-key">Use these models in OpenVibe.Chat</a>`), 'and where to use them');
+        await t.call('POST', `/api/v1/machines/${gpu.deviceId}/ai-models`, { user: alex, body: { on: false } });
+        assert.ok(!(await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text()).includes('Use these models in OpenVibe.Chat'), 'only while it is on');
         gpu.c.close();
     });
 
