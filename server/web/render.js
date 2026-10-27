@@ -891,7 +891,7 @@ function renderMachineDesksPage({ machine, desks = [], maxDesks = null, error = 
         // On the owner's OpenVibe Live channel, when they choose (the Desks plan's D8): a second step says what goes public.
         + `<details class="desk-live"><summary class="button quiet">Show live on my channel</summary>`
         + `<form method="post" action="/machines/${id}/desks/live"><input type="hidden" name="desk" value="${esc(d.desk)}">`
-        + `<p class="muted">Everyone can watch this desk on your OpenVibe Live channel for up to 30 minutes: what your agent does and every page it opens, signed-in pages included. Stop showing it on its screen page, or stop the desk.</p>`
+        + `<p class="muted">Everyone can watch this desk on your OpenVibe Live channel for up to 30 minutes: what your agent does and every page it opens, signed-in pages included. Your followers are told you are live, as for any stream. Stop showing it on its screen page, or stop the desk.</p>`
         + `<button type="submit" class="button primary">Go live with this desk</button></form></details></li>`).join('');
     const list = error ? `<p class="error" role="alert">${esc(error)}</p>`
         : rows ? `<ul class="robots">${rows}</ul>`
