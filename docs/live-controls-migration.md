@@ -1,7 +1,24 @@
 # Moving OpenVibe.Live's stream controls into Bot (plan T15, row R9)
 
-Status: steps 1–3 built in Contracts 0.109.0 and Bot, and step 5 (the conversion) built in Bot, 2026-10-07.
-Live still serves its controls; step 4 (the Node relay plugin) and step 6 (Live's deletion) remain.
+Status: **done** (updated 2026-10-27). Every step below is built and in production:
+- steps 1–3 and 5: Contracts 0.109.0 and Bot, 2026-10-07;
+- step 4: OpenVibe.Node's `relay` plugin (`plugins/relay`);
+- step 6: Live deleted its controls (`0011_drop_live_controls`). Its old hardware socket `/ws/control` answers
+  **410 Gone**, naming OpenVibe.Bot, so a client that still connects there learns where to go
+  (Live `server/net/ws-paths.js`).
+
+What changed since, from the first owner to move (Maticus, 2026-10-26: "Buttons on the stream. That's like my number
+one priority"):
+- **One press puts the buttons under a stream.** The robot page's **On your stream** card ("Put the buttons under my
+  OpenVibe.Live stream") turns the embed on and opens the owner's channel to confirm the binding. Who may drive is
+  chosen beside it (Bot#169).
+- **Drive under the stream needs no second sign-in.** The panel asks the Live page around it for a ticket
+  (`POST /api/v1/robots/:id/control-ticket`).
+- **Chat commands reach a button robot.** `!forward`, `!left` … press the robot's buttons of the same name when it
+  has no drive, and any other `!word` that is not a channel sound presses the button of that name (Live#383,
+  Chat#194).
+- **The Node's lifecycle:** `openvibe-node quit` ends a running Node cleanly with nothing latched (Node 0.16.0), for
+  launchers that start and stop it with the rest of a stream setup. `stop` stays the kill switch.
 
 ## What Live has today
 
@@ -45,7 +62,7 @@ lines) let viewers drive a streamer's hardware from the channel page:
 3. **Built — Bot gate and panel**: the gate accepts `button`/`point` only for names and shapes the profile
    declares; the panel renders `buttons` (keyboard bindings, hold behaviour) and `video_click` (a click layer on the
    camera tile, normalised coordinates).
-4. **Node — the relay plugin**: forwards `button`/`point` commands to the owner's local script in the shape Live's
+4. **Built — Node, the relay plugin**: forwards `button`/`point` commands to the owner's local script in the shape Live's
    hardware clients already understand — one JSON line per command on stdout of a supervised child process, or a
    loopback WebSocket that speaks Live's `{type:'command'|'key_held'|'key_released'|'video_click'}` messages — so an
    existing Pi script keeps working with a one-line change of where it connects. Local policy and the kill switch
@@ -63,7 +80,7 @@ lines) let viewers drive a streamer's hardware from the channel page:
    and skipped (they must sign in to Network once). Idempotent on the Live config id (`live_conversions`,
    migration 0007): a second `--apply` changes nothing and says "already converted". The owner then pairs a
    Node (the five-minute path) and moves the script onto the relay plugin.
-6. **Live**: `LIVE_BOT_EMBED=1`; the channel page shows the robot's embedded panel for a stream whose owner has a
+6. **Done — Live**: `LIVE_BOT_EMBED=1`; the channel page shows the robot's embedded panel for a stream whose owner has a
    robot; then delete `server/controls/*`, the hardware WebSocket path and its stream-key auth, the controls tables
    and `public/js/controls.js` / `onvif-dashboard.js` (the embed stays).
 
@@ -106,10 +123,11 @@ if anything, needs redoing by hand.
    is one line.
 3. Point the Pi script at the paired Node instead of Live's stream-key socket. The stream key is no longer a
    robot credential.
+4. Robot page → **On your stream** → **Put the buttons under my OpenVibe.Live stream**, and choose who may drive.
 
 ## Order and cutover
 
 Contracts → robot-local profiles → gate/panel → relay plugin → conversion run (owners notified) → Live embed on →
 owners re-pair → Live deletion. The conversion (step 5) is built and runs once; the deletion waits for the three
 converted owners' robots to be paired, because the hardware clients are physical devices only their owners can
-move; it does not wait on a date.
+move; it does not wait on a date. (Done: Live's controls are gone, and its old socket answers 410 naming Bot.)
