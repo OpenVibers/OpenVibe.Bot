@@ -229,6 +229,45 @@ const { boot, check, done } = require('./helpers/app');
         m.c.close();
     });
 
+    await check('a desk on the owner\'s OpenVibe Live channel (Desks plan D8): a public stream of its own, linked to their channel; never their own screen; Live\'s refusal said', async () => {
+        const host = await machine(alex, { ...SCREEN, desk: { screen: true, named: true, kinds: ['desktop', 'browser'] } });
+        const privateBefore = [...t.openre.streams.values()].filter((x) => x.refs.some((r) => r.type === 'machine' && r.id === host.deviceId)).map((x) => [x.id, x.mirror_to_live, x.playback_visibility]);
+        assert.strictEqual((await screen('POST', host.deviceId, { user: alex, body: { live: true } })).json.code, 'bot.live_desk_only', 'never the person\'s own screen');
+        const r = await screen('POST', host.deviceId, { user: alex, body: { desk: 'desk-task-a', live: true, seconds: 1800 } });
+        assert.strictEqual(r.status, 201, r.text);
+        assert.match(r.json.live.channel_url, /^https:\/\/openvibe\.live\/@/);
+        const sent = seen.at(-1);
+        assert.deepStrictEqual([sent.kind, sent.value.action, sent.value.desk, sent.value.seconds], ['screen_stream', 'start', 'desk-task-a', 1800]);
+        const live = [...t.openre.streams.values()].find((x) => x.refs.some((ref) => ref.type === 'machine_live' && ref.id === host.deviceId));
+        assert.ok(live, 'a stream of its own for Live');
+        assert.deepStrictEqual([live.playback_visibility, live.mirror_to_live, live.refs.some((ref) => ref.service === 'live')], ['public', true, true], 'public and linked to the channel');
+        assert.ok(t.openre.admits(sent.value.publish_key) && live.keys.some((k) => k.key === sent.value.publish_key && k.status === 'active'), 'the machine publishes to it');
+        const privateAfter = [...t.openre.streams.values()].filter((x) => x.refs.some((r) => r.type === 'machine' && r.id === host.deviceId)).map((x) => [x.id, x.mirror_to_live, x.playback_visibility]);
+        assert.deepStrictEqual(privateAfter, privateBefore, 'the private screen stream is never touched');
+        // Again: the same stream, a new key, linked once.
+        const again = await screen('POST', host.deviceId, { user: alex, body: { desk: 'desk-task-a', live: true } });
+        assert.strictEqual(again.json.live.channel_url, r.json.live.channel_url);
+        assert.strictEqual([...t.openre.streams.values()].filter((x) => x.refs.some((ref) => ref.type === 'machine_live' && ref.id === host.deviceId)).length, 1);
+        // From the desks page: the second step posts the desk, and the page says where it is live.
+        assert.strictEqual((await form(`/machines/${host.deviceId}/desks/live`, alex, { Origin: 'https://evil.test' })).status, 403, 'no cross-site post');
+        const posted = await fetch(`${t.base}/machines/${host.deviceId}/desks/live`, { method: 'POST', redirect: 'manual', body: 'desk=desk-task-a', headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...cookie(alex) } });
+        assert.strictEqual(posted.status, 303);
+        const where = posted.headers.get('location');
+        assert.match(where, /\/desks\?live=desk-task-a&channel=https%3A%2F%2Fopenvibe\.live%2F%40/);
+        const page = await (await fetch(t.base + where, { headers: cookie(alex) })).text();
+        assert.ok(page.includes('<code>desk-task-a</code> is live on <a href="https://openvibe.live/@'), 'the page says where');
+        // Without a Live account: Live's reason, and nothing is sent to the machine.
+        const bobs = await machine(bob, { ...SCREEN, desk: { screen: true, named: true } });
+        t.openre.noLive.add(bob.subject);
+        const before = seen.length;
+        const refused = await screen('POST', bobs.deviceId, { user: bob, body: { desk: 'desk-task-b', live: true } });
+        assert.deepStrictEqual([refused.status, refused.json.code], [409, 'live.no_account'], refused.text);
+        assert.match(refused.json.detail || '', /Sign in to openvibe\.live once/);
+        assert.strictEqual(seen.length, before, 'nothing went to the machine');
+        host.c.close();
+        bobs.c.close();
+    });
+
     await check('removing the machine archives its screen stream', async () => {
         const r = await form(`/machines/${mine.deviceId}/remove`, alex);
         assert.strictEqual(r.status, 303);

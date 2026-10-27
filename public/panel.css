@@ -217,6 +217,12 @@ main { padding: 1rem max(1rem, env(safe-area-inset-right)) calc(1.5rem + env(saf
 /* A machine's computer plugin (Node docs/computer.md): its level, what waits on it, and the agent switch, full width. */
 .machine-computer { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.6rem; padding-top: 0.6rem; border-top: 1px solid var(--line); }
 .machine-ai { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.6rem; flex-basis: 100%; }
+/* A desk on the owner's Live channel: the second step, under the desk's own buttons. */
+.desk-live { flex-basis: 100%; }
+.desk-live > summary { list-style: none; display: inline-flex; }
+.desk-live > summary::-webkit-details-marker { display: none; }
+.desk-live form { display: grid; gap: 0.5rem; margin-top: 0.5rem; max-width: 36rem; }
+.desk-live form p { margin: 0; }
 @media (min-width: 36rem) { .robot-card { grid-template-columns: minmax(0, 1fr) auto; align-items: center; } .robot-meta { grid-column: 1; grid-row: 2; } .robot-actions { grid-column: 2; grid-row: 1 / span 2; } .machine-computer { grid-column: 1 / -1; grid-row: 3; } .machine-computer form { margin-left: auto; } }
 .empty { text-align: center; padding: 2rem 1rem; margin-bottom: 1.5rem; border: 1px dashed var(--line); border-radius: var(--radius); color: var(--muted); }
 .empty-icon { width: 3rem; height: 3rem; stroke-width: 1.5; color: var(--accent); }

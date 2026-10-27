@@ -386,6 +386,7 @@ const { boot, check, done } = require('./helpers/app');
         assert.ok(html.includes('<code>desk-task-a</code>') && html.includes('Browser desk') && html.includes('Whole desk'));
         assert.ok(html.includes(`href="/machines/${host.deviceId}/screen?desk=desk-task-a"`), 'Watch and take over that desk');
         assert.ok(html.includes('name="desk" value="desk-task-a"'), 'its Stop');
+        assert.ok(html.includes(`action="/machines/${host.deviceId}/desks/live"`) && html.includes('Show live on my channel') && html.includes('signed-in pages included'), 'and, a second step away, live on the owner\'s channel (Desks plan D8)');
         assert.ok(html.includes('At most 4 whole desks at once here'));
         assert.strictEqual((await fetch(`${t.base}/machines/${host.deviceId}/desks`, { headers: cookie(bob) })).status, 404, 'nobody else');
         const stop = (body, headers = {}) => fetch(`${t.base}/machines/${host.deviceId}/desks/stop`, { method: 'POST', redirect: 'manual', body, headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...cookie(alex), ...headers } });

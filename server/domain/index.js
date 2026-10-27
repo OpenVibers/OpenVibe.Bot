@@ -720,6 +720,41 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         }
         return { streamId: out.streamId, key: out.key.key, whipUrl: whipUrl(out.key.key) };
     }
+    /**
+     * A desk shown on the owner's OpenVibe Live channel, at their request (the Desks plan's D8) → { streamId, key, whipUrl,
+     * live: { linked, channel_url?, code?, reason? } }. A second stream of the machine's (external ref
+     * bot:machine_live:<id>), public, never the private screen stream: switching its mirror_to_live on has OpenRestream
+     * link it to a slot on their channel (once; Live then shows each session at openvibe.live/@them). Each start rotates
+     * the key. Throws 503 without OpenRestream or a WHIP ingest.
+     */
+    async function liveScreenKey(device, owner) {
+        if (!openre || !whipUrl('x')) fail(503, 'bot.openre_unavailable', 'OpenRestream is not configured here, so a desk cannot go live');
+        const found = await openre.find(`bot:machine_live:${device.id}`, owner);
+        let out = null;
+        if (found && found.id) {
+            const r = await openre.rotate(found.id, owner, { grace_seconds: 0, end_sessions: true });
+            out = r && { streamId: found.id, key: r.key };
+        }
+        if (!out) {
+            const label = String(device.name || device.id).slice(0, 100);
+            const created = await openre.create({
+                title: `${label}: my agent at work`, protocols: ['webrtc'], recording_mode: 'none', recording_visibility: 'public',
+                playback_visibility: 'public', mirror_to_live: false, show_on_live: false,
+                external_refs: [{ service: 'bot', type: 'machine_live', id: device.id, label }],
+            }, owner);
+            out = created && created.stream && { streamId: created.stream.id, key: created.key };
+        }
+        if (!out || typeof out.streamId !== 'string' || !out.key || typeof out.key.key !== 'string' || !out.key.key) {
+            fail(503, 'bot.openre_unavailable', 'OpenRestream answered no ingest key for the desk');
+        }
+        const shown = await openre.showOnLive(out.streamId, owner);
+        const slot = shown && shown.stream && (shown.stream.external_refs || []).find((r) => r && r.service === 'live' && r.type === 'managed_stream');
+        const channel = (shown && shown.live && shown.live.channel_url) || (slot && slot.label) || null;
+        const live = shown && shown.live && shown.live.linked === false
+            ? { linked: false, code: shown.live.code || null, reason: shown.live.reason || null }
+            : { linked: !!(shown && shown.stream && shown.stream.mirror_to_live && channel), channel_url: channel };
+        return { streamId: out.streamId, key: out.key.key, whipUrl: whipUrl(out.key.key), live };
+    }
     /** The viewer signaling URL of the machine's open screen session, as its owner, or null (none is live yet). */
     async function screenLive(device, owner) {
         if (!openre || !device.screen_stream_id) return null;
@@ -1253,7 +1288,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         pairing: { create: createPairingCode, redeem, prune: prunePairingCodes, installerCommand, driverForProfile, whipUrl, onPaired },
         devices: { byCredential, bindNode, issuePublishKey, revokeVideo, updateDeclared, revokeNode, ensureServerDevice, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, revokeByNode, touchSeen, setOnline, ownerOf, onChange },
         machines: { mint: mintMachine, list: listMachines, workerRef, setAgentComputer, setAiModels, setWatchProbe, setVoice,
-            screen: { key: screenKey, live: screenLive, end: screenEnd, archive: screenArchive } },
+            screen: { key: screenKey, liveKey: liveScreenKey, live: screenLive, end: screenEnd, archive: screenArchive } },
         streaming: { get: streaming, set: setStreaming },
         video: { live: liveVideo },
         estop: { set: setEstop, clear: clearEstop },

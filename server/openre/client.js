@@ -19,6 +19,8 @@
  *   get(id, owner)                        GET /api/v1/streams/:id → the stream, or null on 404
  *   create(body, owner)                   POST /api/v1/streams → { stream, key: { id, key, hint } }
  *   update(id, fields, owner)             PATCH /api/v1/streams/:id → the updated stream, or null on 404
+ *   showOnLive(id, owner)                 PATCH /api/v1/streams/:id { mirror_to_live: true } as the owner: OpenRestream
+ *                                         links it to a slot on their Live channel once → { stream, live? }, or null on 404
  *   rotate(id, owner, { grace_seconds, end_sessions })
  *                                         POST /api/v1/streams/:id/keys/rotate → { key: { id, key, hint }, … }
  *   archive(id, owner)                    DELETE /api/v1/streams/:id (OpenRestream refuses a live stream: 409)
@@ -118,6 +120,10 @@ function createOpenRe(config, { fetchImpl = globalThis.fetch } = {}) {
             if (fields && fields.mirror_to_live !== undefined) body.mirror_to_live = fields.mirror_to_live;
             const out = await call('PATCH', stream(id), { owner, body, named: true });
             return (out && out.stream) || null;
+        },
+        async showOnLive(id, owner) {
+            const out = await call('PATCH', stream(id), { owner, body: { mirror_to_live: true }, named: true });
+            return out && out.stream ? { stream: out.stream, live: out.live || null } : null;
         },
         rotate: (id, owner, { grace_seconds = 0, end_sessions = false } = {}) =>
             call('POST', `${stream(id)}/keys/rotate`, { owner, body: { grace_seconds, end_sessions }, named: true }),

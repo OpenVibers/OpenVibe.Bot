@@ -676,7 +676,21 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
             } else error = `The machine did not list its desks: ${(r && (r.reason || r.result)) || 'no answer'}`.slice(0, 300);
         }
         const stopped = typeof req.query.stopped === 'string' && machineScreen.DESK.test(req.query.stopped) ? req.query.stopped : null;
-        res.type('html').send(renderMachineDesksPage({ machine: mine, desks, maxDesks, error, stopped }));
+        const liveDesk = typeof req.query.live === 'string' && machineScreen.DESK.test(req.query.live) && req.query.live !== 'main' ? req.query.live : null;
+        const channel = typeof req.query.channel === 'string' && /^https:\/\/openvibe\.live\/@[A-Za-z0-9_.-]{1,40}$/.test(req.query.channel) ? req.query.channel : null;
+        res.type('html').send(renderMachineDesksPage({ machine: mine, desks, maxDesks, error, stopped, live: liveDesk ? { desk: liveDesk, channel } : null }));
+    }));
+    // A desk on the owner's OpenVibe Live channel for up to 30 minutes (the Desks plan's D8), from the desks page's
+    // "Show live on my channel" and its confirmation.
+    r.post('/machines/:id/desks/live', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        const mine = await myMachine(req, me);
+        const desk = req.body && typeof req.body.desk === 'string' ? req.body.desk : '';
+        if (!machineScreen.DESK.test(desk) || desk === 'main') throw new BotError(422, 'bot.invalid_input', 'desk is private or desk-<name>');
+        const out = await machineScreen.start(mine, me.subject, asUser(me), { desk, live: true, seconds: machineScreen.limits.SECONDS.max });
+        const channel = out.live && /^https:\/\/openvibe\.live\/@[A-Za-z0-9_.-]{1,40}$/.test(String(out.live.channel_url || '')) ? out.live.channel_url : '';
+        res.redirect(303, `/machines/${encodeURIComponent(mine.id)}/desks?live=${encodeURIComponent(desk)}${channel ? `&channel=${encodeURIComponent(channel)}` : ''}`);
     }));
     r.post('/machines/:id/desks/stop', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
         const me = requireUser(req);
