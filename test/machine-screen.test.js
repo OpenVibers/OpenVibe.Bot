@@ -158,6 +158,21 @@ const { boot, check, done } = require('./helpers/app');
         assert.deepStrictEqual(seen.at(-1).value, { action: 'stop' });
     });
 
+    await check('a desk on the live screen: private, or a named desk on a Node that runs several (contracts 0.215.0); never a bad name', async () => {
+        const desk = { level: 'trusted', window_manager: 'openbox', input: true, screen: true };
+        const multi = await machine(alex, { ...SCREEN, desk: { ...desk, named: true, max_desks: 4 } });
+        const r = await screen('POST', multi.deviceId, { user: alex, body: { seconds: 60, desk: 'desk-task-a' } });
+        assert.strictEqual(r.status, 201, r.text);
+        assert.strictEqual(seen.at(-1).value.desk, 'desk-task-a', 'the machine streams that desk');
+        const single = await machine(alex, { ...SCREEN, desk });
+        const old = await screen('POST', single.deviceId, { user: alex, body: { seconds: 60, desk: 'desk-task-a' } });
+        assert.deepStrictEqual([old.status, old.json.code], [409, 'bot.computer_off']);
+        const bad = await screen('POST', multi.deviceId, { user: alex, body: { seconds: 60, desk: 'desk-../x' } });
+        assert.deepStrictEqual([bad.status, bad.json.code], [422, 'bot.invalid_input']);
+        multi.c.close();
+        single.c.close();
+    });
+
     await check('removing the machine archives its screen stream', async () => {
         const r = await form(`/machines/${mine.deviceId}/remove`, alex);
         assert.strictEqual(r.status, 303);

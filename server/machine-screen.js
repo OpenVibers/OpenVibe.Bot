@@ -38,18 +38,21 @@ function createMachineScreen({ domain, hub, now = () => Date.now() }) {
             const seconds = whole(opts.seconds, SECONDS, 'seconds');
             const fps = whole(opts.fps, FPS, 'fps');
             const desk = opts.desk == null || opts.desk === '' ? 'main' : String(opts.desk);
-            if (desk !== 'main' && desk !== 'private') throw new BotError(422, 'bot.invalid_input', 'desk is main or private');
+            if (desk !== 'main' && !/^(private|desk-[a-z0-9][a-z0-9-]{0,23})$/.test(desk)) throw new BotError(422, 'bot.invalid_input', 'desk is main, private or desk-<name>');
             if (!hub.isOnline(device.id)) throw new BotError(409, 'bot.device_offline', 'the machine is offline');
             // Before any key is made: the machine says whether it can (Node v0.12.0's computer plugin, a capture tool).
             const offered = hub.computerOf(device.id);
             if (!(offered && offered.screen && offered.screen.stream === true)) {
                 throw new BotError(409, 'bot.computer_off', 'this machine does not show its screen live: it needs OpenVibe Node v0.12.0 or newer, with the computer plugin running in your graphical session');
             }
-            if (desk === 'private' && !(offered.desk && offered.desk.screen)) {
+            if (desk !== 'main' && !(offered.desk && offered.desk.screen)) {
                 throw new BotError(409, 'bot.computer_off', 'this machine has no private desk to show: it needs OpenVibe Node v0.15.0 or newer on Linux, with Xvfb and allow_desk on');
             }
+            if (desk !== 'main' && desk !== 'private' && offered.desk.named !== true) {
+                throw new BotError(409, 'bot.computer_off', 'this machine runs one desk only (private): several named desks need OpenVibe Node v0.19.0 or newer');
+            }
             const key = await domain.machines.screen.key(device, subject);
-            const r = await hub.machineScreen(device.id, principal, subject, { action: 'start', whip_url: key.whipUrl, publish_key: key.key, seconds, fps, ...(desk === 'private' ? { desk } : {}) });
+            const r = await hub.machineScreen(device.id, principal, subject, { action: 'start', whip_url: key.whipUrl, publish_key: key.key, seconds, fps, ...(desk !== 'main' ? { desk } : {}) });
             if (r.result !== 'ack') {
                 const code = r.code || (r.result === 'expired' ? 'bot.device_timeout' : 'bot.device_refused');
                 const status = r.result === 'refused' ? (code === 'bot.computer_off' || code === 'bot.device_offline' ? 409 : 422) : r.result === 'expired' ? 504 : 409;
