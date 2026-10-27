@@ -34,6 +34,7 @@ const { boot, check, done } = require('./helpers/app');
             else if (m.kind === 'probe') c.send(frame('ack', { id: m.id, data: { status: 200, body: '{"up":true}', ms: 3 } }));
             else if (m.kind === 'input') c.send(frame('ack', { id: m.id, data: { done: true, action: m.value.action } }));
             else if (m.kind === 'browser') c.send(frame('ack', { id: m.id, data: { url: m.value.url || 'https://example.org/', title: 'Example', text: 'Example page', truncated: false, links: [] } }));
+            else if (m.kind === 'ai') c.send(frame('ack', { id: m.id, data: { model: m.value.model, message: { role: 'assistant', content: 'A lock one thread holds at a time.' }, usage: { total_tokens: 20 } } }));
             else if (m.kind === 'desk' && m.value.action === 'list') c.send(frame('ack', { id: m.id, data: { desks: [{ desk: 'desk-task-a', kind: 'browser', running: true, width: 1280, height: 800, since: 1793102400 }, { desk: 'private', kind: 'desktop', running: true, display: ':91', width: 1280, height: 800, since: 1793102000 }], max_desks: 4, available: true } }));
             else if (m.kind === 'desk') c.send(frame('ack', { id: m.id, data: { running: m.value.action !== 'stop', display: ':91', width: 1280, height: 800 } }));
             else if (m.kind === 'screen' && m.value.desk && m.value.desk !== 'main') c.send(frame('ack', { id: m.id, data: { format: 'png', width: 1280, height: 800, content_b64: 'iVBORw0KGgo=' } }));
@@ -389,6 +390,39 @@ const { boot, check, done } = require('./helpers/app');
         assert.deepStrictEqual(seen.at(-1).value, { action: 'stop', desk: 'desk-task-a' });
         assert.ok((await (await fetch(`${t.base}${done.headers.get('location')}`, { headers: cookie(alex) })).text()).includes('Stopped <code>desk-task-a</code>'));
         host.c.close();
+    });
+
+    await check('AI on your own machines (contracts 0.219.0): the owner, and OpenVibe.AI for them once they turn it on; nobody else; the audit keeps no text', async () => {
+        const cookie = (user) => ({ Cookie: `ov_token=${t.network.signUser(user)}` });
+        const gpu = await machine(alex, { ai: { models: ['llama3.1:8b'], ready: true, max_tokens: 2048 } });
+        const ask = { kind: 'ai', value: { model: 'llama3.1:8b', messages: [{ role: 'user', content: 'What is a mutex? secret words' }] } };
+        const mine = await cmd(gpu.deviceId, ask, { user: alex });
+        assert.strictEqual(mine.json.result, 'ack', mine.text);
+        assert.strictEqual(mine.json.data.message.content, 'A lock one thread holds at a time.');
+        const ai = t.network.signService({ sub: 'svc:ai', cap: ['bot.machine.ai'] });
+        const asAi = (subject) => ({ token: ai, headers: { 'X-OV-Subject': subject } });
+        const before = await cmd(gpu.deviceId, ask, asAi(alex.subject));
+        assert.deepStrictEqual([before.status, before.json.code], [403, 'bot.agent_not_allowed'], 'off until the owner turns it on');
+        const on = await t.call('POST', `/api/v1/machines/${gpu.deviceId}/ai-models`, { user: alex, body: { on: true } });
+        assert.strictEqual(on.json.machine.ai_models, true);
+        assert.deepStrictEqual(on.json.machine.computer.ai.models, ['llama3.1:8b']);
+        const viaAi = await cmd(gpu.deviceId, ask, asAi(alex.subject));
+        assert.strictEqual(viaAi.json.result, 'ack', viaAi.text);
+        // Nobody else: another person through OpenVibe.AI, a service without the capability, another service, another kind.
+        assert.strictEqual((await cmd(gpu.deviceId, ask, asAi(bob.subject))).status, 404, 'never another person\'s machine');
+        const noCap = t.network.signService({ sub: 'svc:ai', cap: ['bot.computer.control'] });
+        assert.strictEqual((await cmd(gpu.deviceId, ask, { token: noCap, headers: { 'X-OV-Subject': alex.subject } })).json.code, 'capability.denied');
+        assert.strictEqual((await cmd(gpu.deviceId, ask, asActor(t.network.signService({ sub: 'svc:actor', cap: ['bot.computer.control'] }), alex.subject))).status, 403, 'not the agent');
+        assert.strictEqual((await cmd(gpu.deviceId, { kind: 'exec', value: { argv: ['id'] } }, asAi(alex.subject))).status, 403, 'OpenVibe.AI sends ai only');
+        assert.strictEqual((await t.call('POST', `/api/v1/machines/${gpu.deviceId}/ai-models`, { ...asAi(alex.subject), body: { on: false } })).status, 403, 'only the owner flips it');
+        const rows = await t.db.many('SELECT value FROM command_audit WHERE robot_id = $1 AND kind = $2 AND result = $3', [gpu.deviceId, 'ai', 'ack']);
+        assert.deepStrictEqual(rows[0].value, { model: 'llama3.1:8b', messages: 1, chars: 29 });
+        assert.ok(!JSON.stringify(rows).includes('secret words'), 'never the text');
+        // The machines page: its models and the switch.
+        const html = await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text();
+        assert.ok(html.includes('llama3.1:8b'), 'its models');
+        assert.ok(html.includes("Stop my AI using this computer's models"), 'and the switch, on');
+        gpu.c.close();
     });
 
     await check('Watch sends only probes, only where the owner let their watches use the computer', async () => {

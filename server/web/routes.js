@@ -580,6 +580,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
             computer_waiting: Number.isInteger(sensors.computer_waiting) ? sensors.computer_waiting : null,
             computer_screen_stream: sensors.computer_screen_stream === 'live' ? 'live' : 'off',
             computer_desks: Number.isInteger(sensors.computer_desks) ? sensors.computer_desks : null,
+            ai_models: !!d.ai_models,
         };
     }));
     // ── The live screen (plan T14): the owner watches their machine's screen on their own private stream ──
@@ -761,6 +762,14 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         res.redirect(303, '/machines');
     }));
     // The owner lets their agent (OpenVibe.Actor) use this machine's computer plugin, or stops it.
+    // The owner lets their AI run models on this machine, or stops it (AI on your own machines, contracts 0.219.0).
+    r.post('/machines/:id/ai-models', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        const mine = await myMachine(req, me);
+        await domain.machines.setAiModels(mine.id, req.body && req.body.on === '1');
+        res.redirect(303, '/machines');
+    }));
     r.post('/machines/:id/agent-computer', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
         const me = requireUser(req);
         if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
