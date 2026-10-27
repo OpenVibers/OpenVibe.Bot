@@ -63,7 +63,7 @@ const { loadConfig, frameAncestors } = require('../server/config');
         const html = await (await get(`/panel/${robot.id}`, alex)).text();
         assert.match(html, new RegExp(`action="/robots/${robot.id}/embed"`));
         assert.match(html, /name="embed_public" value="on" checked/);
-        assert.match(html, /never the controls/);
+        assert.match(html, /Driving still needs who you allow/);
         const r = await t.call('GET', `/api/v1/robots/${robot.id}`, { user: alex });
         assert.ok(!r.text.includes('embed_public'));
         const off = await post(url, alex, { embed_public: 'off' });

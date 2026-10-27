@@ -356,7 +356,19 @@ and never billed twice.
 
 `ov_token` cookie (a Network user JWT, set by `/auth`) **or** `Authorization: Bearer <user JWT>`, or a
 **service token** with capability `bot.robot.control` (audience `openvibe.bot`) plus
-`X-OV-Subject: usr_…` naming the person it acts for. Without one the socket closes with code **4002**.
+`X-OV-Subject: usr_…` naming the person it acts for, **or** a Drive ticket in the subprotocols
+(`Sec-WebSocket-Protocol: ov.ticket, ov.ticket.<ticket>`; the server answers `ov.ticket`). Without one the
+socket closes with code **4002**.
+A Drive ticket is one-time, lasts 120 s and is for one robot and one person: their role, as the gate decides it
+when they join (another robot is `error` `bot.forbidden`). `joined` carries the next ticket for a reconnect;
+a spent or expired one closes **4002**. A panel on another site gets one in two ways:
+- `POST /panel/:id/ticket` from the panel's own Drive popup (`/panel/:id/drive`, signed in on openvibe.bot,
+  same-origin only), handed to the panel by `postMessage` on Bot's own origin;
+- `POST /api/v1/robots/:id/control-ticket` from the page that frames the panel (§3): the panel asks it with
+  `postMessage({ type: "ov-bot-ticket-request", robot_id })` sent to each `BOT_EMBED_ORIGINS` origin, and
+  takes an answer only from `window.parent` on one of them: `{ type: "ov-bot-ticket", robot_id, ticket }`, or
+  `{ type: "ov-bot-ticket-none", robot_id, message }` (shown as is: sign in, or the owner decides who drives).
+  With no answer in 2.5 s the next Drive opens the popup.
 The gate then applies the **acted-for subject's** role — a service acting for a viewer is a viewer.
 The same gate is reachable over HTTP as `POST /robots/:id/commands` (§3), so a bound channel's chat can
 forward commands without holding a socket. The HTTP gate is the same gate but not the same join: a caller
@@ -451,6 +463,13 @@ cookie. A signed-in visitor (the `ov_token` cookie) who is a member gets their r
 decides (a stranger on a `queue` robot: `queue`) and drives over `/control`; anyone else gets the role
 `watcher` when the owner turned on `embed_public` (`POST /robots/:id/embed`), with every control disabled
 and a "Sign in to control" link that opens `/panel/:id` in a new tab; otherwise `403` with only a link out.
+Framed, that `403` page also tells the page around it,
+`postMessage({ type: "ov-bot-embed-refused", robot_id })` to each `BOT_EMBED_ORIGINS` origin
+(`/panel/refused.js`), so the page can hide the box and show its owner where to turn embedding on. The
+owner's panel leads with **On your stream**: one button (`POST /robots/:id/on-stream`, owner only,
+same-origin) turns `embed_public` on and sends them to their Live channel's bind prompt
+(`<LIVE_URL>/@<username>?bind_robot=<id>`), and a **Who may drive** select (`POST /robots/:id/access`,
+`private`/`invite`/`queue`) sits beside it.
 An unknown robot is `404`. The e-stop state is always shown; the E-stop button only to an owner or operator.
 Its response carries `Content-Security-Policy: default-src 'self'; frame-ancestors 'self' <BOT_EMBED_ORIGINS>;
 object-src 'none'; base-uri 'self'` and `Cache-Control: no-store`; every other page keeps
@@ -521,6 +540,7 @@ node token, and a service token is judged on `bot.job.dispatch` alone.
 | `POST /robots/:id/estop` | owner/operator, `bot.robot.control` | `{ robot }` |
 | `POST /robots/:id/estop/clear` | **owner only**, `bot.robot.control` | `{ robot }` |
 | `POST /robots/:id/commands` | owner/operator, `bot.robot.control` | `{ robot_id, id, result, code?, reason?, latency_ms?, cached? }` — one command through the same gate, audit and per-subject `id` idempotency key as `/control` (a bound channel's chat forwards here instead of a hardware socket). `result` is `ack`, `nack` or `expired` (a repeated `id` answers `cached: true`); a gate refusal is its code as an RFC 9457 problem: `403 bot.not_an_operator` / `bot.read_only` / `bot.not_your_turn`, `404 bot.robot_not_found`, `409 bot.device_offline` / `bot.estop_latched` / `bot.command_pending` (the same `id` is still in flight), `422` the command-shape codes, `429 bot.cooldown` / `bot.turn_budget`. A service acting for a subject is rate-limited as that person (`user:<subject>`) and also, as a service, at 1200 a minute and 12000 an hour on its own token (`bot.control.service`), so naming a fresh well-formed subject on every request never lifts every ceiling |
+| `POST /robots/:id/control-ticket` | `bot.robot.control` acting for a person (`X-OV-Subject`) who is a member, or anyone on a `queue` robot | `{ ticket, robot_id, role, expires_in }`, `Cache-Control: no-store`: a Drive ticket for that person (§2), for the page that frames the panel. `403 bot.not_an_operator`; `422` without a subject |
 | `GET /robots/:id/steps` | the owner, or `svc:actor` with `bot.robot.read` acting for the owner of a robot with `agent_control` on | `{ robot_id, name, profile_id, online, estop, battery, sensors, steps[], max_steps, max_seconds }`: the robot's state and one example line per step word it takes (server/routines.js `stepHelp`) |
 | `POST /robots/:id/steps` | the owner, or `svc:actor` with `bot.robot.control` acting for the owner of a robot with `agent_control` on | body `{ steps: "forward 1\nsay Hi" }` (routine step lines, at most 20 steps and 30 seconds, waits included) → `{ robot_id, result, steps }` once they end; `result` is `done` or `stopped: <why>` (the e-stop, the device going offline, a cooldown). Each step passes the gate as the owner and is audited as the caller. `403 bot.agent_not_allowed` while the owner's switch is off or for anyone but the owner, `403 bot.forbidden` for any other service, `409 bot.routine_busy` while a routine runs, `422 bot.invalid_routine` naming the wrong line. `POST /robots/:id/commands` holds `svc:actor` to the same switch and owner |
 | `GET /robots/:id/audit?limit=&before=` | owner, or `bot.robot.read` | `{ audit[], next_before }` (newest first) |

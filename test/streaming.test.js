@@ -171,7 +171,7 @@ const { boot, check, done } = require('./helpers/app');
         let html = await (await page(`/panel/${robot.id}`, alex)).text();
         assert.match(html, new RegExp(`action="/robots/${robot.id}/streaming"`));
         assert.match(html, /Record to OpenVibe\.Media/);
-        assert.match(html, /Show on my OpenVibe\.Live channel/);
+        assert.match(html, /Send the robot(&#39;|')s camera to my OpenVibe\.Live channel/, 'video only; the buttons are "On your stream"');
         assert.doesNotMatch(html, /name="(media|live)" value="on" checked/, 'both off by default');
         const saved = await form(`/robots/${robot.id}/streaming`, alex, 'media_was=off&media=off&media=on&live_was=off&live=off');
         assert.strictEqual(saved.status, 303);

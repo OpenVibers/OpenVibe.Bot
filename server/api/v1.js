@@ -26,6 +26,7 @@
  * | POST   /robots/:id/estop                        | bot.robot.control      | owner or operator                   |
  * | POST   /robots/:id/estop/clear                  | bot.robot.control      | the owner only                      |
  * | POST   /robots/:id/commands                     | bot.robot.control      | owner or operator                   |
+ * | POST   /robots/:id/control-ticket               | bot.robot.control      | a member (or anyone on a queue robot): a Drive ticket |
  * | GET    /robots/:id/audit                        | bot.robot.read         | owner (paged)                       |
  * | GET    /robots/:id/streaming                    | bot.robot.read         | a member                            |
  * | POST   /robots/:id/streaming                    | bot.robot.manage       | the owner                           |
@@ -358,6 +359,24 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         await hub.pushEstop(req.params.id, false, robot.owner_subject);
         hub.broadcast(req.params.id);
         res.json({ robot: domain.present.robot(await domain.robots.get(req.params.id)) });
+    }));
+
+    // ── A Drive ticket for an embedded panel (server/control-tickets.js) ───────────────────────────
+    // The page that frames a robot's panel (a Live channel bound to it) asks for a person who is signed in there: the
+    // frame cannot see an openvibe.bot session, and the popup Drive took (its own sign-in) was a step too many. The
+    // ticket names this person and robot, lasts two minutes and is used once; the join that redeems it still decides
+    // what they may do by their role, exactly as the popup's ticket.
+    r.post('/robots/:id/control-ticket', commandControl, wrap(async (req, res) => {
+        requireControlCap(req);
+        const subject = actedFor(req);
+        const robot = await domain.robots.get(req.params.id);
+        if (!robot) fail(404, 'bot.robot_not_found', 'no such robot');
+        const role = (await domain.members.roleOf(robot.id, subject)) || (robot.access_policy === 'queue' ? 'queue' : null);
+        if (!role) fail(403, 'bot.not_an_operator', 'the owner decides who may drive this robot');
+        const t = hub.issueControlTicket({ kind: 'user', subject }, robot.id);
+        if (!t) fail(503, 'bot.busy', 'try again in a moment');
+        res.setHeader('Cache-Control', 'no-store');
+        res.json({ ticket: t.ticket, robot_id: robot.id, role, expires_in: t.expires_in });
     }));
 
     // ── Commands (the /control gate over HTTP: a service forwards a bound channel's chat commands) ─

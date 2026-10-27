@@ -251,6 +251,12 @@ main { padding: 1rem max(1rem, env(safe-area-inset-right)) calc(1.5rem + env(saf
 .form-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
 .setting-note { color: var(--muted); font-size: 0.88rem; margin: -0.35rem 0 0.7rem; }
 .setting-note a { color: var(--accent); }
+/* "On your stream": the first owner card, so a streamer finds the one button that puts the panel under their stream. */
+.setting-card.on-stream { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.setting-card.on-stream form + .setting-note { margin-top: -0.2rem; }
+.setting-card.on-stream .access-form { margin-top: 0.4rem; padding-top: 0.8rem; border-top: 1px solid var(--line); }
+.setting-ok { display: flex; gap: 0.45rem; align-items: center; margin: 0 0 0.7rem; padding: 0.5rem 0.7rem; border-radius: 10px; background: color-mix(in srgb, var(--ok) 14%, transparent); font-size: 0.9rem; }
+.setting-ok .icon { flex: none; width: 1.1rem; height: 1.1rem; color: var(--ok); }
 .toggle { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.75rem; align-items: start; min-height: var(--tap);
   padding: 0.65rem 0.75rem; border: 1px solid var(--line); border-radius: 10px; background: var(--raised); cursor: pointer; }
 .toggle:has(input:checked) { border-color: var(--accent); }

@@ -55,6 +55,7 @@ const PATHS = {
     robot: '<rect x="4" y="8" width="16" height="11" rx="2.5"/><path d="M12 4v4M9 13h.01M15 13h.01M2 13v2M22 13v2"/>',
     plug: '<path d="M9 2v5M15 2v5M6 7h12v4a6 6 0 0 1-12 0zM12 17v5"/>',
     gamepad: '<path d="M7 7h10a4 4 0 0 1 4 4l.8 5a2.6 2.6 0 0 1-4.6 2L15 15H9l-2.2 3a2.6 2.6 0 0 1-4.6-2L3 11a4 4 0 0 1 4-4z"/><path d="M7.5 10v3M6 11.5h3M16 11h.01M18 13h.01"/>',
+    check: '<path d="M20 6 9 17l-5-5"/>',
 };
 const icon = (name, cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${PATHS[name] || ''}</svg>`;
 /** Hold-button icons by axis: [negative, positive]. */
@@ -327,10 +328,31 @@ ${toggle('listed', robot.listed, 'List it in the robot directory', 'It gets a pu
 </form>${robot.listed ? `<p class="setting-note"><a href="/r/${esc(robot.id)}">Its public page</a></p>` : ''}</section>`;
 }
 
+/**
+ * "On your stream" (owner, 2026-10-26, from a streamer's notes: "impossible to put buttons on my stream"): one button
+ * puts this robot's panel under the owner's OpenVibe.Live stream (it shows the panel where it is embedded, then opens
+ * their channel, which asks to bind it), and who may drive from there is chosen beside it. Plain forms, no JavaScript.
+ */
+function onStreamCard(robot, { liveUrl = null } = {}) {
+    const policy = robot.access_policy || 'private';
+    const state = robot.embed_public
+        ? `<p class="setting-ok" role="status">${icon('check')}<span>Its panel shows wherever it is embedded. Bound to your channel, viewers see it under your stream.</span></p>`
+        : '';
+    return `<section class="setting-card on-stream" id="on-stream" aria-labelledby="on-stream-h"><h2 id="on-stream-h">On your stream</h2>
+<p class="setting-note">Put this robot's buttons under your OpenVibe.Live stream so your viewers can drive it there. Your stream stays the video; the panel adds the buttons, the e-stop and the latency.</p>
+${state}${liveUrl ? `<form method="post" action="/robots/${esc(robot.id)}/on-stream"><button type="submit" class="button primary">${icon('gamepad')}<span>Put the buttons under my OpenVibe.Live stream</span></button></form>
+<p class="setting-note">Opens your channel on OpenVibe.Live, which asks you to confirm. To take it off, choose no robot there, or turn off the panel below.</p>` : ''}
+<form class="access-form" method="post" action="/robots/${esc(robot.id)}/access">
+<label class="field"><span class="field-label">Who may drive</span><select name="access_policy">${POLICIES.map(([v, label]) => `<option value="${esc(v)}"${v === policy ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select></label>
+<p class="setting-note">"Anyone, taking turns" lets every signed-in viewer queue for a turn. With the other two, only you and the people you add can drive; everyone else watches.</p>
+<button type="submit">Save</button>
+</form></section>`;
+}
+
 /** The owner's embed switch: plain markup, works without JavaScript. On the panel it is a card; in the robots list, a compact row. */
 function embedForm(robot, { card = true } = {}) {
     const form = `<form class="embed-form${card ? '' : ' embed-inline'}" method="post" action="/robots/${esc(robot.id)}/embed" data-embed-form>
-${toggle('embed_public', robot.embed_public, 'Let anyone watch where it is embedded', "A page that embeds this robot shows its video and readouts to everyone; never the controls.")}
+${toggle('embed_public', robot.embed_public, 'Show the panel where it is embedded (your OpenVibe.Live stream)', "Your stream's page and any other page that embeds this robot show its panel to everyone. Driving still needs who you allow below, through Drive.")}
 <button type="submit">Save</button>
 </form>`;
     return card ? `<section class="setting-card" aria-labelledby="embed-h"><h2 id="embed-h">Embedding</h2>\n${form}</section>` : form;
@@ -358,7 +380,7 @@ function streamingForm(robot, streaming) {
 <p class="setting-note">Off until you turn them on. Operators and viewers cannot change these.</p>
 ${why}<form class="streaming-form" method="post" action="/robots/${esc(robot.id)}/streaming" data-streaming-form>
 ${toggle('media', s.media && s.media.on, 'Record to OpenVibe.Media', 'Each time the robot goes live, OpenRestream records the session to OpenVibe.Media as an unlisted video.', off, true)}
-${toggle('live', s.live && s.live.on, 'Show on my OpenVibe.Live channel', 'Lets OpenRestream mirror the camera to your Live channel. It appears there once your channel plays OpenRestream streams.', off, true)}
+${toggle('live', s.live && s.live.on, "Send the robot's camera to my OpenVibe.Live channel", "Video only: OpenRestream mirrors the camera to your Live channel. For the buttons under your stream, use \"On your stream\" above.", off, true)}
 <button type="submit"${off ? ' disabled' : ''}>Save</button>
 </form></section>`;
 }
@@ -441,7 +463,7 @@ function turnStrip(robot, role) {
     return `<div class="turn" data-turn hidden><span class="turn-state" data-turn-state></span><span class="turn-meta" data-turn-meta></span>${leave}${give}</div>`;
 }
 
-function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs = 150, mode = 'page', signedIn = true, streaming = null, people = null, signaling_url = null, profileForm = {}, tryIt = false, automation = null }) {
+function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs = 150, mode = 'page', signedIn = true, streaming = null, people = null, signaling_url = null, profileForm = {}, tryIt = false, automation = null, parentOrigins = [], liveUrl = null }) {
     const embed = mode === 'embed';
     const latched = !!(robot.estop && robot.estop.latched);
     const widgets = (profile.widgets || []).map((w, i) => ({ w, i }))
@@ -455,7 +477,7 @@ function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs
 ${embed ? '' : tryIt ? topbar('<span class="crumb">Try the panel</span>', '/') : topbar(`<span class="crumb">${esc(robot.name)}</span>`)}
 <div class="estop-bar"><p class="estop-state" role="status" aria-live="assertive"><span class="estop-dot"></span><span data-estop-state>${latched ? 'E-stop latched' : 'E-stop clear'}</span><span class="estop-note">${latched ? ' — the robot stays still until the owner clears it.' : ''}</span></p>${clear}${estop}</div>
 </header>
-<main id="panel" tabindex="0" data-robot-id="${esc(robot.id)}" data-role="${esc(role)}" data-hold-ms="${esc(holdResendMs)}" data-allowed="${data(allowed_commands)}"${tryIt ? ' data-transport="local"' : ''}>
+<main id="panel" tabindex="0" data-robot-id="${esc(robot.id)}" data-role="${esc(role)}" data-hold-ms="${esc(holdResendMs)}" data-allowed="${data(allowed_commands)}"${tryIt ? ' data-transport="local"' : ''}${embed && parentOrigins.length ? ` data-parent-origins="${esc(parentOrigins.join(' '))}"` : ''}>
 <div class="panel-head">
 <h1>${esc(robot.name)}</h1>
 <p class="meta"><span class="pill online" data-online-pill data-state="connecting"><span class="dot"></span><span data-online-label>Connecting…</span></span> <span class="pill">${esc(profile.name || robot.profile_id)}</span> <span class="pill role" data-role-label>${esc(ROLE_LABEL[role] || role)}</span></p>
@@ -468,7 +490,7 @@ ${embed && role === 'watcher' && !signedIn ? `<p class="embed-sign-in" data-driv
 <div class="widgets">
 ${widgets.join('\n')}
 </div>
-${tryIt ? tryOutro(profile) : ''}${role === 'owner' && !embed && !tryIt ? `<div class="owner-settings">${localProfileForm(robot, profile, profileForm)}${automation ? routinesCard(robot, profile, automation) + webhooksCard(robot, automation) : ''}${agentForm(robot)}${listingForm(robot)}${embedForm(robot)}${streamingForm(robot, streaming)}${people ? peopleCard(robot, people) : ''}</div>` : ''}
+${tryIt ? tryOutro(profile) : ''}${role === 'owner' && !embed && !tryIt ? `<div class="owner-settings">${onStreamCard(robot, { liveUrl })}${localProfileForm(robot, profile, profileForm)}${automation ? routinesCard(robot, profile, automation) + webhooksCard(robot, automation) : ''}${agentForm(robot)}${listingForm(robot)}${embedForm(robot)}${streamingForm(robot, streaming)}${people ? peopleCard(robot, people) : ''}</div>` : ''}
 </main>`;
     return page(tryIt ? 'Try the panel with a simulated rover' : robot.name, body, {
         scripts: panelScripts(profile, tryIt), bodyClass: embed ? 'embed-page' : 'panel-page',
@@ -512,12 +534,14 @@ function renderDrivePage({ robot }) {
 }
 
 /** The framed 403: no robot data, only a way out to openvibe.bot (where signing in may grant access). */
-function renderEmbedRefused({ robotId }) {
-    const body = `<main class="page embed-refused">
-<div class="card"><p>This robot is not shared for embedding.</p>
-<p>${outLink(`/panel/${robotId}`, 'Open on openvibe.bot', 'button primary')}</p></div>
+function renderEmbedRefused({ robotId, parentOrigins = [] }) {
+    const body = `<main class="page embed-refused" data-embed-refused="${esc(robotId)}" data-parent-origins="${esc(parentOrigins.join(' '))}">
+<div class="card"><p>This robot's panel is not shown here yet.</p>
+<p class="setting-note">Its owner turns it on with "Put the buttons under my OpenVibe.Live stream" on the robot's page.</p>
+<p>${outLink(`/panel/${robotId}#on-stream`, 'Open on openvibe.bot', 'button primary')}</p></div>
 </main>`;
-    return page('Not shared', body, { bodyClass: 'embed-page' });
+    // refused.js tells the page around the frame, so a stream page can hide the box or point its owner to the switch.
+    return page('Not shown here yet', body, { bodyClass: 'embed-page', scripts: ['/panel/refused.js'] });
 }
 
 /**
