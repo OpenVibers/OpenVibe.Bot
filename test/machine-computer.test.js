@@ -454,6 +454,12 @@ const { boot, check, done } = require('./helpers/app');
         }
         assert.ok(ownCard.includes('qwen2.5-1.5b-instruct'), 'the card shows its models');
         assert.ok(ownCard.includes('about 15 tokens a second'), 'and how fast they answer there');
+        // Two machines whose models the owner's AI may use (gpu, switched on below, and this one once on): any of them.
+        await t.call('POST', `/api/v1/machines/${own.deviceId}/ai-models`, { user: alex, body: { on: true } });
+        await t.call('POST', `/api/v1/machines/${gpu.deviceId}/ai-models`, { user: alex, body: { on: true } });
+        const both = await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text();
+        assert.ok(both.includes('settings?own=node&amp;machine=any&amp;model='), 'with two, the link chooses any of them');
+        await t.call('POST', `/api/v1/machines/${own.deviceId}/ai-models`, { user: alex, body: { on: false } });
         own.c.close();
         // The machines page: its models and the switch.
         const html = await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text();

@@ -750,6 +750,8 @@ function renderMachinesPage({ machines = [], pairing = null }) {
         const kinds = browser && whole ? `${d.max} at once, or twice as many browser desks` : browser ? `${d.max * 2} browser desks at once` : `${d.max} at once`;
         return `Desks for your agents: ${kinds}${d.keeps ? ', sign-ins kept' : ''}`;
     };
+    // The person's machines whose models their AI may use: with two or more, Chat's link chooses any of them.
+    const modelMachines = machines.filter((x) => { const c = x.ai_models && computerOf(x); return !!(c && c.ai && c.ai.models.length); }).length;
     const computerRow = (m) => {
         const c = computerOf(m);
         if (!c) return '';
@@ -760,7 +762,8 @@ function renderMachinesPage({ machines = [], pairing = null }) {
             + `<form method="post" action="/machines/${esc(m.id)}/ai-models"><input type="hidden" name="on" value="${m.ai_models ? '0' : '1'}">`
             + `<button type="submit" class="button quiet" aria-pressed="${m.ai_models ? 'true' : 'false'}">${m.ai_models ? 'Stop my AI using this computer\'s models' : 'Let my AI use this computer\'s models'}</button></form>`
             // Turned on: OpenVibe.Chat's "Your AI key" comes filled in with this computer and its first model (saved only there).
-            + (m.ai_models && c.ai.models.length ? `<a class="button quiet" href="https://openvibe.chat/settings?own=node&amp;machine=${encodeURIComponent(m.id)}&amp;model=${encodeURIComponent(c.ai.models[0])}#oc-ai-key">Use these models in OpenVibe.Chat</a>` : '')
+            // With several such machines, any of them (contracts 0.221.0): the fastest that is on answers.
+            + (m.ai_models && c.ai.models.length ? `<a class="button quiet" href="https://openvibe.chat/settings?own=node&amp;machine=${modelMachines > 1 ? 'any' : encodeURIComponent(m.id)}&amp;model=${encodeURIComponent(c.ai.models[0])}#oc-ai-key">Use these models in OpenVibe.Chat</a>` : '')
             + '</div>' : '';
         // A machine that offers only its models (the ai plugin, no computer plugin): just them.
         if (!c.on) return `<div class="machine-computer">${aiRow}</div>`;
