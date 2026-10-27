@@ -176,6 +176,17 @@ const { boot, check, done } = require('./helpers/app');
 
     await check('a desk host (Node v0.20.0 --desk-host) shows its desks live though it has no screen of its own', async () => {
         const host = await machine(alex, { files: SCREEN.files, desk: { level: 'trusted', window_manager: 'openbox', input: true, screen: true, named: true, max_desks: 4 } });
+        // Its page offers its desks, never a screen it does not have.
+        const idle = await (await fetch(`${t.base}/machines/${host.deviceId}/screen?desk=desk-task-a`, { headers: cookie(alex) })).text();
+        assert.ok(!idle.includes('Show my screen'), 'no screen of its own to show');
+        assert.ok(idle.includes('no screen of its own'));
+        assert.ok(idle.includes('Show the private desk'));
+        // A Mac runs browser desks only: no private desk (a whole desk) to show.
+        const mac = await machine(alex, { ...SCREEN, desk: { level: 'trusted', window_manager: null, input: true, screen: true, named: true, max_desks: 2, kinds: ['browser'] } });
+        const macPage = await (await fetch(`${t.base}/machines/${mac.deviceId}/screen`, { headers: cookie(alex) })).text();
+        assert.ok(macPage.includes('Show my screen'));
+        assert.ok(!macPage.includes('Show the private desk'), 'a Mac has no whole desk');
+        mac.c.close();
         const r = await screen('POST', host.deviceId, { user: alex, body: { seconds: 60, desk: 'desk-task-a' } });
         assert.strictEqual(r.status, 201, r.text);
         assert.strictEqual(seen.at(-1).value.desk, 'desk-task-a');

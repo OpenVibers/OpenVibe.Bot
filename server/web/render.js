@@ -822,7 +822,7 @@ ${control ? `<div class="share-controls">
     return page(`${name}: shared screen`, body, { scripts: ['/panel/panel.js', ...(control ? ['/panel/screen-share.js'] : [])], bodyClass: 'share-body', description: 'A shared computer screen on OpenVibe.Bot.' });
 }
 
-function renderMachineScreenPage({ machine, until = null, error = null, idle = false, shares = [], madeLink = null, madeShare = null, hasDesk = false, desk = 'main' }) {
+function renderMachineScreenPage({ machine, until = null, error = null, idle = false, shares = [], madeLink = null, madeShare = null, hasDesk = false, hasScreen = true, desk = 'main' }) {
     const name = machine.name || machine.id;
     const stateUrl = `/machines/${encodeURIComponent(machine.id)}/screen.json`;
     const base = `/machines/${encodeURIComponent(machine.id)}/screen`;
@@ -836,8 +836,8 @@ function renderMachineScreenPage({ machine, until = null, error = null, idle = f
 <h1>${esc(name)}: screen</h1>
 ${agentDesk ? `<p>Your agent works on a desk of its own on this computer. Watch it live, and take it over whenever you like: while you use the mouse and keyboard, the agent waits; when you stop, it goes on.</p>
 <form method="post" action="/machines/${esc(machine.id)}/screen" class="inline-form"><input type="hidden" name="desk" value="${esc(desk)}"><button type="submit" class="primary">Watch your agent's desk</button></form>` : ''}
-<p class="muted">Show this computer's screen here, live, to you only, for 10 minutes. Nothing is recorded, and the computer says on its desktop that its screen is live.</p>
-<form method="post" action="/machines/${esc(machine.id)}/screen" class="inline-form"><button type="submit" class="${agentDesk ? 'button' : 'primary'}">Show my screen</button></form>
+${hasScreen ? `<p class="muted">Show this computer's screen here, live, to you only, for 10 minutes. Nothing is recorded, and the computer says on its desktop that its screen is live.</p>
+<form method="post" action="/machines/${esc(machine.id)}/screen" class="inline-form"><button type="submit" class="${agentDesk ? 'button' : 'primary'}">Show my screen</button></form>` : '<p class="muted">This computer has no screen of its own to show (a desk host): only its desks, where your agents work. A task\'s Watch link opens its desk.</p>'}
 ${hasDesk ? `<form method="post" action="/machines/${esc(machine.id)}/screen" class="inline-form"><input type="hidden" name="desk" value="private"><button type="submit" class="button">Show the private desk</button></form>
 <p class="muted">The private desk is a screen of its own on this computer, where your agent works without touching yours.</p>` : ''}
 ${sharesBlock(machine, shares, madeLink, madeShare, hasDesk)}
@@ -865,7 +865,7 @@ ${takeOver}
 <form method="post" action="/machines/${esc(machine.id)}/screen/stop"><button type="submit" class="primary">Stop showing it</button></form>
 <form method="post" action="/machines/${esc(machine.id)}/screen">${desk !== 'main' ? `<input type="hidden" name="desk" value="${esc(desk)}">` : ''}<button type="submit" class="button quiet">${error ? 'Try again' : 'Start again (10 more minutes)'}</button></form>
 </div>
-<p class="muted small">The machine says on its desktop that its screen is live. <code>openvibe-node stop</code> on the machine ends it at once, and it ends on its own after its time.</p>
+<p class="muted small">${desk === 'main' ? 'The machine says on its desktop that its screen is live. ' : 'Nothing of your own screen is shown: this is the desk\'s own. '}<code>openvibe-node stop</code> on the machine ends it at once, and it ends on its own after its time.</p>
 ${sharesBlock(machine, shares, madeLink, madeShare)}
 </main>`;
     return page(`${name}: screen`, body, { scripts: ['/panel/panel.js', '/panel/screen-share.js'], description: 'Your machine\'s screen, live, for you only.', canonical: '/machines' });
