@@ -34,6 +34,7 @@ const { boot, check, done } = require('./helpers/app');
             else if (m.kind === 'probe') c.send(frame('ack', { id: m.id, data: { status: 200, body: '{"up":true}', ms: 3 } }));
             else if (m.kind === 'input') c.send(frame('ack', { id: m.id, data: { done: true, action: m.value.action } }));
             else if (m.kind === 'browser') c.send(frame('ack', { id: m.id, data: { url: m.value.url || 'https://example.org/', title: 'Example', text: 'Example page', truncated: false, links: [] } }));
+            else if (m.kind === 'desk' && m.value.action === 'list') c.send(frame('ack', { id: m.id, data: { desks: [{ desk: 'desk-task-a', kind: 'browser', running: true, width: 1280, height: 800, since: 1793102400 }, { desk: 'private', kind: 'desktop', running: true, display: ':91', width: 1280, height: 800, since: 1793102000 }], max_desks: 4, available: true } }));
             else if (m.kind === 'desk') c.send(frame('ack', { id: m.id, data: { running: m.value.action !== 'stop', display: ':91', width: 1280, height: 800 } }));
             else if (m.kind === 'screen' && m.value.desk && m.value.desk !== 'main') c.send(frame('ack', { id: m.id, data: { format: 'png', width: 1280, height: 800, content_b64: 'iVBORw0KGgo=' } }));
             else c.send(frame('nack', { id: m.id, fault_code: 'not_allowed', message: 'this machine allows observing only' }));
@@ -337,6 +338,34 @@ const { boot, check, done } = require('./helpers/app');
         assert.ok(!hostCmd[1].includes('--worker'), 'a desk host never runs the job worker too');
         host.c.close();
         mac.c.close();
+    });
+
+    await check('a machine\'s desks page: its running desks to watch, take over or stop, for its owner only; stop is same-site only', async () => {
+        const cookie = (user) => ({ Cookie: `ov_token=${t.network.signUser(user)}` });
+        const host = await machine(alex, { ...COMPUTER, desk: { level: 'trusted', window_manager: 'openbox', input: true, screen: true, named: true, max_desks: 4, kinds: ['desktop', 'browser'] } });
+        host.c.send(frame('telemetry', { sensors: { computer_level: 'trusted', computer_waiting: 0, computer_running: 0, computer_desks: 2 } }));
+        await poll(async () => (await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text()).includes('2 desks running'));
+        const list = await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text();
+        assert.ok(list.includes(`href="/machines/${host.deviceId}/desks"`), 'the card links its desks');
+        const page = await fetch(`${t.base}/machines/${host.deviceId}/desks`, { headers: cookie(alex) });
+        assert.strictEqual(page.status, 200);
+        const html = await page.text();
+        assert.deepStrictEqual(seen.at(-1).value, { action: 'list' }, 'asked of the machine when the page opens');
+        assert.ok(html.includes('<code>desk-task-a</code>') && html.includes('Browser desk') && html.includes('Whole desk'));
+        assert.ok(html.includes(`href="/machines/${host.deviceId}/screen?desk=desk-task-a"`), 'Watch and take over that desk');
+        assert.ok(html.includes('name="desk" value="desk-task-a"'), 'its Stop');
+        assert.ok(html.includes('At most 4 whole desks at once here'));
+        assert.strictEqual((await fetch(`${t.base}/machines/${host.deviceId}/desks`, { headers: cookie(bob) })).status, 404, 'nobody else');
+        const stop = (body, headers = {}) => fetch(`${t.base}/machines/${host.deviceId}/desks/stop`, { method: 'POST', redirect: 'manual', body, headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...cookie(alex), ...headers } });
+        assert.strictEqual((await stop('desk=desk-task-a', { Origin: 'https://evil.test' })).status, 403);
+        assert.strictEqual((await stop('desk=main')).status, 422, 'never the person\'s own screen');
+        assert.strictEqual((await stop('desk=desk-../x')).status, 422);
+        const done = await stop('desk=desk-task-a');
+        assert.strictEqual(done.status, 303);
+        assert.match(done.headers.get('location'), /\/desks\?stopped=desk-task-a$/);
+        assert.deepStrictEqual(seen.at(-1).value, { action: 'stop', desk: 'desk-task-a' });
+        assert.ok((await (await fetch(`${t.base}${done.headers.get('location')}`, { headers: cookie(alex) })).text()).includes('Stopped <code>desk-task-a</code>'));
+        host.c.close();
     });
 
     await check('Watch sends only probes, only where the owner let their watches use the computer', async () => {

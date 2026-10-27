@@ -749,9 +749,13 @@ function renderMachinesPage({ machines = [], pairing = null }) {
         if (!c) return '';
         const can = [c.terminal && 'terminal', c.files && 'files', c.screen && 'screen', c.input && 'mouse and keyboard'].filter(Boolean).join(', ');
         const desks = c.desks ? `<span class="muted">${esc(deskWords(c.desks))}</span>` : '';
+        // The desks running now (the Node's telemetry), and the page that lists them, to watch or stop one.
+        const running = Number.isInteger(m.computer_desks) && m.computer_desks > 0
+            ? ` <span class="pill">${m.computer_desks === 1 ? '1 desk running' : `${m.computer_desks} desks running`}</span>` : '';
+        const deskLink = c.desks && m.online ? `<a class="button quiet" href="/machines/${esc(m.id)}/desks">See its desks</a>` : '';
         const waiting = Number.isInteger(m.computer_waiting) && m.computer_waiting > 0
             ? ` <span class="pill warn">${m.computer_waiting} waiting for you on the machine</span>` : '';
-        return `<div class="machine-computer"><span class="pill">Computer: ${esc(c.level ? LEVELS[c.level] : 'on')}</span><span class="muted">${esc(can)}</span>${desks}${waiting}`
+        return `<div class="machine-computer"><span class="pill">Computer: ${esc(c.level ? LEVELS[c.level] : 'on')}</span><span class="muted">${esc(can)}</span>${desks}${running}${waiting}${deskLink}`
             + `<form method="post" action="/machines/${esc(m.id)}/agent-computer"><input type="hidden" name="on" value="${m.agent_computer ? '0' : '1'}">`
             + `<button type="submit" class="button quiet" aria-pressed="${m.agent_computer ? 'true' : 'false'}">${m.agent_computer ? 'Stop my agent using this computer' : 'Let my agent use this computer'}</button></form>`
             + (c.screenStream && m.online ? `<form method="post" action="/machines/${esc(m.id)}/screen"><button type="submit" class="button quiet">${m.computer_screen_stream === 'live' ? 'Watch my screen' : 'Show my screen'}</button></form>` : '')
@@ -834,6 +838,38 @@ ${control ? `<div class="share-controls">
 <span class="muted small" data-share-note role="status"></span></div>` : ''}
 </main>`;
     return page(`${name}: shared screen`, body, { scripts: ['/panel/panel.js', ...(control ? ['/panel/screen-share.js'] : [])], bodyClass: 'share-body', description: 'A shared computer screen on OpenVibe.Bot.' });
+}
+
+/**
+ * /machines/:id/desks: the desks running on the owner's machine (Desks plan), each a computer of its own for an agent:
+ * its kind, size and start, Watch and take over (the screen page on that desk), and Stop.
+ */
+function renderMachineDesksPage({ machine, desks = [], maxDesks = null, error = null, stopped = null }) {
+    const name = machine.name || machine.id;
+    const id = esc(machine.id);
+    const KIND = { browser: 'Browser desk', desktop: 'Whole desk' };
+    const since = (d) => {
+        const t = Number(d.since);
+        if (!Number.isFinite(t) || t <= 0) return '';
+        const iso = new Date(t * 1000).toISOString();
+        return ` <span class="muted">since <time datetime="${esc(iso)}" data-local-time>${esc(iso.slice(11, 16))} UTC</time></span>`;
+    };
+    const rows = desks.map((d) => `<li class="robot-card"><span class="robot-name">${icon('plug')}<span><code>${esc(d.desk)}</code></span></span>`
+        + `<span class="robot-meta"><span class="pill">${esc(KIND[d.kind] || 'Desk')}</span>${Number.isInteger(d.width) ? ` <span class="muted">${d.width}×${d.height}</span>` : ''}${since(d)}</span>`
+        + `<span class="robot-actions"><a class="button" href="/machines/${id}/screen?desk=${encodeURIComponent(d.desk)}">Watch and take over</a>`
+        + `<form method="post" action="/machines/${id}/desks/stop"><input type="hidden" name="desk" value="${esc(d.desk)}"><button type="submit" class="button quiet">Stop</button></form></span></li>`).join('');
+    const list = error ? `<p class="error" role="alert">${esc(error)}</p>`
+        : rows ? `<ul class="robots">${rows}</ul>`
+            : `<div class="empty">${icon('plug', 'icon empty-icon')}<p class="empty-title">No desks are running.</p><p>An agent's task starts a desk of its own here when it needs one, and stops it when it is done.</p></div>`;
+    const body = `${topbar(`<a class="crumb" href="/machines">Machines</a><span class="crumb">${esc(name)}</span>`)}
+<main class="page">
+<h1>${esc(name)}: desks</h1>
+<p class="muted">Each desk is a computer of its own on this machine, where one of your agents works: its own screen or browser, files and sign-ins. Watch one live and take it over, or stop it; a task whose desk you stop goes on without it.</p>
+${stopped ? `<p class="setting-ok" role="status">${icon('check')}<span>Stopped <code>${esc(stopped)}</code>.</span></p>` : ''}
+${list}
+${Number.isInteger(maxDesks) ? `<p class="muted small">At most ${maxDesks} whole ${maxDesks === 1 ? 'desk' : 'desks'} at once here; a browser desk counts as half.</p>` : ''}
+</main>`;
+    return page(`${name}: desks`, body, { description: 'The desks your agents work on, on your machine.', canonical: '/machines' });
 }
 
 function renderMachineScreenPage({ machine, until = null, error = null, idle = false, shares = [], madeLink = null, madeShare = null, hasDesk = false, hasScreen = true, desk = 'main' }) {
@@ -919,4 +955,4 @@ function renderPhonePage() {
     return page('This phone is a robot', body, { scripts: ['/panel/phone-device.js'], bodyClass: 'phone-page', description: 'Turn a phone into a robot on OpenVibe.Bot from its browser: its camera, voice and face, with nothing to install.', canonical: '/device/phone' });
 }
 
-module.exports = { page, renderPanel, renderPhonePage, renderMachinesPage, renderMachineScreenPage, renderSharePage, renderShareGone, panelScripts, isSim, TRY_DESCRIPTION, renderEmbedRefused, renderDrivePage, renderWidget, renderRobotsPage, renderPairingPage, renderLinkPage, renderClaimPage, renderClaimApproved, camerasOf, esc };
+module.exports = { page, renderPanel, renderPhonePage, renderMachinesPage, renderMachineDesksPage, renderMachineScreenPage, renderSharePage, renderShareGone, panelScripts, isSim, TRY_DESCRIPTION, renderEmbedRefused, renderDrivePage, renderWidget, renderRobotsPage, renderPairingPage, renderLinkPage, renderClaimPage, renderClaimApproved, camerasOf, esc };
