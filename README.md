@@ -89,6 +89,34 @@ Sitemap entries use the release commit time for these code-backed pages.
     the owner set there (`ask` waits for approval on the machine; `observe` refuses), 8 a second at most per link.
     The audit keeps the action and position (typed text only as a character count) under the machine. Nothing else
     passes: no programs, no files, no choice of where the screen goes.
+- **Desks for agents** (the Desks plan, `OpenVibe_Agent_Desks_Plan_2026-10-27.md`; contracts 0.215.0–0.218.0,
+  OpenVibe.Node v0.19.0–v0.26.0). Each agent task gets a desk of its own on a machine.
+  - **Named desks** (`desk-<name>`): each has its own display, browser profile and files. **Browser desks**
+    (`kind: browser`) are a headless browser alone; a desk host or a Mac runs browser desks only.
+  - **Programs on a desk:** `exec` with `desk`, and `detach` for an app that lasts until the desk stops.
+  - **Watch and take over:** the desk's live screen, where the person's own input wins (`bot.person_driving`).
+  - **The desks page** `/machines/:id/desks` lists what runs there. The machines API reports `desks_running`, so
+    Actor's `machine: "any"` places a desk on a desk host first, then on the machine with the most room.
+  - **Desk hosts:** `install.sh --desk-host` turns a spare computer into a host for its owner's agents.
+  - **A desk on the owner's OpenVibe Live channel**, at their request (`POST /machines/:id/screen { desk, live: true }`,
+    or the desks page's "Show live on my channel" and its second step): a second, public OpenRestream stream of the
+    machine's (`bot:machine_live:<id>`) whose `mirror_to_live` OpenRestream links to their channel. It is never the
+    person's own screen and never the private screen stream, and it lasts up to 30 minutes.
+- **Your own models** (AI on your own machines; contracts 0.219.0 `bot.command@1` kind `ai`, capability
+  `bot.machine.ai`; OpenVibe.Node v0.27.0+ `ai` plugin, `install.sh --ai`).
+  - **Reporting:** a machine's Node reports its model server's models (`capabilities.ai.ai`, read by
+    `server/machine-ai.js`) and, from v0.29.0, how fast the last one answered there (`ai_tokens_per_s`). The API has it
+    as `computer.ai` and `computer.ai_speed`.
+  - **Who may ask:** the owner, or OpenVibe.AI (`svc:ai` with `bot.machine.ai`, acting for the owner) once the owner
+    turned on "Let my AI use this computer's models" (`devices.ai_models`, migration 0025;
+    `POST /api/v1/machines/:id/ai-models`). OpenVibe.AI sends kind `ai` only, and lists only machines with the switch
+    on (for a credential with `machine: "any"`).
+  - **The audit** keeps the model and the counts, never the text.
+  - **The card** shows the models, their speed and "Use these models in OpenVibe.Chat", which prefills Chat's "Your AI
+    key", with `machine=any` when several machines offer models.
+- **The resource index** (`server/api/resource-index.js`) lists a person's robots (`bot.robot`) and then their machines
+  (`bot.machine`, online or offline) on one cursor. Each names its page here (`links.console`), so OpenVibe.Services
+  lists and links them.
 - A server-side ONVIF camera (`camera.onvif`) is not installed on a machine: it gets no `--driver` and Bot attaches it itself from `BOT_ONVIF_CAMERAS` (see Deploy), so its panel works as soon as the camera answers.
 - The robot's panel is `openvibe.bot/panel/<rob_…>` (`GET /panel/:id`, rendered from the profile; `docs/protocol.md` §3). The device-side bring-up steps for the Adeept ADR036 kit live with the driver, in OpenVibe.Node's `docs/hardware-adeept.md` (T15 step 1).
 - A robot can use its own `local.rob_…` profile, stored with that robot and validated against `bot.robot-profile@1` and Bot's capability, driver and widget registries. On the owner's robot page, the Buttons form adds or removes rows and saves each button's name, label, optional keyboard key, cooldown in milliseconds and hold setting. The Video click checkbox enables a separate point cooldown. Only the owner can save or return to the robot's catalogue profile; each change is audited.
@@ -132,10 +160,11 @@ per export and deletion in `account_data_events` (migration 0008).
 | `bot.computer.control` | an agent service (OpenVibe.Actor) uses a person's own machine: `GET /machines` (the person's machines whose owner allowed it), `GET /machines/:id/computer`, `POST /machines/:id/commands` (exec, fs, screen) acting as that owner, only where the owner turned "Let my agent use this computer" on |
 | `bot.robot.control` | the e-stop set and clear (clear is owner-only), the control gate and `POST /robots/:id/commands` (so a bound channel's chat can forward a command over HTTP instead of a hardware socket) |
 | `bot.device.connect` | rotate and revoke a device credential |
+| `bot.machine.ai` | OpenVibe.AI asks a person's own machine's model for them (kind `ai` only), and lists their machines whose owner turned on "Let my AI use this computer's models" |
 | `bot.job.dispatch` | the internal Run → Bot jobs API (`POST /jobs`, `POST /jobs/:id/cancel`, `GET /jobs/:id`); services only |
 | `bot.resource.read` | the internal authority index (`GET /api/v1/resources`, `GET /api/v1/resources/:ovrn`); services only |
 
-The authority index lists `bot.robot` summaries for OpenVibe.Services. A robot belongs to a person, so a project filter returns an empty page and individual OVRN lookups return 404. Services read it over loopback with `bot.resource.read`.
+The authority index lists `bot.robot` and `bot.machine` summaries for OpenVibe.Services. A robot belongs to a person, so a project filter returns an empty page and individual OVRN lookups return 404. Services read it over loopback with `bot.resource.read`.
 
 A person acts on their own robots with a Network user token; a service acts with a service token plus the capability, for the subject it names. The REST routes are in `docs/protocol.md` §3 and the two WebSockets in §§1–2.
 
