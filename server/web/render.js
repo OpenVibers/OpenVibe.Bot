@@ -871,7 +871,7 @@ ${control ? `<div class="share-controls">
  * /machines/:id/desks: the desks running on the owner's machine (Desks plan), each a computer of its own for an agent:
  * its kind, size and start, Watch and take over (the screen page on that desk), and Stop.
  */
-function renderMachineDesksPage({ machine, desks = [], maxDesks = null, error = null, stopped = null }) {
+function renderMachineDesksPage({ machine, desks = [], maxDesks = null, error = null, stopped = null, live = null }) {
     const name = machine.name || machine.id;
     const id = esc(machine.id);
     const KIND = { browser: 'Browser desk', desktop: 'Whole desk' };
@@ -884,7 +884,12 @@ function renderMachineDesksPage({ machine, desks = [], maxDesks = null, error = 
     const rows = desks.map((d) => `<li class="robot-card"><span class="robot-name">${icon('plug')}<span><code>${esc(d.desk)}</code></span></span>`
         + `<span class="robot-meta"><span class="pill">${esc(KIND[d.kind] || 'Desk')}</span>${Number.isInteger(d.width) ? ` <span class="muted">${d.width}×${d.height}</span>` : ''}${since(d)}</span>`
         + `<span class="robot-actions"><a class="button" href="/machines/${id}/screen?desk=${encodeURIComponent(d.desk)}">Watch and take over</a>`
-        + `<form method="post" action="/machines/${id}/desks/stop"><input type="hidden" name="desk" value="${esc(d.desk)}"><button type="submit" class="button quiet">Stop</button></form></span></li>`).join('');
+        + `<form method="post" action="/machines/${id}/desks/stop"><input type="hidden" name="desk" value="${esc(d.desk)}"><button type="submit" class="button quiet">Stop</button></form></span>`
+        // On the owner's OpenVibe Live channel, when they choose (the Desks plan's D8): a second step says what goes public.
+        + `<details class="desk-live"><summary class="button quiet">Show live on my channel</summary>`
+        + `<form method="post" action="/machines/${id}/desks/live"><input type="hidden" name="desk" value="${esc(d.desk)}">`
+        + `<p class="muted">Everyone can watch this desk on your OpenVibe Live channel for up to 30 minutes: what your agent does and every page it opens, signed-in pages included. Stop showing it on its screen page, or stop the desk.</p>`
+        + `<button type="submit" class="button primary">Go live with this desk</button></form></details></li>`).join('');
     const list = error ? `<p class="error" role="alert">${esc(error)}</p>`
         : rows ? `<ul class="robots">${rows}</ul>`
             : `<div class="empty">${icon('plug', 'icon empty-icon')}<p class="empty-title">No desks are running.</p><p>An agent's task starts a desk of its own here when it needs one, and stops it when it is done.</p></div>`;
@@ -893,6 +898,7 @@ function renderMachineDesksPage({ machine, desks = [], maxDesks = null, error = 
 <h1>${esc(name)}: desks</h1>
 <p class="muted">Each desk is a computer of its own on this machine, where one of your agents works: its own screen or browser, files and sign-ins. Watch one live and take it over, or stop it; a task whose desk you stop goes on without it.</p>
 ${stopped ? `<p class="setting-ok" role="status">${icon('check')}<span>Stopped <code>${esc(stopped)}</code>.</span></p>` : ''}
+${live ? `<p class="setting-ok" role="status">${icon('check')}<span><code>${esc(live.desk)}</code> is live${live.channel ? ` on <a href="${esc(live.channel)}">${esc(live.channel.replace(/^https:\/\//, ''))}</a>` : ' on your OpenVibe Live channel'} for up to 30 minutes. <a href="/machines/${id}/screen?desk=${encodeURIComponent(live.desk)}">Its screen page</a> stops it.</span></p>` : ''}
 ${list}
 ${Number.isInteger(maxDesks) ? `<p class="muted small">At most ${maxDesks} whole ${maxDesks === 1 ? 'desk' : 'desks'} at once here; a browser desk counts as half.</p>` : ''}
 </main>`;

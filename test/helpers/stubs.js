@@ -194,6 +194,8 @@ async function startOpenRe({ token = `ovt_${crypto.randomBytes(16).toString('hex
     const streams = new Map();
     const sessions = new Map();
     const calls = [];
+    const noLive = new Set();   // owners with no OpenVibe Live account (a Live link is refused)
+    let slotSeq = 40;
     let failure = null;
     let failuresLeft = 0;   // how many further requests failNext answers before it clears
     let n = 0;
@@ -311,6 +313,14 @@ async function startOpenRe({ token = `ovt_${crypto.randomBytes(16).toString('hex
         if (st && !m[2] && req.method === 'PATCH') {
             // Only the streaming toggles are writable here, as OpenRestream's PATCH accepts: the rest stays put.
             if (body && body.recording_mode !== undefined) st.recording_mode = body.recording_mode;
+            // Switching mirror_to_live on links a slot on the owner's Live channel once, as OpenRestream does for the
+            // person or a service acting for them (OpenRestream#117); an owner in noLive has no Live account.
+            if (body && body.mirror_to_live === true && !st.refs.some((r) => r.service === 'live')) {
+                if (noLive.has(st.owner)) return send(res, 200, { stream: view(st), live: { linked: false, code: 'live.no_account', reason: 'You have no OpenVibe Live channel yet. Sign in to openvibe.live once, then switch this on again.' } });
+                st.refs.push({ service: 'live', type: 'managed_stream', id: String(++slotSeq), label: `https://openvibe.live/@${st.owner.slice(-6).toLowerCase()}` });
+                st.mirror_to_live = true;
+                return send(res, 200, { stream: view(st), live: { linked: true, channel_url: st.refs.at(-1).label } });
+            }
             if (body && body.mirror_to_live !== undefined) st.mirror_to_live = !!body.mirror_to_live;
             return send(res, 200, { stream: view(st) });
         }
@@ -333,7 +343,7 @@ async function startOpenRe({ token = `ovt_${crypto.randomBytes(16).toString('hex
     });
     const url = await listen(server);
     return {
-        url, token, streams, sessions, calls, admits, goLive, endLive,
+        url, token, streams, sessions, calls, admits, goLive, endLive, noLive,
         failNext: (what, times = 1) => { failure = what; failuresLeft = what == null ? 0 : times; },
         setCaps: (list) => { granted = [...(list || caps)]; },
         close: () => { server.closeAllConnections(); return new Promise((r) => server.close(r)); },

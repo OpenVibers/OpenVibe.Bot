@@ -78,7 +78,14 @@ function createMachineScreen({ domain, hub, now = () => Date.now() }) {
             if (desk !== 'main' && desk !== 'private' && offered.desk.named !== true) {
                 throw new BotError(409, 'bot.computer_off', 'this machine runs one desk only (private): several named desks need OpenVibe Node v0.19.0 or newer');
             }
-            const key = await domain.machines.screen.key(device, subject);
+            // On the owner's OpenVibe Live channel (the Desks plan's D8): a desk only, never their own screen, on a public
+            // stream of its own that OpenRestream links to their channel; refused with Live's reason when it cannot be.
+            const live = opts.live === true;
+            if (live && desk === 'main') throw new BotError(422, 'bot.live_desk_only', 'only a desk goes on your Live channel, never your own screen');
+            const key = live ? await domain.machines.screen.liveKey(device, subject) : await domain.machines.screen.key(device, subject);
+            if (live && !key.live.linked) {
+                throw new BotError(409, key.live.code || 'bot.live_refused', key.live.reason || 'OpenVibe Live did not take the desk: sign in to openvibe.live once, then try again');
+            }
             const r = await hub.machineScreen(device.id, principal, subject, { action: 'start', whip_url: key.whipUrl, publish_key: key.key, seconds, fps, ...(desk !== 'main' ? { desk } : {}) });
             if (r.result !== 'ack') {
                 const code = r.code || (r.result === 'expired' ? 'bot.device_timeout' : 'bot.device_refused');
@@ -88,7 +95,7 @@ function createMachineScreen({ domain, hub, now = () => Date.now() }) {
             const data = r.data && typeof r.data === 'object' ? r.data : {};
             const until = Number.isFinite(data.until_ms) ? new Date(data.until_ms).toISOString() : new Date(now() + seconds * 1000).toISOString();
             shown.set(device.id, desk);
-            return { streaming: true, seconds, fps, until, desk };
+            return { streaming: true, seconds, fps, until, desk, ...(live ? { live: { channel_url: key.live.channel_url } } : {}) };
         },
         async state(device, subject) {
             const sensors = hub ? ((hub.deviceState(device.id).telemetry || {}).sensors || {}) : {};

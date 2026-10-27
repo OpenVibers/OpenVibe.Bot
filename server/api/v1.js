@@ -489,7 +489,7 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
     };
     r.post('/machines/:id/screen', manage, wrap(async (req, res) => {
         const { device, subject } = await screenOwner(req);
-        const out = await machineScreen.start(device, subject, req.principal, { seconds: req.body?.seconds, fps: req.body?.fps, desk: req.body?.desk });
+        const out = await machineScreen.start(device, subject, req.principal, { seconds: req.body?.seconds, fps: req.body?.fps, desk: req.body?.desk, live: req.body?.live === true });
         res.status(201).json({ machine_id: device.id, ...out });
     }));
     r.get('/machines/:id/screen', wrap(async (req, res) => {
