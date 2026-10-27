@@ -763,7 +763,10 @@ function renderMachinesPage({ machines = [], pairing = null }) {
             + (c.screenStream && m.online ? `<form method="post" action="/machines/${esc(m.id)}/screen"><button type="submit" class="button quiet">${m.computer_screen_stream === 'live' ? 'Watch my screen' : 'Show my screen'}</button></form>` : '')
             + (c.ai ? `<div class="machine-ai"><span class="pill">${c.ai.ready ? 'Models' : 'Models: no server answers'}</span>${c.ai.models.length ? `<span class="muted">${esc(c.ai.models.join(', '))}</span>` : ''}`
                 + `<form method="post" action="/machines/${esc(m.id)}/ai-models"><input type="hidden" name="on" value="${m.ai_models ? '0' : '1'}">`
-                + `<button type="submit" class="button quiet" aria-pressed="${m.ai_models ? 'true' : 'false'}">${m.ai_models ? 'Stop my AI using this computer\'s models' : 'Let my AI use this computer\'s models'}</button></form></div>` : '')
+                + `<button type="submit" class="button quiet" aria-pressed="${m.ai_models ? 'true' : 'false'}">${m.ai_models ? 'Stop my AI using this computer\'s models' : 'Let my AI use this computer\'s models'}</button></form>`
+                // Turned on: OpenVibe.Chat's "Your AI key" comes filled in with this computer and its first model (saved only there).
+                + (m.ai_models && c.ai.models.length ? `<a class="button quiet" href="https://openvibe.chat/settings?own=node&amp;machine=${encodeURIComponent(m.id)}&amp;model=${encodeURIComponent(c.ai.models[0])}#oc-ai-key">Use these models in OpenVibe.Chat</a>` : '')
+                + '</div>' : '')
             + (c.probe ? `<form method="post" action="/machines/${esc(m.id)}/watch-probe"><input type="hidden" name="on" value="${m.watch_probe ? '0' : '1'}">`
                 + `<button type="submit" class="button quiet" aria-pressed="${m.watch_probe ? 'true' : 'false'}">${m.watch_probe ? 'Stop my watches checking from here' : 'Let my watches check things from this computer'}</button></form>` : '')
             + '</div>';

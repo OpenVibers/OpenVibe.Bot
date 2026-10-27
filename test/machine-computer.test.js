@@ -422,6 +422,9 @@ const { boot, check, done } = require('./helpers/app');
         const html = await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text();
         assert.ok(html.includes('llama3.1:8b'), 'its models');
         assert.ok(html.includes("Stop my AI using this computer's models"), 'and the switch, on');
+        assert.ok(html.includes(`href="https://openvibe.chat/settings?own=node&amp;machine=${gpu.deviceId}&amp;model=llama3.1%3A8b#oc-ai-key">Use these models in OpenVibe.Chat</a>`), 'and where to use them');
+        await t.call('POST', `/api/v1/machines/${gpu.deviceId}/ai-models`, { user: alex, body: { on: false } });
+        assert.ok(!(await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text()).includes('Use these models in OpenVibe.Chat'), 'only while it is on');
         gpu.c.close();
     });
 
