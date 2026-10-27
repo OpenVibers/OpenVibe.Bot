@@ -789,6 +789,9 @@ function renderMachinesPage({ machines = [], pairing = null }) {
 <li class="card"><h2>Or make a spare computer a desk host</h2>
 <pre tabindex="0" class="installer"><code>${esc(pairing.installer.replace(/ --worker$/, ' --desk-host'))}</code></pre>
 <p class="muted">An old laptop, a mini PC or a spare workstation becomes a place where your agents work: each task gets a desk of its own, with its own browser, and you can watch any desk and take it over. No screen, keyboard or sign-in needed on it. It runs as its own account and only for your agents; the installer adds what desks need and sizes them to its memory. Linux. <a href="https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/computer.md#desk-hosts---desk-host-node-v0200">How it works</a>.</p></li>
+<li class="card"><h2>Or use the models you run on it</h2>
+<pre tabindex="0" class="installer"><code>${esc(pairing.installer.replace(/ --worker$/, ' --ai'))}</code></pre>
+<p class="muted">If this computer runs Ollama, LM Studio or llama.cpp's server, your Vibe and your AI members can think with its models: free, and no port is opened. The installer says which server it finds. Add <code>--ai</code> to any command above to do both. Once it is paired, turn on "Let my AI use this computer's models" for it here. Node v0.28.0 or newer. <a href="https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/ai.md">How it works</a>.</p></li>
 <li class="card"><h2>Or enter the pairing code</h2><p><strong class="code">${esc(pairing.code)}</strong></p>
 <p class="muted">Valid until <time datetime="${esc(pairing.expires_at)}">${esc(pairing.expires_at)}</time>. It works once.</p></li></ol>
 <p class="muted">Reload this page once the installer says it is paired: the machine shows up above.</p>`
