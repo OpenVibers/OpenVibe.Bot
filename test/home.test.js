@@ -50,6 +50,11 @@ const { boot, check, done } = require('./helpers/app');
         const questions = [...faq.matchAll(/<h3>([^<]+)<\/h3>/g)].map((m) => m[1].replace(/&#39;/g, "'"));
         assert.deepStrictEqual(ld.find((x) => x['@type'] === 'FAQPage').mainEntity.map((q) => q.name), questions, 'FAQPage holds exactly the questions shown');
         assert.ok(questions.length >= 6);
+        // Your own computers: desks for your agents, desk hosts, your own models, a desk live (the Desks plan, AI on your
+        // own machines), with the questions people ask about them.
+        assert.match(html, /<h2 id="computers-h">Your computers, for your agents and your AI<\/h2>/);
+        for (const card of ['A desk for each task', 'A spare computer as a desk host', 'Your own AI models', 'A desk live on your channel']) assert.ok(html.includes(`<b>${card}</b>`), card);
+        assert.ok(questions.includes('Can my agents use my computer?') && questions.includes('Can my AI use the models on my computer?'));
         const home = await get('/home.css');
         assert.strictEqual(home.status, 200);
         assert.match(home.headers.get('content-type'), /^text\/css/);

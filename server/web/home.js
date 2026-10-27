@@ -199,12 +199,25 @@ function kitSection({ kit, models }) {
         `<div class="hm-kit"><ul class="hm-parts">${parts}</ul><p class="hm-kit-actions">${link(kit.build_guide_url, 'Adeept\'s build guide', 'sc-btn')}${model ? ` ${link(`/models/${model.id}`, 'Its model page', 'sc-btn')}` : ''} ${link('https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/hardware-adeept.md', 'Setup guide for the Node', 'sc-btn')}</p></div>`);
 }
 
+/** The same OpenVibe Node on a person's own computers: desks for their agents, desk hosts, their own models. */
+function computersSection() {
+    const cards = [
+        ['/docs/computers#desks-h', 'A desk for each task', 'Your agents work on desks of their own on your computer, a browser or a whole screen, never yours. Watch any of them live and take it over.'],
+        ['/machines', 'A spare computer as a desk host', 'An old laptop or a mini PC hosts desks for all your agents\' tasks, with no screen or sign-in, sized to its memory.'],
+        ['/docs/computers#models-c-h', 'Your own AI models', 'Ollama, LM Studio or llama.cpp on your computer answers your Vibe, your AI members and your stream\'s AI viewers: free, and no port is opened.'],
+        ['/docs/computers', 'A desk live on your channel', 'When you choose, an agent\'s desk shows on your OpenVibe Live channel for up to 30 minutes, so people can watch it work.'],
+    ];
+    return sec('computers', 'Your computers, for your agents and your AI', 'The same OpenVibe Node runs on your own computers. It connects out, nobody else\'s work reaches them, and the limits you set on each computer always win.',
+        `<ul class="hm-grid hm-grid-tight">${cards.map(([href, title, text]) => `<li class="hm-card"><a class="hm-card-link" href="${esc(href)}"><span class="hm-card-head"><b>${esc(title)}</b></span><span class="hm-card-text">${esc(text)}</span></a></li>`).join('')}</ul>`,
+        link('/machines', 'Your machines', 'hm-more'));
+}
+
 function docsSection() {
     const docs = [
         ['/docs/drivers', 'Write a driver', 'A separate program in any language that speaks JSON lines with the OpenVibe Node: every message and the safety rules.'],
         ['/docs/profiles', 'Robot profiles', 'The JSON that says what a robot can do and which controls its panel shows, with a validator.'],
         ['/docs/automation', 'Routines, webhooks and your agent', 'Steps on a schedule, signed webhooks for a robot\'s events, and the switch that lets your agent drive.'],
-        ['/docs/computers', 'Your computer for your agents', 'The Node\'s computer plugin: levels set on the computer, approvals there, and the API.'],
+        ['/docs/computers', 'Your computer for your agents', 'The Node\'s computer plugin: levels set on the computer, approvals there, desks, your own models, and the API.'],
         ['/robots/submit', 'Submit a robot', 'Describe your robot with a profile and point at its driver. Once reviewed, anyone can add one.'],
         ['https://github.com/OpenVibers/OpenVibe.Bot', 'The source', 'OpenVibe.Bot and the OpenVibe Node are open source under the AGPL-3.0.'],
     ];
@@ -232,6 +245,8 @@ function faqItems({ models }) {
         { q: 'Can other people drive my robot?', a: 'Only if you say so. Add people by @username as operators or viewers, or open a queue where signed-in visitors take timed turns. Listing a robot in the directory lets anyone watch it.' },
         { q: 'Can I show it on my stream?', a: 'Yes. Bind the robot to your OpenVibe.Live channel and its panel shows under your stream, where anyone you allow can take the controls.' },
         { q: 'Can my AI agent drive it?', a: 'Only when you turn on Your agent for that robot. Then your OpenVibe.Actor agent can read its state and run steps as you, through the same gate, and for nobody else.' },
+        { q: 'Can my agents use my computer?', a: 'Only if you install the OpenVibe Node there and say so. Each agent task gets a desk of its own, a browser or a whole screen, that you can watch and take over, at the level you set on the computer, with a kill switch there. A spare computer can host the desks instead.' },
+        { q: 'Can my AI use the models on my computer?', a: 'Yes. Install the Node with --ai where Ollama, LM Studio or llama.cpp runs and turn on "Let my AI use this computer\'s models": your Vibe, your AI members and your stream\'s AI viewers can then think with them, free, and only for you.' },
         { q: 'Is it open source?', a: 'Yes. OpenVibe.Bot and the OpenVibe Node that runs on the robot are on GitHub under the AGPL-3.0, and anyone can write a driver or submit a robot profile.' },
     ].filter(Boolean);
 }
@@ -249,6 +264,7 @@ function sections({ signedIn = false, config, models = [], robots = [], kit = nu
         + startSection({ config })
         + panelSection()
         + automationSection()
+        + computersSection()
         + kitSection({ kit, models })
         + docsSection()
         + jobsSection({ jobs })
