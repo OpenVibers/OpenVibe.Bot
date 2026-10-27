@@ -140,6 +140,26 @@ const { boot, check, done } = require('./helpers/app');
         withDesk.c.close();
     });
 
+    await check('desk turn (Desks plan D4): an agent sees whether its person is using a desk and when they last did; read only', async () => {
+        const m = await machine(alex, { ...COMPUTER, desk: { level: 'trusted', window_manager: 'openbox', input: true, screen: true, named: true, max_desks: 4 } });
+        const token = actor();
+        await t.call('POST', `/api/v1/machines/${m.deviceId}/agent-computer`, { user: alex, body: { on: true } });
+        const turn = async (desk) => t.call('GET', `/api/v1/machines/${m.deviceId}/desk-turn?desk=${desk}`, asActor(token, alex.subject));
+        const before = await turn('desk-task-a');
+        assert.deepStrictEqual([before.status, before.json.person_driving, before.json.last_person_at], [200, false, null], 'nobody yet');
+        assert.strictEqual((await cmd(m.deviceId, { kind: 'input', value: { action: 'move', x: 5, y: 5, width: 1280, height: 800, desk: 'desk-task-a' } }, { user: alex })).json.result, 'ack');
+        const during = await turn('desk-task-a');
+        assert.strictEqual(during.json.person_driving, true, 'the person is using it');
+        assert.ok(Date.parse(during.json.last_person_at) <= Date.now());
+        assert.strictEqual((await turn('desk-task-b')).json.person_driving, false, 'another desk is another screen');
+        await t.wait(450);   // BOT_PERSON_TURN_MS is 400 in this boot
+        const after = await turn('desk-task-a');
+        assert.deepStrictEqual([after.json.person_driving, after.json.last_person_at], [false, during.json.last_person_at], 'they stopped; when they last did stays');
+        assert.strictEqual((await turn('desk-../x')).status, 422);
+        await t.call('POST', `/api/v1/machines/${m.deviceId}/agent-computer`, { user: alex, body: { on: false } });
+        m.c.close();
+    });
+
     await check('named desks (contracts 0.215.0, Node v0.19.0): one per agent task, each its own screen; an older Node runs one', async () => {
         const multi = await machine(alex, { ...COMPUTER, desk: { level: 'trusted', window_manager: 'openbox', input: true, screen: true, named: true, max_desks: 4 } });
         const single = await machine(alex, { ...COMPUTER, desk: { level: 'trusted', window_manager: 'openbox', input: true, screen: true } });

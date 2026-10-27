@@ -457,6 +457,15 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         if (result.result === 'refused') fail(commandRefusalStatus(result.code), result.code, result.reason || null);
         res.json({ machine_id: device.id, ...result });
     }));
+    // Who has a desk right now (Desks plan D4): an agent that asked its person to take over a step (a sign-in, a
+    // CAPTCHA, a payment) waits for them to take it, then to stop. Read only; the person's own input is what moves it.
+    r.get('/machines/:id/desk-turn', commandControl, wrap(async (req, res) => {
+        const { device } = await computerMachine(req);
+        const desk = typeof req.query.desk === 'string' && /^(main|private|desk-[a-z0-9][a-z0-9-]{0,23})$/.test(req.query.desk) ? req.query.desk : null;
+        if (!desk) fail(422, 'bot.invalid_input', 'desk is main, private or desk-<name>');
+        res.set('Cache-Control', 'no-store');
+        res.json({ machine_id: device.id, desk, ...hub.deskTurn(device.id, desk) });
+    }));
     // The live screen (plan T14): the machine's owner, signed in as themselves, watches it on their own private stream.
     // Never an agent, a watch or another service: screen_stream is not a bot.command@1 kind, and only this route sends it.
     const screenOwner = async (req) => {

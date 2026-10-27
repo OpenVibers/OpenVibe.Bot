@@ -119,6 +119,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     const inflight = new Map();        // operator key → device-facing id, while the command is pending
     // The person always wins a screen (machines): `${device}|${main|private}` → until when a person's input holds it.
     const personTurns = new Map();
+    const personLast = new Map();   // the same key → when a person last used that screen (ms), for desk turns
     const timers = [];
     let closed = false;
 
@@ -777,8 +778,9 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
                 const turnKey = `${deviceId}|${deskOf(value)}`;   // each desk is its own screen: a person on one never holds another
                 const person = conn.principal.kind === 'user' || conn.principal.kind === 'share';
                 if (person) {
-                    if (personTurns.size > 5000) personTurns.clear();
+                    if (personTurns.size > 5000) { personTurns.clear(); personLast.clear(); }
                     personTurns.set(turnKey, now() + config.device.personTurnMs);
+                    personLast.set(turnKey, now());
                 } else if ((personTurns.get(turnKey) || 0) > now()) {
                     const left = Math.ceil((personTurns.get(turnKey) - now()) / 1000);
                     return refuse('bot.person_driving', `a person is using this screen right now: try again in ${left} s, after they stop`, summary);
@@ -1031,6 +1033,16 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         },
         bindJobs(j) { jobs = j; },
         handleUpgrade, attachSim, detachSim,
+        /**
+         * Who has a screen right now (Desks plan D4): whether a person is using it (their input holds agents off it for
+         * BOT_PERSON_TURN_MS after each action) and when they last did. An agent that handed a desk to its person waits
+         * for them to take it, then to stop, before it goes on.
+         */
+        deskTurn(deviceId, desk) {
+            const key = `${deviceId}|${desk}`;
+            const last = personLast.get(key) || null;
+            return { person_driving: (personTurns.get(key) || 0) > now(), last_person_at: last ? new Date(last).toISOString() : null };
+        },
         /** A one-time ticket for the embedded panel's Drive (POST /panel/:id/ticket), or null. */
         issueControlTicket(principal, robotId) { return tickets.issue(principal, robotId); },
         isOnline, deviceState, sendToDevice, sendToRobotDevices, broadcast, closeDevice, robotState, refreshConfig, pushEstop, closeWatchers, dropSubject, operatorCommand,
