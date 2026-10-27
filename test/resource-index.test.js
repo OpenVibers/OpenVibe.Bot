@@ -21,7 +21,7 @@ const { boot, check, done } = require('./helpers/app');
         assert.deepStrictEqual(contracts.validate('common.resource-list-result@1', response.json).errors, []);
         assert.deepStrictEqual(response.json.resources.map((r) => r.id), [first.id, second.id, third.id].sort());
         for (const summary of response.json.resources) {
-            assert.deepStrictEqual(Object.keys(summary).sort(), ['created_at', 'id', 'kind', 'name', 'owner', 'service', 'state', 'updated_at']);
+            assert.deepStrictEqual(Object.keys(summary).sort().filter((k) => k !== 'links'), ['created_at', 'id', 'kind', 'name', 'owner', 'service', 'state', 'updated_at']);
             assert.strictEqual(summary.kind, 'bot.robot');
             assert.strictEqual(summary.service, 'bot');
             assert.strictEqual(summary.ovrn, undefined);
@@ -117,6 +117,13 @@ const { boot, check, done } = require('./helpers/app');
         assert.deepStrictEqual(all.json.resources.map((r) => [r.kind, r.id]), [...[first.id, second.id].sort().map((id) => ['bot.robot', id]), ['bot.machine', deviceId]], 'robots, then machines');
         const machine = all.json.resources.find((r) => r.id === deviceId);
         assert.deepStrictEqual([machine.state, machine.owner, machine.service], ['online', { type: 'user', id: alice.subject }, 'bot']);
+        // Its page on openvibe.bot (links.console) when Bot's address is https, for Services to link to.
+        const { machineSummary, robotSummary } = require('../server/api/resource-index');
+        const row = { id: deviceId, owner_subject: alice.subject, name: 'desk-pc', created_at: new Date(), updated_at: new Date() };
+        assert.deepStrictEqual(machineSummary(row, true, 'https://openvibe.bot/').links, { console: 'https://openvibe.bot/machines' });
+        assert.deepStrictEqual(robotSummary({ ...row, id: first.id, estop_latched: false }, 'https://openvibe.bot').links, { console: `https://openvibe.bot/r/${first.id}` });
+        assert.strictEqual(machineSummary(row, true, 'http://localhost:4630').links, undefined, 'https only');
+        assert.deepStrictEqual(contracts.validate('common.resource-summary@1', machineSummary(row, true, 'https://openvibe.bot')).errors, []);
         assert.deepStrictEqual((await get('?kind=bot.machine')).json.resources.map((r) => r.id), [deviceId]);
         assert.deepStrictEqual((await get('?kind=bot.robot')).json.resources.map((r) => r.kind), ['bot.robot', 'bot.robot']);
         assert.deepStrictEqual((await get(`?owner=${bob.subject}`)).json.resources.map((r) => r.id), [second.id], 'never another person\'s');

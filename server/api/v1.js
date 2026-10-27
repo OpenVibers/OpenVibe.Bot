@@ -78,7 +78,7 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
     r.use(limits.reads('bot.read'));
     // Control first (bot.resource.control), then the index (bot.resource.read) for everything else under /resources.
     r.use('/resources/control', limits('bot.control', { minute: 120, hour: 1200 }), resourceControl.router({ domain, apiAuth, hub }));
-    r.use('/resources', resourceIndex.router({ db: domain.db, apiAuth, hub }));
+    r.use('/resources', resourceIndex.router({ db: domain.db, apiAuth, hub, baseUrl: config.baseUrl }));
     const manage = limits('bot.robot.manage', { minute: 30, hour: 300 });
     const control = limits('bot.control', { minute: 120, hour: 1200 });
     const machineScreen = createMachineScreen({ domain, hub });

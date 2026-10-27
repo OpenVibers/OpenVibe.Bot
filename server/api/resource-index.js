@@ -24,8 +24,11 @@ const SUBJECT_RE = /^(usr|agt)_[0-9A-HJKMNP-TV-Z]{26}$/;
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 1000;
 
+/** Where the resource's own page is (links.console): https only, for OpenVibe.Services to link to. */
+const consoleOf = (baseUrl, path) => (/^https:\/\//.test(String(baseUrl || '')) ? { links: { console: `${String(baseUrl).replace(/\/+$/, '')}${path}` } } : {});
+
 /** Only the public fields in common.resource-summary@1. Person-owned robots have no OVRN. */
-function robotSummary(row) {
+function robotSummary(row, baseUrl = null) {
     const summary = {
         id: row.id, kind: KIND, service: SERVICE,
         name: row.name, state: row.estop_latched ? 'estopped' : 'ready',
@@ -35,11 +38,11 @@ function robotSummary(row) {
     if (USER_SUBJECT_RE.test(String(row.owner_subject || ''))) summary.owner = { type: 'user', id: row.owner_subject };
     const ovrn = contracts.resources.nameOf(summary);
     if (ovrn) summary.ovrn = ovrn;
-    return summary;
+    return { ...summary, ...consoleOf(baseUrl, `/r/${encodeURIComponent(row.id)}`) };
 }
 
 /** A person's own machine (devices.owner_subject): online while its Node is connected. */
-function machineSummary(row, online) {
+function machineSummary(row, online, baseUrl = null) {
     const summary = {
         id: row.id, kind: MACHINE_KIND, service: SERVICE,
         name: row.name || row.id, state: online ? 'online' : 'offline',
@@ -47,7 +50,7 @@ function machineSummary(row, online) {
         updated_at: new Date(row.updated_at).toISOString(),
     };
     if (USER_SUBJECT_RE.test(String(row.owner_subject || ''))) summary.owner = { type: 'user', id: row.owner_subject };
-    return summary;
+    return { ...summary, ...consoleOf(baseUrl, '/machines') };
 }
 
 const encodeCursor = (id, kind = KIND) => Buffer.from(JSON.stringify([kind, id])).toString('base64url');
@@ -79,7 +82,7 @@ function filtersOf(query) {
     return { project, kind, owner, limit, cursor };
 }
 
-function router({ db, apiAuth, hub = null }) {
+function router({ db, apiAuth, hub = null, baseUrl = null }) {
     const r = express.Router();
     const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res)).catch(next);
     const bad = (res, detail, ctx) => contracts.http.sendProblem(res, 400, 'resources.bad_query', { detail, ctx });
@@ -104,7 +107,7 @@ function router({ db, apiAuth, hub = null }) {
             const rows = await db.many(`SELECT id, owner_subject, name, estop_latched, created_at, updated_at
                 FROM robots WHERE ($1::text IS NULL OR id > $1) AND ($3::text IS NULL OR owner_subject = $3) ORDER BY id LIMIT $2`,
             [cur ? cur.id : null, filters.limit + 1, filters.owner]);
-            out.push(...rows.map(robotSummary));
+            out.push(...rows.map((row) => robotSummary(row, baseUrl)));
         }
         if ((!filters.kind || filters.kind === MACHINE_KIND) && out.length <= filters.limit) {
             const after = cur && cur.kind === MACHINE_KIND ? cur.id : null;
@@ -112,7 +115,7 @@ function router({ db, apiAuth, hub = null }) {
                 FROM devices WHERE owner_subject IS NOT NULL AND revoked_at IS NULL AND ($1::text IS NULL OR id > $1)
                   AND ($3::text IS NULL OR owner_subject = $3) ORDER BY id LIMIT $2`,
             [after, filters.limit + 1 - out.length, filters.owner]);
-            out.push(...rows.map((row) => machineSummary(row, !!(hub && hub.isOnline(row.id)))));
+            out.push(...rows.map((row) => machineSummary(row, !!(hub && hub.isOnline(row.id)), baseUrl)));
         }
         const resources = out.slice(0, filters.limit);
         const last = resources[resources.length - 1];
