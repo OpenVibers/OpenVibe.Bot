@@ -791,22 +791,21 @@ function renderMachinesPage({ machines = [], pairing = null }) {
             + computerRow(m) + voiceRow(m)
             + `<span class="robot-actions"><form method="post" action="/machines/${esc(m.id)}/remove"><button type="submit" class="button quiet">Remove</button></form></span></li>`).join('')}</ul>`
         : `<div class="empty">${icon('plug', 'icon empty-icon')}<p class="empty-title">No machines yet.</p><p>Add your computer or a server you own. It runs the jobs you start, such as a coding task on openvibe.codes, and nobody else's.</p></div>`;
-    const add = pairing
-        ? `<ol class="steps"><li class="card"><h2>Run this on the machine</h2>
-<pre tabindex="0" class="installer"><code data-copy-source>${esc(pairing.installer)}</code></pre>
+    // Adding a machine is a choice of what it does, each with its own command (one copy button each), not steps.
+    const choice = (title, flag, text) => `<li class="card"><h2>${title}</h2>
+<pre tabindex="0" class="installer"><code data-copy-source>${esc(pairing.installer.replace(/ --worker$/, flag))}</code></pre>
 <button type="button" class="copy" data-copy>${icon('copy')}<span data-copy-label>Copy the command</span></button>
-<p class="muted">Linux with systemd. It installs OpenVibe Node, turns its job worker on (jobs run as a separate user, in a sandbox, with the limits you set) and pairs the machine with your account. For coding jobs the machine also needs Node.js 22 or newer and git, and a coding agent: Claude Code, Codex, OpenCode, or a DeepSeek key.</p></li>
-<li class="card"><h2>Or let your agents use this computer</h2>
-<pre tabindex="0" class="installer"><code>${esc(pairing.installer.replace(/ --worker$/, ' --computer ask'))}</code></pre>
-<p class="muted">Instead of running jobs, the machine's terminal, files and screen become usable by your agents, at the level you set on the machine: <code>ask</code> waits for <code>openvibe-node approve</code> there before anything runs or changes. The Node runs as your own account, never root. <a href="https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/computer.md">How it works</a>.</p></li>
-<li class="card"><h2>Or make a spare computer a desk host</h2>
-<pre tabindex="0" class="installer"><code>${esc(pairing.installer.replace(/ --worker$/, ' --desk-host'))}</code></pre>
-<p class="muted">An old laptop, a mini PC or a spare workstation becomes a place where your agents work: each task gets a desk of its own, with its own browser, and you can watch any desk and take it over. No screen, keyboard or sign-in needed on it. It runs as its own account and only for your agents; the installer adds what desks need and sizes them to its memory. Linux. <a href="https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/computer.md#desk-hosts---desk-host-node-v0200">How it works</a>.</p></li>
-<li class="card"><h2>Or use the models you run on it</h2>
-<pre tabindex="0" class="installer"><code>${esc(pairing.installer.replace(/ --worker$/, ' --ai'))}</code></pre>
-<p class="muted">If this computer runs Ollama, LM Studio or llama.cpp's server, your Vibe and your AI members can think with its models: free, and no port is opened. The installer says which server it finds. Add <code>--ai</code> to any command above to do both. Once it is paired, turn on "Let my AI use this computer's models" for it here. Node v0.28.0 or newer. <a href="https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/ai.md">How it works</a>.</p></li>
+<p class="muted">${text}</p></li>`;
+    const add = pairing
+        ? `<h2 id="add-h">What should this computer do?</h2>
+<p class="muted">Pick one and run its command on the computer: it installs OpenVibe Node and pairs the computer with your account. Add <code>--ai</code> to any of them to use its models too.</p>
+<ul class="choices" aria-labelledby="add-h">
+${choice('Run your coding jobs', ' --worker', 'Linux with systemd. It turns the Node\'s job worker on: jobs run as a separate user, in a sandbox, with the limits you set. For coding jobs the computer also needs Node.js 22 or newer and git, and a coding agent: Claude Code, Codex, OpenCode, or a DeepSeek key.')}
+${choice('Let your agents use it', ' --computer ask', 'The computer\'s terminal, files and screen become usable by your agents, at the level you set on the computer: <code>ask</code> waits for <code>openvibe-node approve</code> there before anything runs or changes. The Node runs as your own account, never root. <a href="https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/computer.md">How it works</a>.')}
+${choice('Make a spare computer a desk host', ' --desk-host', 'An old laptop, a mini PC or a spare workstation becomes a place where your agents work: each task gets a desk of its own, with its own browser, and you can watch any desk and take it over. No screen, keyboard or sign-in needed on it. It runs as its own account and only for your agents; the installer adds what desks need and sizes them to its memory. Linux. <a href="https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/computer.md#desk-hosts---desk-host-node-v0200">How it works</a>.')}
+${choice('Use the models you run on it', ' --ai', 'If this computer runs Ollama, LM Studio or llama.cpp\'s server, your Vibe and your AI members can think with its models: free, and no port is opened. The installer says which server it finds. Once it is paired, turn on "Let my AI use this computer\'s models" for it here. Node v0.28.0 or newer. <a href="https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/ai.md">How it works</a>.')}
 <li class="card"><h2>Or enter the pairing code</h2><p><strong class="code">${esc(pairing.code)}</strong></p>
-<p class="muted">Valid until <time datetime="${esc(pairing.expires_at)}">${esc(pairing.expires_at)}</time>. It works once.</p></li></ol>
+<p class="muted">Valid until <time datetime="${esc(pairing.expires_at)}" data-local-time>${esc(String(pairing.expires_at).slice(11, 16))} UTC</time>. It works once.</p></li></ul>
 <p class="muted">Reload this page once the installer says it is paired: the machine shows up above.</p>`
         : `<form class="add-robot card" method="post" action="/machines"><h2>Add a machine</h2>
 <p class="muted">You get a one-line install command with a one-time code.</p><button type="submit" class="primary">Add a machine</button></form>`;

@@ -366,7 +366,7 @@ function renderComputersPage({ config }) {
 <p class="muted">The OpenVibe Node's <b>computer</b> plugin lets your agents use your own computer: its terminal, its files, its screen and (when you allow it) its mouse and keyboard. It is off unless you install it, it never runs as root, and you decide what it may do on the computer itself. Nothing on OpenVibe can raise that level.</p>
 
 <section class="card" aria-labelledby="install-h"><h2 id="install-h">Install it</h2>
-<p>On ${inLink('/machines', 'Your machines')}, choose <b>Add a machine</b> and run the second command it shows on the computer, from your own account (the installer uses sudo itself):</p>
+<p>On ${inLink('/machines', 'Your machines')}, choose <b>Add a machine</b> and run the command under <b>Let your agents use it</b> on the computer, from your own account (the installer uses sudo itself):</p>
 ${code(COMPUTER_INSTALL)}
 <p>The Node then runs as you, never as root, and its only folder is your home folder. Linux for now; elsewhere, run the Node in your own session with the plugin in its config (${out(`${BLOB}/docs/computer.md`, 'computer.md')}).</p></section>
 
@@ -410,7 +410,7 @@ ${code(COMPUTER_APPROVE)}
 <section class="card" aria-labelledby="models-c-h"><h2 id="models-c-h">Your own models</h2>
 <p>If you run a model on your computer (Ollama, LM Studio or llama.cpp's server), your OpenVibe AI can think with it: free, private to you, and with no port opened.</p>
 <ul>
-<li><b>Set it up.</b> On ${inLink('/machines', 'Your machines')}, choose <b>Add a machine</b> and run the command under <b>Or use the models you run on it</b>, or add <code>--ai</code> to any other one (OpenVibe Node v0.28.0 or newer). The installer says which model server it finds.</li>
+<li><b>Set it up.</b> On ${inLink('/machines', 'Your machines')}, choose <b>Add a machine</b> and run the command under <b>Use the models you run on it</b>, or add <code>--ai</code> to any other one (OpenVibe Node v0.28.0 or newer). The installer says which model server it finds.</li>
 <li><b>Turn it on.</b> The machine's card lists its models and how fast they answer there. <b>Let my AI use this computer's models</b> lets OpenVibe ask them for you; nothing reaches them before that.</li>
 <li><b>Use it.</b> <b>Use these models in OpenVibe.Chat</b> fills in "Your AI key" on OpenVibe.Chat. Your Vibe and the AI members you set up can then think with your computer. On OpenVibe.Live, a streamer's AI viewers can too: choose <b>A model on my own computer</b> as their AI source.</li>
 <li><b>Any of your computers.</b> Choose <b>any of my computers</b> instead of one, and OpenVibe asks the fastest of yours that is on and has the model, then the next when one is busy.</li>
