@@ -125,6 +125,11 @@ main { padding: 1rem max(1rem, env(safe-area-inset-right)) calc(1.5rem + env(saf
 .stick.held .stick-knob { transition: none; }
 .stick.active .stick-knob { background: radial-gradient(circle at 40% 35%, #7fb2ff, var(--accent) 70%); border-color: #8fbaff; }
 .stick[aria-disabled="true"] { opacity: 0.4; cursor: not-allowed; }
+/* The same joystick on a robot made of buttons (it presses forward, back, left and right) and on a pan-tilt camera. */
+.stick--buttons, .stick--ptz { width: min(12rem, 60vw); }
+.stick--buttons { margin: 0 auto; }
+.stick--buttons + .hint { margin-bottom: 0.9rem; }
+.ptz-pad { display: grid; justify-items: center; gap: 0.9rem; }
 .pad { display: grid; gap: 0.5rem; width: 100%; max-width: 22rem; }
 .axis { display: grid; grid-template-columns: 1fr auto 1fr; gap: 0.5rem; align-items: center; }
 .axis .hold { min-height: 56px; user-select: none; -webkit-user-select: none; touch-action: none; }

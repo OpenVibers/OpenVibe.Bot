@@ -104,6 +104,14 @@ function axisButtons(axes, enabled) {
     }).join('');
 }
 
+/** The buttons that mean a direction on a robot made of buttons (panel.js presses them from keys, a stick and a pad). */
+const DIRECTION_BUTTONS = [
+    { dir: 'up', label: 'forward', names: ['forward', 'drive_forward', 'up'] },
+    { dir: 'down', label: 'back', names: ['backward', 'back', 'reverse', 'down'] },
+    { dir: 'left', label: 'left', names: ['turn_left', 'left', 'rotate_left'] },
+    { dir: 'right', label: 'right', names: ['turn_right', 'right', 'rotate_right'] },
+];
+
 /** The drive pad: a touch joystick for two axes (pointer events, see panel.js), hold buttons for the rest. */
 function drivePad(axes, enabled) {
     const x = STICK_X.find((a) => axes[a]);
@@ -200,7 +208,13 @@ function renderWidget(w, { profile = {}, allowed_commands = [], signaling_url = 
         }
         case 'ptz': {
             const axes = (commands[kind] && commands[kind].axes) || {};
-            inner = `<div class="pad">${axisButtons(axes, enabled)}</div>`;
+            // A camera that pans and tilts gets the joystick too (Maticus, 2026-10-27: "that cool virtual joystick from the
+            // sim … would work killer for LOOI or any PTZ"): drag to move, let go to stop; zoom stays on its buttons.
+            const ptzStick = axes.pan && axes.tilt
+                ? `<div class="stick stick--ptz" data-ptz-stick="${data({ x: 'pan', y: 'tilt' })}" data-axes="${data(axes)}" role="img" aria-label="Joystick: pan and tilt. Drag and hold to move the camera."${enabled ? '' : ' aria-disabled="true"'}>`
+                    + '<span class="stick-ring"></span><span class="stick-cross"></span><span class="stick-knob" data-knob></span></div>'
+                : '';
+            inner = `<div class="ptz-pad">${ptzStick}<div class="pad">${axisButtons(axes, enabled)}</div></div>`;
             break;
         }
         case 'pan-tilt': case 'servo': case 'head': case 'lift': case 'lights': case 'horn': {
@@ -241,7 +255,16 @@ function renderWidget(w, { profile = {}, allowed_commands = [], signaling_url = 
             break;
         case 'buttons': {
             const names = (commands.button && commands.button.names) || {};
-            inner = `<div class="button-grid">${Object.entries(names).map(([name, button]) =>
+            // A robot made of buttons (a relay profile: forward, backward, turn_left, turn_right …) with no drive of its own
+            // drives from a joystick, the keyboard and a gamepad too: each direction presses its button (panel.js).
+            const dirs = DIRECTION_BUTTONS.filter((d) => d.names.some((n) => names[n]));
+            const hasDrive = (profile.widgets || []).some((x) => x.type === 'drive');
+            const buttonStick = dirs.length >= 2 && !hasDrive
+                ? `<div class="stick stick--buttons" data-button-stick role="img" aria-label="Joystick: presses ${esc(dirs.map((d) => d.label).join(', '))}. Drag and hold to drive."${enabled ? '' : ' aria-disabled="true"'}>`
+                    + '<span class="stick-ring"></span><span class="stick-cross"></span><span class="stick-knob" data-knob></span></div>'
+                    + `<p class="hint"><kbd>W A S D</kbd> or arrows press ${esc(dirs.map((d) => d.label).join(', '))}. <span class="pad-hint" data-pad-hint>${icon('gamepad')} A gamepad's stick and D-pad do too.</span></p>`
+                : '';
+            inner = `${buttonStick}<div class="button-grid">${Object.entries(names).map(([name, button]) =>
                 `<button type="button" class="hold pad-button" data-button-name="${esc(name)}" data-button-hold="${button.hold ? 'true' : 'false'}"${button.key ? ` data-button-key="${esc(button.key)}"` : ''}${disabledUnless(enabled)}>`
                 + `<span>${esc(button.label)}</span>${button.key ? `<kbd>${esc(button.key)}</kbd>` : ''}</button>`).join('')}</div>`;
             break;
@@ -407,7 +430,7 @@ function localProfileForm(robot, profile, settings = {}) {
 </div>
 </fieldset>`).join('');
     return `<section class="setting-card" aria-labelledby="buttons-h"><h2 id="buttons-h">Buttons</h2>
-<p class="setting-note">Each button sends its name to the robot. A key works while the panel has focus. Space always stops, and on a robot that drives its drive keys stay with driving.</p>
+<p class="setting-note">Each button sends its name to the robot. A key works while the panel has focus. Space always stops, and on a robot that drives its drive keys stay with driving. Buttons named forward, back (or backward), left (or turn_left) and right (or turn_right) also get a joystick, and W A S D, the arrows and a gamepad press them.</p>
 ${settings.error ? `<p class="error" role="alert">${esc(settings.error)}</p>` : ''}
 <form method="post" action="/robots/${esc(robot.id)}/profile" data-profile-form>
 <input type="hidden" name="count" value="${shown.length}">
