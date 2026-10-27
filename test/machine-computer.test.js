@@ -198,6 +198,35 @@ const { boot, check, done } = require('./helpers/app');
         single.c.close();
     });
 
+    await check('browser desks (contracts 0.216.0, Node v0.23.0): a desk starts as a kind the machine runs; the audit names it; an older Node is never sent one', async () => {
+        const desk = { level: 'trusted', window_manager: 'openbox', input: true, screen: true, named: true, max_desks: 4 };
+        const both = await machine(alex, { ...COMPUTER, desk: { ...desk, kinds: ['desktop', 'browser'] } });
+        const mac = await machine(alex, { ...COMPUTER, desk: { ...desk, window_manager: null, kinds: ['browser'] } });
+        const old = await machine(alex, { ...COMPUTER, desk });
+        const page = await cmd(both.deviceId, { kind: 'desk', value: { action: 'start', desk: 'desk-task-a', kind: 'browser' } }, { user: alex });
+        assert.strictEqual(page.json.result, 'ack', page.text);
+        assert.deepStrictEqual(seen.at(-1).value, { action: 'start', desk: 'desk-task-a', kind: 'browser' }, 'the machine is told the kind');
+        assert.strictEqual((await cmd(both.deviceId, { kind: 'desk', value: { action: 'start', desk: 'desk-task-b', kind: 'desktop' } }, { user: alex })).json.result, 'ack');
+        assert.strictEqual((await cmd(mac.deviceId, { kind: 'desk', value: { action: 'start', desk: 'desk-task-a', kind: 'browser' } }, { user: alex })).json.result, 'ack');
+        const before = seen.length;
+        const whole = await cmd(mac.deviceId, { kind: 'desk', value: { action: 'start', desk: 'desk-task-b' } }, { user: alex });
+        assert.deepStrictEqual([whole.status, whole.json.code], [409, 'bot.computer_off']);
+        assert.match(whole.json.detail || whole.json.reason || '', /browser desks only/);
+        const older = await cmd(old.deviceId, { kind: 'desk', value: { action: 'start', desk: 'desk-task-a', kind: 'browser' } }, { user: alex });
+        assert.deepStrictEqual([older.status, older.json.code], [409, 'bot.computer_off'], 'an older Node would start a whole desk instead');
+        assert.match(older.json.detail || older.json.reason || '', /Node v0\.23\.0/);
+        const bad = await cmd(both.deviceId, { kind: 'desk', value: { action: 'start', desk: 'desk-task-c', kind: 'vm' } }, { user: alex });
+        assert.strictEqual(bad.status, 422);
+        assert.strictEqual(seen.length, before, 'nothing refused reached a machine');
+        // An older Node still starts its whole desks as before (no kind).
+        assert.strictEqual((await cmd(old.deviceId, { kind: 'desk', value: { action: 'start', desk: 'desk-task-a' } }, { user: alex })).json.result, 'ack');
+        const audit = await t.db.many('SELECT value FROM command_audit WHERE robot_id = $1 AND kind = $2 AND result = $3 ORDER BY id', [both.deviceId, 'desk', 'ack']);
+        assert.deepStrictEqual(audit.map((r) => r.value.kind), ['browser', 'desktop'], 'the audit names the kind');
+        both.c.close();
+        mac.c.close();
+        old.c.close();
+    });
+
     await check('a desk host (Node v0.20.0 --desk-host): no screen of its own, yet its desks are seen and driven', async () => {
         // Nobody is signed in to a desk host: it offers no screen or input of its own, only its desks' (desk.screen, desk.input).
         const { screen: _s, input: _i, ...headless } = COMPUTER;

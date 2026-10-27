@@ -45,6 +45,10 @@ const DEVICE_MAX_PAYLOAD = 640 * 1024;
 const COMPUTER_CAP = { exec: 'terminal', fs: 'files', screen: 'screen', probe: 'probe', input: 'input', browser: 'browser', desk: 'desk' };
 const NO_DESK = 'this machine has no private desk: it needs OpenVibe Node v0.15.0 or newer on Linux, with Xvfb and allow_desk on';
 const NO_NAMED_DESKS = 'this machine runs one desk only (private): several named desks need OpenVibe Node v0.19.0 or newer';
+const NO_BROWSER_DESKS = 'this machine runs no browser desks: they need OpenVibe Node v0.23.0 or newer, with Chromium, Chrome, Edge or Brave';
+const NO_WHOLE_DESKS = 'this machine runs browser desks only (a whole desk needs Linux with Xvfb): start it with kind browser';
+/** The kinds of desk a machine runs (Node v0.23.0: desk.kinds); an older Node's desks are all whole desks. */
+const deskKinds = (offered) => (offered && offered.desk ? (Array.isArray(offered.desk.kinds) ? offered.desk.kinds : ['desktop']) : []);
 /** The desk a command names: main (the person's own screen, the default), private or desk-<name> (contracts 0.215.0). */
 const deskOf = (value) => (typeof value.desk === 'string' && value.desk ? value.desk : 'main');
 // The screen and the mouse and keyboard of a desk are the desk's own (Node's desk.screen, desk.input): a desk host with
@@ -61,7 +65,7 @@ const COMPUTER_MAX_MS = 600000;
 /** What an audit row keeps of a computer command: never a file's content, stdin or arguments (they may hold secrets). */
 function computerSummary(kind, value) {
     const where = deskOf(value) !== 'main' ? { desk: deskOf(value) } : {};
-    if (kind === 'desk') return { action: value.action, ...(typeof value.desk === 'string' ? { desk: value.desk } : {}), ...(Number.isInteger(value.width) && Number.isInteger(value.height) ? { width: value.width, height: value.height } : {}) };
+    if (kind === 'desk') return { action: value.action, ...(typeof value.desk === 'string' ? { desk: value.desk } : {}), ...(typeof value.kind === 'string' ? { kind: value.kind } : {}), ...(Number.isInteger(value.width) && Number.isInteger(value.height) ? { width: value.width, height: value.height } : {}) };
     if (kind === 'exec') return { program: String(value.argv[0]).slice(0, 120), args: value.argv.length - 1 };
     if (kind === 'fs') return { op: value.op, path: String(value.path).slice(0, 300), ...(typeof value.content_b64 === 'string' ? { bytes: Math.floor((value.content_b64.length * 3) / 4) } : {}) };
     if (kind === 'probe') { try { const u = new URL(value.target); return { scheme: u.protocol.replace(':', ''), host: u.host }; } catch { return { scheme: null }; } }
@@ -776,6 +780,12 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             const desk = kind === 'desk' ? (typeof value.desk === 'string' ? value.desk : 'private') : deskOf(value);
             if (desk !== 'main' && !(offered && offered.desk)) return refuse('bot.computer_off', NO_DESK, summary);
             if (desk !== 'main' && desk !== 'private' && !(offered.desk && offered.desk.named === true)) return refuse('bot.computer_off', NO_NAMED_DESKS, summary);
+            // A desk starts as a kind the machine runs (Desks plan D2): an older Node would quietly start a whole desk
+            // for a browser desk, and a Mac runs browser desks only.
+            if (kind === 'desk' && value.action === 'start') {
+                const wanted = typeof value.kind === 'string' ? value.kind : 'desktop';
+                if (!deskKinds(offered).includes(wanted)) return refuse('bot.computer_off', wanted === 'browser' ? NO_BROWSER_DESKS : NO_WHOLE_DESKS, summary);
+            }
             // Two hands, one screen: a person's input (the owner, or a share link's holder) holds the screen for a few
             // seconds, and an agent's acting command there is refused meanwhile, so it never fights them for the mouse.
             if (!screen && actsOnScreen(kind, value)) {

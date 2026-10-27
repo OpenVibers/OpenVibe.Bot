@@ -590,7 +590,16 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     };
     const asUser = (me) => ({ kind: 'user', sub: me.subject });
     // The machine has a private desk to show (Node v0.15.0 on Linux): its owner may show it, or share it, instead.
-    const hasDesk = (mine) => !!(hub && (hub.computerOf(mine.id) || {}).desk);
+    // The private desk is a whole desk: a machine that runs browser desks only (a Mac, Node v0.23.0) has none to show.
+    const hasDesk = (mine) => {
+        const d = hub && (hub.computerOf(mine.id) || {}).desk;
+        return !!d && (!Array.isArray(d.kinds) || d.kinds.includes('desktop'));
+    };
+    // A screen of its own to show live: a desk host (install.sh --desk-host) has none, only its desks.
+    const hasScreen = (mine) => {
+        const c = hub && hub.computerOf(mine.id);
+        return !!(c && c.screen && c.screen.stream === true);
+    };
     r.post('/machines/:id/screen', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
         const me = requireUser(req);
         if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
@@ -603,7 +612,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         } catch (e) {
             if (!(e instanceof BotError)) throw e;
             res.setHeader('Content-Security-Policy', PANEL_CSP);
-            res.status(e.status).type('html').send(renderMachineScreenPage({ machine: mine, error: e.detail || e.message, hasDesk: hasDesk(mine) }));
+            res.status(e.status).type('html').send(renderMachineScreenPage({ machine: mine, error: e.detail || e.message, hasDesk: hasDesk(mine), hasScreen: hasScreen(mine) }));
         }
     }));
     r.get('/machines/:id/screen', page(async (req, res) => {
@@ -617,7 +626,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         const idle = !until && st.state !== 'live';
         res.setHeader('Vary', 'Cookie');
         res.setHeader('Content-Security-Policy', PANEL_CSP);
-        res.type('html').send(renderMachineScreenPage({ machine: mine, until, idle, shares: await shares.list(mine, me.subject).catch(() => []), hasDesk: hasDesk(mine), desk: idle ? desk : st.desk }));
+        res.type('html').send(renderMachineScreenPage({ machine: mine, until, idle, shares: await shares.list(mine, me.subject).catch(() => []), hasDesk: hasDesk(mine), hasScreen: hasScreen(mine), desk: idle ? desk : st.desk }));
     }));
     // The owner's page drives what it shows (public/screen-share.js, owner mode): its state, start, stop and the mouse
     // and keyboard ("Take over"), as JSON, same-site only.
@@ -665,7 +674,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         const mine = await myMachine(req, me);
         const made = await shares.create(mine, me.subject, { label: req.body && req.body.label, control: req.body && req.body.control === '1', days: (req.body && req.body.days) || 30, desk: req.body && req.body.desk === 'private' ? 'private' : 'main' });
         res.setHeader('Content-Security-Policy', PANEL_CSP);
-        res.type('html').send(renderMachineScreenPage({ machine: mine, idle: true, shares: await shares.list(mine, me.subject), madeLink: `${config.baseUrl}/screen/${made.token}`, madeShare: made.share, hasDesk: hasDesk(mine) }));
+        res.type('html').send(renderMachineScreenPage({ machine: mine, idle: true, shares: await shares.list(mine, me.subject), madeLink: `${config.baseUrl}/screen/${made.token}`, madeShare: made.share, hasDesk: hasDesk(mine), hasScreen: hasScreen(mine) }));
     }));
     r.post('/machines/:id/shares/:share/revoke', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
         const me = requireUser(req);
