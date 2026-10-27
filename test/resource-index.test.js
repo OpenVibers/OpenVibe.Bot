@@ -1,5 +1,5 @@
 'use strict';
-// The first-party authority index lists only public robot summaries, with stable id pagination.
+// The first-party authority index lists only public robot and machine summaries, with stable id pagination.
 const assert = require('assert');
 const contracts = require('openvibe-contracts');
 const { boot, check, done } = require('./helpers/app');
@@ -106,6 +106,38 @@ const { boot, check, done } = require('./helpers/app');
     await check('removed robots leave the index', async () => {
         await t.db.query('DELETE FROM robots WHERE id = $1', [third.id]);
         assert.deepStrictEqual((await get('')).json.resources.map((r) => r.id), [first.id, second.id].sort());
+    });
+
+    await check('a person\'s machines follow their robots (bot.machine): online while connected, by kind and owner, one cursor', async () => {
+        const principal = t.network.addNode({ owner: alice.subject, ref: `worker:${alice.subject}`, name: 'desk-pc' });
+        const c = await t.ws('/device', { headers: { Authorization: `Bearer ${t.network.signNode(principal)}` } });
+        const deviceId = (await c.waitFor((m) => m.type === 'hello')).device_id;
+        const all = await get('');
+        assert.deepStrictEqual(contracts.validate('common.resource-list-result@1', all.json).errors, []);
+        assert.deepStrictEqual(all.json.resources.map((r) => [r.kind, r.id]), [...[first.id, second.id].sort().map((id) => ['bot.robot', id]), ['bot.machine', deviceId]], 'robots, then machines');
+        const machine = all.json.resources.find((r) => r.id === deviceId);
+        assert.deepStrictEqual([machine.state, machine.owner, machine.service], ['online', { type: 'user', id: alice.subject }, 'bot']);
+        assert.deepStrictEqual((await get('?kind=bot.machine')).json.resources.map((r) => r.id), [deviceId]);
+        assert.deepStrictEqual((await get('?kind=bot.robot')).json.resources.map((r) => r.kind), ['bot.robot', 'bot.robot']);
+        assert.deepStrictEqual((await get(`?owner=${bob.subject}`)).json.resources.map((r) => r.id), [second.id], 'never another person\'s');
+        const ids = [];
+        let cursor = null;
+        do {
+            const page = await get(`?limit=2${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`);
+            assert.strictEqual(page.status, 200, page.text);
+            ids.push(...page.json.resources.map((r) => r.id));
+            cursor = page.json.next_cursor;
+        } while (cursor);
+        assert.deepStrictEqual(ids, [...[first.id, second.id].sort(), deviceId], 'a page ending among the robots goes on to the machines');
+        c.close();
+        let state = 'online';
+        for (let i = 0; i < 20 && state !== 'offline'; i++) {
+            await new Promise((r) => setTimeout(r, 100));
+            state = (await get('?kind=bot.machine')).json.resources[0].state;
+        }
+        assert.strictEqual(state, 'offline', 'offline once its Node goes');
+        await t.db.query('UPDATE devices SET revoked_at = now() WHERE id = $1', [deviceId]);
+        assert.deepStrictEqual((await get('?kind=bot.machine')).json.resources, [], 'a removed machine leaves the index');
     });
 
     await t.close();
