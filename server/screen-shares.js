@@ -23,9 +23,9 @@
  *                                                   move, scroll, type, key) → the machine's answer
  */
 const { BotError, prefixedId, sha256, token: newToken } = require('./util');
+const { inputValue, ACTIONS } = require('./machine-screen');
 
 const DAYS = { min: 1, max: 365, default: 30 };
-const ACTIONS = new Set(['click', 'double_click', 'right_click', 'move', 'scroll', 'type', 'key']);
 const PER_SECOND = 8;           // a person clicks and types a few times a second, not more
 
 function createScreenShares({ db, domain, hub, machineScreen, now = () => Date.now() }) {
@@ -106,19 +106,7 @@ function createScreenShares({ db, domain, hub, machineScreen, now = () => Date.n
     async function input(t, value = {}) {
         const s = await must(t, { control: true });
         if (!hub) throw new BotError(503, 'bot.unavailable', 'machines are not connected here');
-        const v = value && typeof value === 'object' ? value : {};
-        if (!ACTIONS.has(v.action)) throw new BotError(422, 'bot.invalid_input', `action is one of ${[...ACTIONS].join(', ')}`);
-        const out = { action: v.action };
-        if (['click', 'double_click', 'right_click', 'move', 'scroll'].includes(v.action) && v.x != null) {
-            for (const k of ['x', 'y', 'width', 'height']) {
-                const n = Math.round(Number(v[k]));
-                if (!Number.isFinite(n) || n < 0 || n > 10000) throw new BotError(422, 'bot.invalid_input', `${k} is a position in the picture`);
-                out[k] = n;
-            }
-        }
-        if (v.action === 'scroll') out.dy = Math.max(-50, Math.min(50, Math.round(Number(v.dy) || 0)));
-        if (v.action === 'type') out.text = String(v.text || '').slice(0, 500);
-        if (v.action === 'key') out.keys = String(v.keys || '').slice(0, 40);
+        const out = inputValue(value);
         if (s.share.desk === 'private') out.desk = 'private';   // a desk link drives the desk, never the owner's screen
         const recent = (rate.get(s.share.id) || []).filter((x) => now() - x < 1000);
         if (recent.length >= PER_SECOND) throw new BotError(429, 'bot.rate_limited', 'slow down a little');

@@ -822,16 +822,22 @@ ${control ? `<div class="share-controls">
     return page(`${name}: shared screen`, body, { scripts: ['/panel/panel.js', ...(control ? ['/panel/screen-share.js'] : [])], bodyClass: 'share-body', description: 'A shared computer screen on OpenVibe.Bot.' });
 }
 
-function renderMachineScreenPage({ machine, until = null, error = null, idle = false, shares = [], madeLink = null, madeShare = null, hasDesk = false }) {
+function renderMachineScreenPage({ machine, until = null, error = null, idle = false, shares = [], madeLink = null, madeShare = null, hasDesk = false, desk = 'main' }) {
     const name = machine.name || machine.id;
     const stateUrl = `/machines/${encodeURIComponent(machine.id)}/screen.json`;
+    const base = `/machines/${encodeURIComponent(machine.id)}/screen`;
+    // An agent task's own desk (desk-<name>, Desks plan D1) is what a task's Watch link opens.
+    const agentDesk = /^desk-/.test(desk);
+    const deskWords = desk === 'main' ? 'your own screen' : desk === 'private' ? 'the private desk' : 'your agent\'s desk';
     // Idle (nothing is shown, as from a link): a start button instead of waiting for a stream nobody started.
     if (idle && !error) {
         const body = `${topbar(`<a class="crumb" href="/machines">Machines</a><span class="crumb">${esc(name)}</span>`)}
 <main class="page">
 <h1>${esc(name)}: screen</h1>
+${agentDesk ? `<p>Your agent works on a desk of its own on this computer. Watch it live, and take it over whenever you like: while you use the mouse and keyboard, the agent waits; when you stop, it goes on.</p>
+<form method="post" action="/machines/${esc(machine.id)}/screen" class="inline-form"><input type="hidden" name="desk" value="${esc(desk)}"><button type="submit" class="primary">Watch your agent's desk</button></form>` : ''}
 <p class="muted">Show this computer's screen here, live, to you only, for 10 minutes. Nothing is recorded, and the computer says on its desktop that its screen is live.</p>
-<form method="post" action="/machines/${esc(machine.id)}/screen" class="inline-form"><button type="submit" class="primary">Show my screen</button></form>
+<form method="post" action="/machines/${esc(machine.id)}/screen" class="inline-form"><button type="submit" class="${agentDesk ? 'button' : 'primary'}">Show my screen</button></form>
 ${hasDesk ? `<form method="post" action="/machines/${esc(machine.id)}/screen" class="inline-form"><input type="hidden" name="desk" value="private"><button type="submit" class="button">Show the private desk</button></form>
 <p class="muted">The private desk is a screen of its own on this computer, where your agent works without touching yours.</p>` : ''}
 ${sharesBlock(machine, shares, madeLink, madeShare, hasDesk)}
@@ -839,22 +845,30 @@ ${sharesBlock(machine, shares, madeLink, madeShare, hasDesk)}
         return page(`${name}: screen`, body, { description: 'Your machine\'s screen, live, for you only.', canonical: '/machines' });
     }
     const ends = until ? `<p class="muted">Shown until <time datetime="${esc(until)}" data-local-time>${esc(until)}</time>, to you only. Nothing is recorded.</p>` : '';
+    // Take over (Desks plan D4): the share page's own controls (public/screen-share.js) in owner mode, on what is shown.
+    const takeOver = error ? '' : `<div class="share-controls">
+<button type="button" class="primary" data-share-start hidden>Start the screen</button>
+<label class="check share-use"><input type="checkbox" data-share-use> ${desk === 'main' ? 'Use the mouse and keyboard' : 'Take over: use the mouse and keyboard'}</label>
+<span class="muted small" data-share-note role="status"></span></div>
+${desk !== 'main' ? '<p class="muted small">While you use it, the agent waits on this desk; uncheck to give it back, and it goes on a moment later.</p>' : ''}`;
     const body = `${topbar(`<a class="crumb" href="/machines">Machines</a><span class="crumb">${esc(name)}</span>`)}
-<main class="page">
+<main class="page" data-share="${esc(base)}" data-control="${error ? '0' : '1'}" data-owner="1">
+<p class="muted small">Showing ${esc(deskWords)}${agentDesk ? ` (<code>${esc(desk)}</code>)` : ''}.</p>
 <h1>${esc(name)}: screen</h1>
 ${error ? `<p class="error" role="alert">${esc(error)}</p>` : ends}
-<figure class="camera machine-screen" data-screen-state="${esc(stateUrl)}">
+<figure class="camera machine-screen" data-screen-state="${esc(stateUrl)}" tabindex="0" aria-label="The screen: turn on the mouse and keyboard to click and type on it">
 <div class="camera-screen" data-camera-screen>${icon('plug', 'icon camera-icon')}<p class="camera-title" data-screen-status role="status">${error ? 'The screen is not shown.' : 'Waiting for the machine…'}</p>
 <p class="camera-sub">The picture comes from the machine itself, a few frames a second.</p></div>
 </figure>
+${takeOver}
 <div class="machine-screen-actions">
-<form method="post" action="/machines/${esc(machine.id)}/screen/stop"><button type="submit" class="primary">Stop showing my screen</button></form>
-<form method="post" action="/machines/${esc(machine.id)}/screen"><button type="submit" class="button quiet">${error ? 'Try again' : 'Start again (10 more minutes)'}</button></form>
+<form method="post" action="/machines/${esc(machine.id)}/screen/stop"><button type="submit" class="primary">Stop showing it</button></form>
+<form method="post" action="/machines/${esc(machine.id)}/screen">${desk !== 'main' ? `<input type="hidden" name="desk" value="${esc(desk)}">` : ''}<button type="submit" class="button quiet">${error ? 'Try again' : 'Start again (10 more minutes)'}</button></form>
 </div>
 <p class="muted small">The machine says on its desktop that its screen is live. <code>openvibe-node stop</code> on the machine ends it at once, and it ends on its own after its time.</p>
 ${sharesBlock(machine, shares, madeLink, madeShare)}
 </main>`;
-    return page(`${name}: screen`, body, { scripts: ['/panel/panel.js'], description: 'Your machine\'s screen, live, for you only.', canonical: '/machines' });
+    return page(`${name}: screen`, body, { scripts: ['/panel/panel.js', '/panel/screen-share.js'], description: 'Your machine\'s screen, live, for you only.', canonical: '/machines' });
 }
 
 /**

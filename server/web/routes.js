@@ -596,8 +596,10 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
         const mine = await myMachine(req, me);
         try {
-            const out = await machineScreen.start(mine, me.subject, asUser(me), { desk: req.body && req.body.desk === 'private' ? 'private' : 'main' });
-            res.redirect(303, `/machines/${encodeURIComponent(mine.id)}/screen?until=${encodeURIComponent(out.until)}`);
+            // Any desk: the person's own screen (main), the private desk, or an agent task's own desk (desk-<name>).
+            const desk = req.body && machineScreen.DESK.test(String(req.body.desk || '')) ? String(req.body.desk) : 'main';
+            const out = await machineScreen.start(mine, me.subject, asUser(me), { desk });
+            res.redirect(303, `/machines/${encodeURIComponent(mine.id)}/screen?until=${encodeURIComponent(out.until)}${desk !== 'main' ? `&desk=${encodeURIComponent(desk)}` : ''}`);
         } catch (e) {
             if (!(e instanceof BotError)) throw e;
             res.setHeader('Content-Security-Policy', PANEL_CSP);
@@ -608,11 +610,35 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         const me = requireUser(req);
         const mine = await myMachine(req, me);
         const until = typeof req.query.until === 'string' && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,3})?Z$/.test(req.query.until) ? req.query.until : null;
+        // A link from an agent's task names its desk (Desks plan D4: Watch, Take over): offer that one first.
+        const desk = typeof req.query.desk === 'string' && machineScreen.DESK.test(req.query.desk) ? req.query.desk : 'main';
         // Opened from a link with nothing shown: offer to start it rather than wait for a stream nobody started.
-        const idle = !until && (await machineScreen.state(mine, me.subject)).state !== 'live';
+        const st = await machineScreen.state(mine, me.subject);
+        const idle = !until && st.state !== 'live';
         res.setHeader('Vary', 'Cookie');
         res.setHeader('Content-Security-Policy', PANEL_CSP);
-        res.type('html').send(renderMachineScreenPage({ machine: mine, until, idle, shares: await shares.list(mine, me.subject).catch(() => []), hasDesk: hasDesk(mine) }));
+        res.type('html').send(renderMachineScreenPage({ machine: mine, until, idle, shares: await shares.list(mine, me.subject).catch(() => []), hasDesk: hasDesk(mine), desk: idle ? desk : st.desk }));
+    }));
+    // The owner's page drives what it shows (public/screen-share.js, owner mode): its state, start, stop and the mouse
+    // and keyboard ("Take over"), as JSON, same-site only.
+    r.get('/machines/:id/screen/state.json', page(async (req, res) => {
+        const me = requireUser(req);
+        const mine = await myMachine(req, me);
+        res.setHeader('Cache-Control', 'private, no-store');
+        res.json(await machineScreen.state(mine, me.subject));
+    }));
+    r.post('/machines/:id/screen/start', ...manage, express.json({ limit: '1kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site requests are refused');
+        const mine = await myMachine(req, me);
+        const desk = req.body && machineScreen.DESK.test(String(req.body.desk || '')) ? String(req.body.desk) : 'main';
+        res.json(await machineScreen.start(mine, me.subject, asUser(me), { desk }));
+    }));
+    r.post('/machines/:id/screen/input', ...manage, express.json({ limit: '2kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site requests are refused');
+        const mine = await myMachine(req, me);
+        res.json(await machineScreen.input(mine, me.subject, req.body || {}));
     }));
     r.get('/machines/:id/screen.json', page(async (req, res) => {
         const me = requireUser(req);
@@ -620,11 +646,12 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         res.setHeader('Cache-Control', 'private, no-store');
         res.json(await machineScreen.state(mine, me.subject));
     }));
-    r.post('/machines/:id/screen/stop', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
+    r.post('/machines/:id/screen/stop', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), express.json({ limit: '1kb' }), page(async (req, res) => {
         const me = requireUser(req);
         if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
         const mine = await myMachine(req, me);
-        await machineScreen.stop(mine, me.subject, asUser(me));
+        const out = await machineScreen.stop(mine, me.subject, asUser(me));
+        if (req.is('application/json')) return res.json(out);   // the page's own Stop (owner mode)
         res.redirect(303, '/machines');
     }));
     // ── Screen share links (server/screen-shares.js): the owner shares the live screen with a group, to watch or use ──
