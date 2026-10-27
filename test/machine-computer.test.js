@@ -35,7 +35,7 @@ const { boot, check, done } = require('./helpers/app');
             else if (m.kind === 'input') c.send(frame('ack', { id: m.id, data: { done: true, action: m.value.action } }));
             else if (m.kind === 'browser') c.send(frame('ack', { id: m.id, data: { url: m.value.url || 'https://example.org/', title: 'Example', text: 'Example page', truncated: false, links: [] } }));
             else if (m.kind === 'desk') c.send(frame('ack', { id: m.id, data: { running: m.value.action !== 'stop', display: ':91', width: 1280, height: 800 } }));
-            else if (m.kind === 'screen' && m.value.desk === 'private') c.send(frame('ack', { id: m.id, data: { format: 'png', width: 1280, height: 800, content_b64: 'iVBORw0KGgo=' } }));
+            else if (m.kind === 'screen' && m.value.desk && m.value.desk !== 'main') c.send(frame('ack', { id: m.id, data: { format: 'png', width: 1280, height: 800, content_b64: 'iVBORw0KGgo=' } }));
             else c.send(frame('nack', { id: m.id, fault_code: 'not_allowed', message: 'this machine allows observing only' }));
         });
         // Beat like a real Node while the socket is open, so a longer check never sees its machine go offline.
@@ -196,6 +196,30 @@ const { boot, check, done } = require('./helpers/app');
         await t.call('POST', `/api/v1/machines/${multi.deviceId}/agent-computer`, { user: alex, body: { on: false } });
         multi.c.close();
         single.c.close();
+    });
+
+    await check('a desk host (Node v0.20.0 --desk-host): no screen of its own, yet its desks are seen and driven', async () => {
+        // Nobody is signed in to a desk host: it offers no screen or input of its own, only its desks' (desk.screen, desk.input).
+        const { screen: _s, input: _i, ...headless } = COMPUTER;
+        const host = await machine(alex, { ...headless, desk: { level: 'trusted', window_manager: 'openbox', input: true, screen: true, named: true, max_desks: 4 } });
+        const look = await cmd(host.deviceId, { kind: 'screen', value: { desk: 'desk-task-a', max_width: 1280 } }, { user: alex });
+        assert.strictEqual(look.json.result, 'ack', look.text);
+        const click = await cmd(host.deviceId, { kind: 'input', value: { action: 'click', x: 10, y: 10, width: 1280, height: 800, desk: 'desk-task-a' } }, { user: alex });
+        assert.strictEqual(click.json.result, 'ack', click.text);
+        assert.strictEqual(seen.at(-1).value.desk, 'desk-task-a');
+        // Its own screen is still refused: there is none.
+        const own = await cmd(host.deviceId, { kind: 'screen', value: { max_width: 1280 } }, { user: alex });
+        assert.deepStrictEqual([own.status, own.json.code], [409, 'bot.computer_off']);
+        const ownClick = await cmd(host.deviceId, { kind: 'input', value: { action: 'click', x: 1, y: 1, width: 2, height: 2 } }, { user: alex });
+        assert.deepStrictEqual([ownClick.status, ownClick.json.code], [409, 'bot.computer_off']);
+        // A desk that cannot be seen (no X capture tool) is refused, never sent.
+        const blind = await machine(alex, { ...headless, desk: { level: 'trusted', window_manager: 'openbox', input: true, screen: false, named: true, max_desks: 4 } });
+        const before = seen.length;
+        const dark = await cmd(blind.deviceId, { kind: 'screen', value: { desk: 'desk-task-a' } }, { user: alex });
+        assert.deepStrictEqual([dark.status, dark.json.code], [409, 'bot.computer_off']);
+        assert.strictEqual(seen.length, before, 'nothing reached the machine');
+        host.c.close();
+        blind.c.close();
     });
 
     await check('the audit keeps what was asked in short, never stdin, arguments or content', async () => {

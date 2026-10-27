@@ -47,6 +47,9 @@ const NO_DESK = 'this machine has no private desk: it needs OpenVibe Node v0.15.
 const NO_NAMED_DESKS = 'this machine runs one desk only (private): several named desks need OpenVibe Node v0.19.0 or newer';
 /** The desk a command names: main (the person's own screen, the default), private or desk-<name> (contracts 0.215.0). */
 const deskOf = (value) => (typeof value.desk === 'string' && value.desk ? value.desk : 'main');
+// The screen and the mouse and keyboard of a desk are the desk's own (Node's desk.screen, desk.input): a desk host with
+// no screen of its own (no one signed in, Node v0.20.0 --desk-host) offers them on its desks only.
+const onDeskOnly = (kind, value) => (kind === 'screen' || kind === 'input') && deskOf(value) !== 'main';
 /** A command that acts on a screen (the mouse and keyboard, or the browser doing more than reading it). */
 const actsOnScreen = (kind, value) => kind === 'input' || (kind === 'browser' && !['read', 'close'].includes(value.action));
 const COMPUTER_KINDS = Object.keys(COMPUTER_CAP);
@@ -760,10 +763,11 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             if (!device || !device.online) return refuse('bot.device_offline', 'the machine is offline', summary);
             const offered = computerOf(deviceId);
             if (screen) {
-                if (value.action === 'start' && !(offered && offered.screen && offered.screen.stream === true)) {
+                // A desk's live view is the desk's own screen (desk.screen, checked below), not the person's.
+                if (value.action === 'start' && deskOf(value) === 'main' && !(offered && offered.screen && offered.screen.stream === true)) {
                     return refuse('bot.computer_off', 'this machine does not show its screen live: it needs OpenVibe Node v0.12.0 or newer, with the computer plugin running in your graphical session', summary);
                 }
-            } else if (!offered || !offered[COMPUTER_CAP[kind]]) {
+            } else if (!offered || !(onDeskOnly(kind, value) ? (offered.desk && offered.desk[kind] === true) : offered[COMPUTER_CAP[kind]])) {
                 return refuse('bot.computer_off', kind === 'desk' ? NO_DESK : `this machine does not offer ${COMPUTER_CAP[kind]}: its computer plugin is off (openvibe-node, --computer)`, summary);
             }
             // A desk other than the person's own screen needs a machine that has desks; one other than private (a named desk,

@@ -174,6 +174,16 @@ const { boot, check, done } = require('./helpers/app');
         single.c.close();
     });
 
+    await check('a desk host (Node v0.20.0 --desk-host) shows its desks live though it has no screen of its own', async () => {
+        const host = await machine(alex, { files: SCREEN.files, desk: { level: 'trusted', window_manager: 'openbox', input: true, screen: true, named: true, max_desks: 4 } });
+        const r = await screen('POST', host.deviceId, { user: alex, body: { seconds: 60, desk: 'desk-task-a' } });
+        assert.strictEqual(r.status, 201, r.text);
+        assert.strictEqual(seen.at(-1).value.desk, 'desk-task-a');
+        const own = await screen('POST', host.deviceId, { user: alex, body: { seconds: 60 } });
+        assert.deepStrictEqual([own.status, own.json.code], [409, 'bot.computer_off'], 'its own screen: there is none');
+        host.c.close();
+    });
+
     await check('watch and take over an agent\'s desk (Desks plan D4): a task\'s link opens its desk; the owner\'s mouse and keyboard go to the desk shown, as the owner; same site only', async () => {
         const desk = { level: 'trusted', window_manager: 'openbox', input: true, screen: true, named: true, max_desks: 4 };
         const m = await machine(alex, { ...SCREEN, input: { level: 'trusted', tool: 'xdotool' }, desk });
