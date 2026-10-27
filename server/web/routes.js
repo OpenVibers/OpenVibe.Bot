@@ -581,6 +581,10 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
             computer_screen_stream: sensors.computer_screen_stream === 'live' ? 'live' : 'off',
             computer_desks: Number.isInteger(sensors.computer_desks) ? sensors.computer_desks : null,
             ai_models: !!d.ai_models,
+            // How fast its last model answered there (Node v0.29.0's ai plugin), and whether one is answering now.
+            ai_speed: typeof sensors.ai_tokens_per_s === 'number' && sensors.ai_tokens_per_s > 0 && typeof sensors.ai_model === 'string'
+                ? { model: sensors.ai_model.slice(0, 120), tokens_per_s: sensors.ai_tokens_per_s } : null,
+            ai_busy: sensors.ai_busy === 1,
         };
     }));
     // ── The live screen (plan T14): the owner watches their machine's screen on their own private stream ──
