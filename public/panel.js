@@ -46,7 +46,8 @@
 
     for (const b of $$('[data-copy]')) {
         b.addEventListener('click', () => {
-            const src = $('[data-copy-source]');
+            // The command in the button's own card (adding a machine offers several), else the page's one.
+            const src = $('[data-copy-source]', b.closest('.card') || document) || $('[data-copy-source]');
             const label = $('[data-copy-label]', b);
             if (src && navigator.clipboard) {
                 navigator.clipboard.writeText(src.textContent).then(() => {
