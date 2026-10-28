@@ -192,6 +192,12 @@ function loadConfig(env = process.env) {
             cooldownMs: int(env.BOT_CONTROL_COOLDOWN_MS, 0),
         },
 
+        // Desk hosts that serve other people (server/api/desk-leases.js): the owners (user:usr_…) whose shared hosts are
+        // OpenVibe's own, so Run places on them as first-party; every other shared host is community.
+        deskHosts: {
+            firstPartyOwners: list(env.BOT_FIRST_PARTY_DESK_OWNERS).map((s) => s.replace(/^user:/, '')),
+        },
+
         // Per-actor limits on /api/v1 reads (server/api/actor-limits.js).
         actorLimits: {
             minute: Math.max(1, int(env.BOT_LIMITS_MINUTE, 120)),

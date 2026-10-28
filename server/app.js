@@ -102,7 +102,7 @@ function createApp(opts = {}) {
     // started by server/index.js with the other jobs. Without Network credentials nothing is reported.
     const offerReporter = opts.offerReporter !== undefined ? opts.offerReporter
         : (config.oauth.clientSecret ? createOfferReporter(config, { fetchImpl }) : null);
-    const offers = createOfferPublisher({ db, hub, reporter: offerReporter, log, now });
+    const offers = createOfferPublisher({ db, hub, reporter: offerReporter, log, now, firstPartyOwners: (config.deskHosts && config.deskHosts.firstPartyOwners) || [] });
     domain.devices.onChange(() => offers.poke());
     const sim = opts.sim || createSimulator({ config, domain, hub, now, log });
     // Server-side ONVIF cameras (server/onvif): the same in-process attach as the simulator, but with a real
