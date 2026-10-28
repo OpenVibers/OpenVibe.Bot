@@ -729,7 +729,9 @@ function renderMachinesPage({ machines = [], pairing = null }) {
         return { on: true, level: LEVELS[level] ? level : null, terminal: !!c.terminal, files: !!c.files, screen: !!c.screen, probe: !!c.probe, input: !!c.input,
             screenStream: !!(c.screen && c.screen.stream === true),
             // Desks for its agents (Desks plan): how many at once, which kinds, and whether sign-ins carry over.
-            desks: d ? { max: Number.isInteger(d.max_desks) ? d.max_desks : 1, kinds: Array.isArray(d.kinds) ? d.kinds : ['desktop'], keeps: d.profiles === true } : null,
+            desks: d ? { max: Number.isInteger(d.max_desks) ? d.max_desks : 1, kinds: Array.isArray(d.kinds) ? d.kinds : ['desktop'], keeps: d.profiles === true,
+                // Each desk in its own sandbox (Node v0.32.0, --desk-host --shared): it may serve other people's sessions.
+                sandboxed: d.isolation === 'sandbox' } : null,
             ai };
     };
     // Vibe by voice: shown for a machine whose Node runs the voice plugin (capabilities.voice).
@@ -752,6 +754,16 @@ function renderMachinesPage({ machines = [], pairing = null }) {
     };
     // The person's machines whose models their AI may use: with two or more, Chat's link chooses any of them.
     const modelMachines = machines.filter((x) => { const c = x.ai_models && computerOf(x); return !!(c && c.ai && c.ai.models.length); }).length;
+    // A desk host that sandboxes every desk (Desks plan D6): its owner may offer its desks to other people's sessions on
+    // OpenVibe.Run, and sees how many are in use. Nothing of the machine itself is reachable from a desk there.
+    const shareRow = (m, c) => {
+        if (!c.desks || !c.desks.sandboxed) return '';
+        const inUse = Number.isInteger(m.desk_leases) && m.desk_leases > 0 ? ` <span class="pill">${m.desk_leases === 1 ? '1 desk in use' : `${m.desk_leases} desks in use`}</span>` : '';
+        return `<div class="machine-share"><span class="pill">${m.shared_desks ? 'Serving other people' : 'Desks: yours only'}</span>${inUse}`
+            + '<span class="muted">Each desk runs in its own sandbox here (its own memory, CPU and network, the public internet only): nobody reaches this machine\'s files, screen or network from one.</span>'
+            + `<form method="post" action="/machines/${esc(m.id)}/shared-desks"><input type="hidden" name="on" value="${m.shared_desks ? '0' : '1'}">`
+            + `<button type="submit" class="button quiet" aria-pressed="${m.shared_desks ? 'true' : 'false'}">${m.shared_desks ? 'Stop offering my desks' : 'Offer my desks to other people'}</button></form></div>`;
+    };
     const computerRow = (m) => {
         const c = computerOf(m);
         if (!c) return '';
@@ -778,6 +790,7 @@ function renderMachinesPage({ machines = [], pairing = null }) {
         return `<div class="machine-computer"><span class="pill">Computer: ${esc(c.level ? LEVELS[c.level] : 'on')}</span><span class="muted">${esc(can)}</span>${desks}${running}${waiting}${deskLink}`
             + `<form method="post" action="/machines/${esc(m.id)}/agent-computer"><input type="hidden" name="on" value="${m.agent_computer ? '0' : '1'}">`
             + `<button type="submit" class="button quiet" aria-pressed="${m.agent_computer ? 'true' : 'false'}">${m.agent_computer ? 'Stop my agent using this computer' : 'Let my agent use this computer'}</button></form>`
+            + shareRow(m, c)
             + (c.screenStream && m.online ? `<form method="post" action="/machines/${esc(m.id)}/screen"><button type="submit" class="button quiet">${m.computer_screen_stream === 'live' ? 'Watch my screen' : 'Show my screen'}</button></form>` : '')
             + aiRow
             + (c.probe ? `<form method="post" action="/machines/${esc(m.id)}/watch-probe"><input type="hidden" name="on" value="${m.watch_probe ? '0' : '1'}">`

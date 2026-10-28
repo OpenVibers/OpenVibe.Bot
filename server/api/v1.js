@@ -47,6 +47,7 @@ const { getProfile, listProfiles, checkProfile } = require('../profiles');
 const kits = require('../kits');
 const resourceIndex = require('./resource-index');
 const resourceControl = require('./resource-control');
+const deskLeases = require('./desk-leases');
 
 const CAP = {
     read: 'bot.robot.read',
@@ -79,6 +80,8 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
     // Control first (bot.resource.control), then the index (bot.resource.read) for everything else under /resources.
     r.use('/resources/control', limits('bot.control', { minute: 120, hour: 1200 }), resourceControl.router({ domain, apiAuth, hub }));
     r.use('/resources', resourceIndex.router({ db: domain.db, apiAuth, hub, baseUrl: config.baseUrl }));
+    // Run's sessions lease one desk each (contracts 0.223.0, bot.desk.session): desk hosts, leases and their commands.
+    r.use(deskLeases.router({ domain, apiAuth, hub, config, limit: limits('bot.desk_session', { minute: 600, hour: 6000 }) }));
     const manage = limits('bot.robot.manage', { minute: 30, hour: 300 });
     const control = limits('bot.control', { minute: 120, hour: 1200 });
     const machineScreen = createMachineScreen({ domain, hub });
@@ -431,6 +434,7 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         const pick = (cap) => (offered && offered[cap] && typeof offered[cap] === 'object' ? offered[cap] : null);
         return {
             id: device.id, name: device.name || null, online: !!st.online, agent_computer: !!device.agent_computer, ai_models: !!device.ai_models, watch_probe: !!device.watch_probe,
+            shared_desks: !!device.shared_desks,
             voice: { on: !!device.voice_on, call_word: device.call_word || DEFAULT_CALL_WORD },
             computer: offered ? {
                 level: typeof sensors.computer_level === 'string' ? sensors.computer_level : ((pick('files') || pick('terminal') || pick('screen') || {}).level || null),
@@ -467,6 +471,10 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
     // id answers its first result without data; an `ask`-level machine answers once its owner approves it there.
     r.post('/machines/:id/commands', commandControl, wrap(async (req, res) => {
         const { device, subject } = await computerMachine(req, { kind: req.body?.kind });
+        // A desk leased to a Run session is the session's alone (desk-leases.js): its machine's own routes never reach it.
+        const v = req.body && req.body.value && typeof req.body.value === 'object' ? req.body.value : {};
+        const named = req.body?.kind === 'desk' ? (typeof v.desk === 'string' ? v.desk : 'private') : (typeof v.desk === 'string' ? v.desk : 'main');
+        if (/^desk-/.test(named) && await domain.deskLeases.get(device.id, named)) fail(409, 'bot.desk_leased', 'that desk is held by an OpenVibe.Run session');
         const principal = req.principal.kind === 'service' ? { ...req.principal, subject } : req.principal;
         const result = await hub.machineCommand(device.id, principal, subject, { id: req.body?.id, kind: req.body?.kind, value: req.body?.value, ms: req.body?.ms });
         if (result.result === 'refused') fail(commandRefusalStatus(result.code), result.code, result.reason || null);

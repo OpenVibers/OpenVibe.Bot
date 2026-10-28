@@ -56,6 +56,9 @@ const deskOf = (value) => (typeof value.desk === 'string' && value.desk ? value.
 // The screen and the mouse and keyboard of a desk are the desk's own (Node's desk.screen, desk.input): a desk host with
 // no screen of its own (no one signed in, Node v0.20.0 --desk-host) offers them on its desks only.
 const onDeskOnly = (kind, value) => (kind === 'screen' || kind === 'input') && deskOf(value) !== 'main';
+// A browser command on a desk drives that desk's own browser: any machine with desks takes it, whether or not it offers a
+// browser of its own (a desk host for other people offers none, Node v0.32.0; its core routes it to the desks, v0.32.1).
+const onDeskBrowser = (kind, value, offered) => kind === 'browser' && deskOf(value) !== 'main' && !!(offered && offered.desk);
 /** A command that acts on a screen (the mouse and keyboard, or the browser doing more than reading it). */
 const actsOnScreen = (kind, value) => kind === 'input' || (kind === 'browser' && !['read', 'close'].includes(value.action));
 const COMPUTER_KINDS = Object.keys(COMPUTER_CAP);
@@ -777,7 +780,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
                 if (value.action === 'start' && deskOf(value) === 'main' && !(offered && offered.screen && offered.screen.stream === true)) {
                     return refuse('bot.computer_off', 'this machine does not show its screen live: it needs OpenVibe Node v0.12.0 or newer, with the computer plugin running in your graphical session', summary);
                 }
-            } else if (!offered || !(onDeskOnly(kind, value) ? (offered.desk && offered.desk[kind] === true) : offered[COMPUTER_CAP[kind]])) {
+            } else if (!offered || !(onDeskBrowser(kind, value, offered) || (onDeskOnly(kind, value) ? (offered.desk && offered.desk[kind] === true) : offered[COMPUTER_CAP[kind]]))) {
                 return refuse('bot.computer_off', kind === 'desk' ? NO_DESK : kind === 'ai' ? 'this machine offers no models: it needs OpenVibe Node v0.27.0 or newer with the ai plugin (install.sh --ai) and a model server (Ollama, LM Studio or llama.cpp)' : `this machine does not offer ${COMPUTER_CAP[kind]}: its computer plugin is off (openvibe-node, --computer)`, summary);
             }
             // A desk other than the person's own screen needs a machine that has desks; one other than private (a named desk,

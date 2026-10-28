@@ -216,7 +216,7 @@ main { padding: 1rem max(1rem, env(safe-area-inset-right)) calc(1.5rem + env(saf
 .robot-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 /* A machine's computer plugin (Node docs/computer.md): its level, what waits on it, and the agent switch, full width. */
 .machine-computer { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.6rem; padding-top: 0.6rem; border-top: 1px solid var(--line); }
-.machine-ai { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.6rem; flex-basis: 100%; }
+.machine-ai, .machine-share { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.6rem; flex-basis: 100%; }
 /* A desk on the owner's Live channel: the second step, under the desk's own buttons. */
 .desk-live { flex-basis: 100%; }
 .desk-live > summary { list-style: none; display: inline-flex; }

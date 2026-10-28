@@ -790,6 +790,35 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     async function setAiModels(deviceId, value) {
         return db.maybe('UPDATE devices SET ai_models = $2, updated_at = $3 WHERE id = $1 AND revoked_at IS NULL RETURNING *', [deviceId, !!value, iso(now())]);
     }
+    /** Offer this machine's desks to other people, or stop (the owner check and the sandbox check are the caller's). */
+    async function setSharedDesks(deviceId, value) {
+        return db.maybe('UPDATE devices SET shared_desks = $2, updated_at = $3 WHERE id = $1 AND revoked_at IS NULL RETURNING *', [deviceId, !!value, iso(now())]);
+    }
+    /** Every live machine whose owner offers its desks to other people (Run's placement; the live checks are the caller's). */
+    async function listSharedDesks() {
+        return db.many('SELECT * FROM devices WHERE revoked_at IS NULL AND shared_desks = true ORDER BY created_at');
+    }
+
+    // ── Desk leases (contracts 0.223.0 bot.desk-lease@1, the Desks plan's D6) ──────────────────────────────────────
+    const leaseOut = (r) => (r ? {
+        machine_id: r.device_id, desk: r.desk, session: r.session_id, owner: r.owner_subject, kind: r.kind,
+        width: Number(r.width), height: Number(r.height), shared: !!r.shared, created_at: new Date(r.created_at).toISOString(),
+    } : null);
+    const deskLeases = {
+        async get(deviceId, desk) { return leaseOut(await db.maybe('SELECT * FROM desk_leases WHERE device_id = $1 AND desk = $2', [deviceId, desk])); },
+        async forSession(sessionId) { return leaseOut(await db.maybe('SELECT * FROM desk_leases WHERE session_id = $1', [sessionId])); },
+        async count(deviceId) { return Number((await db.one('SELECT count(*)::int AS n FROM desk_leases WHERE device_id = $1', [deviceId])).n); },
+        async list(deviceId) { return (await db.many('SELECT * FROM desk_leases WHERE device_id = $1 ORDER BY created_at', [deviceId])).map(leaseOut); },
+        /** The lease, or null when the desk is someone else's already (the caller answers 409). */
+        async create({ deviceId, desk, session, owner, width, height, shared }) {
+            const r = await db.maybe(
+                `INSERT INTO desk_leases (device_id, desk, session_id, owner_subject, kind, width, height, shared, created_at)
+                 VALUES ($1, $2, $3, $4, 'browser', $5, $6, $7, $8) ON CONFLICT DO NOTHING RETURNING *`,
+                [deviceId, desk, session, owner, width, height, !!shared, iso(now())]);
+            return leaseOut(r);
+        },
+        async remove(deviceId, desk) { return leaseOut(await db.maybe('DELETE FROM desk_leases WHERE device_id = $1 AND desk = $2 RETURNING *', [deviceId, desk])); },
+    };
     /** Let the owner's agent use this machine's computer plugin, or stop it (the owner check is the caller's). */
     async function setAgentComputer(deviceId, value) {
         return db.maybe('UPDATE devices SET agent_computer = $2, updated_at = $3 WHERE id = $1 AND revoked_at IS NULL RETURNING *', [deviceId, !!value, iso(now())]);
@@ -1287,8 +1316,9 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         members: { roleOf, add: addOperator, remove: removeOperator, list: listOperators },
         pairing: { create: createPairingCode, redeem, prune: prunePairingCodes, installerCommand, driverForProfile, whipUrl, onPaired },
         devices: { byCredential, bindNode, issuePublishKey, revokeVideo, updateDeclared, revokeNode, ensureServerDevice, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, revokeByNode, touchSeen, setOnline, ownerOf, onChange },
-        machines: { mint: mintMachine, list: listMachines, workerRef, setAgentComputer, setAiModels, setWatchProbe, setVoice,
+        machines: { mint: mintMachine, list: listMachines, workerRef, setAgentComputer, setAiModels, setWatchProbe, setVoice, setSharedDesks, listSharedDesks,
             screen: { key: screenKey, liveKey: liveScreenKey, live: screenLive, end: screenEnd, archive: screenArchive } },
+        deskLeases,
         streaming: { get: streaming, set: setStreaming },
         video: { live: liveVideo },
         estop: { set: setEstop, clear: clearEstop },

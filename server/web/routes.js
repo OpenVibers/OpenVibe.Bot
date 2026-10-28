@@ -580,6 +580,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
             computer_waiting: Number.isInteger(sensors.computer_waiting) ? sensors.computer_waiting : null,
             computer_screen_stream: sensors.computer_screen_stream === 'live' ? 'live' : 'off',
             computer_desks: Number.isInteger(sensors.computer_desks) ? sensors.computer_desks : null,
+            desk_leases: d.shared_desks ? await domain.deskLeases.count(d.id) : 0,
             ai_models: !!d.ai_models,
             // How fast its last model answered there (Node v0.29.0's ai plugin), and whether one is answering now.
             ai_speed: typeof sensors.ai_tokens_per_s === 'number' && sensors.ai_tokens_per_s > 0 && typeof sensors.ai_model === 'string'
@@ -794,6 +795,21 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         const mine = (await domain.machines.list(me.subject)).find((d) => d.id === req.params.id);
         if (!mine) throw new BotError(404, 'bot.device_not_found', 'no such machine of yours');
         await domain.machines.setAgentComputer(mine.id, req.body && req.body.on === '1');
+        res.redirect(303, '/machines');
+    }));
+    // The owner offers this desk host's desks to other people's sessions (OpenVibe.Run, contracts 0.223.0), or stops: only
+    // where its Node sandboxes every desk (Node v0.32.0, install.sh --desk-host --shared).
+    r.post('/machines/:id/shared-desks', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        const mine = (await domain.machines.list(me.subject)).find((d) => d.id === req.params.id);
+        if (!mine) throw new BotError(404, 'bot.device_not_found', 'no such machine of yours');
+        const on = req.body && req.body.on === '1';
+        const desk = ((hub && hub.computerOf(mine.id)) || {}).desk;
+        if (on && !(desk && desk.isolation === 'sandbox')) {
+            throw new BotError(409, 'bot.computer_off', 'this machine does not sandbox its desks: install it with --desk-host --shared (OpenVibe Node v0.32.0 or newer), then try again');
+        }
+        await domain.machines.setSharedDesks(mine.id, on);
         res.redirect(303, '/machines');
     }));
     // The owner lets Vibe answer their voice on this machine (OpenVibe Node's voice plugin), with a call word, or stops it.
