@@ -53,7 +53,10 @@ const { boot, check, done } = require('./helpers/app');
         // A gated page answers here with noindex (SEO-7): no redirect whose destination carried another origin's canonical.
         assert.strictEqual(out.status, 401);
         assert.match(gate, /<meta name="robots" content="noindex, nofollow">/);
-        assert.match(gate, /href="\/auth\/login\?next=%2Flink%3Fcode%3D/);
+        // The sign-in link goes back to the path only: an anonymous page must not echo a query string
+        // (a code in it would come back in the body), so the device code is asked for again after sign-in.
+        assert.match(gate, /href="\/auth\/login\?next=%2Flink"/);
+        assert.ok(!gate.includes(claim.user_code), 'the gate does not echo the device code');
         const r = await get(`/link?code=${claim.user_code.toLowerCase().replace('-', ' ')}`, alex);
         assert.strictEqual(r.status, 200);
         const html = await r.text();
