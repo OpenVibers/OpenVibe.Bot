@@ -263,7 +263,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
             // redirects, because its session ended and sign-in brings the person back to the page.
             if (e.status === 401) {
                 if (req.method !== 'GET' || !req.accepts('html')) return res.redirect(302, `/auth/login?next=${encodeURIComponent(req.originalUrl)}`);
-                return res.status(401).type('html').send(renderSignInPage({ next: req.originalUrl, what: 'this page' }));
+                return res.status(401).type('html').send(renderSignInPage({ next: req.path, what: 'this page' }));
             }
             // A refusal the person can act on (a bad form value, a robot with no stream, OpenRestream not answering) says so
             // with its own status instead of the generic error page.
