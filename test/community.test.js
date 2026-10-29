@@ -50,7 +50,8 @@ const PROFILE = {
     const submit = (u, profile, extra = {}, headers = {}) => post('/robots/submit', u, { profile: typeof profile === 'string' ? profile : JSON.stringify(profile), driver_url: 'https://github.com/mia/ballbot-driver', guide_url: 'https://openvibe.wiki/robots/ballbot', license: 'MIT', notes: 'Tested on two boards.', ...extra }, headers);
 
     await check('/robots/submit: signed in only; a profile template; refusals come back on the form', async () => {
-        assert.strictEqual((await get('/robots/submit')).status, 302);
+        // A gated page answers here with noindex (SEO-7), never a redirect off the site.
+        assert.strictEqual((await get('/robots/submit')).status, 401);
         const form = await (await get('/robots/submit', mia)).text();
         assert.ok(form.includes('name="profile"') && form.includes('community.my-robot') && form.includes('<option value="MIT"'));
         const bad = await submit(mia, '{ not json');

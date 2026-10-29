@@ -83,8 +83,9 @@ const { renderPanel } = require('../server/web/render');
         const html = await page.text();
         assert.ok(html.includes('data-drive-page') && html.includes(`data-robot-id="${mine.id}"`) && html.includes('/panel/drive.js'));
         const out = await fetch(`${t.base}/panel/${mine.id}/drive`, { redirect: 'manual' });
-        assert.strictEqual(out.status, 302);
-        assert.match(out.headers.get('location'), /^\/auth\/login\?next=/);
+        // A gated page answers here with noindex (SEO-7), not a redirect off the site.
+        assert.strictEqual(out.status, 401);
+        assert.match(await out.text(), /name="robots" content="noindex, nofollow"/);
         assert.strictEqual((await fetch(`${t.base}/panel/${mine.id}/drive`, { redirect: 'manual', headers: { Cookie: cookie(bob) } })).status, 403);
         assert.strictEqual((await fetch(`${t.base}/panel/drive.js`)).status, 200);
     });

@@ -154,10 +154,18 @@ const allowedFor = (profile, role) => [...(DEFAULT_ALLOW[role] || []).filter((k)
         assert.strictEqual((await get('/install')).status, 302);
         assert.strictEqual((await get('/robots')).status, 200, 'the directory is public');
         for (const p of ['/robots/new', '/panel/rob_x', '/pair/rob_x']) {
+            // A gated page answers here with noindex and a link to sign-in (SEO-7): a redirect there
+            // handed a crawler openvibe.network's canonical as this page's.
             const r = await get(p);
-            assert.strictEqual(r.status, 302, p);
-            assert.strictEqual(r.headers.get('location'), `/auth/login?next=${encodeURIComponent(p)}`);
+            const body = await r.text();
+            assert.strictEqual(r.status, 401, p);
+            assert.match(body, /<meta name="robots" content="noindex, nofollow">/, p);
+            assert.ok(body.includes('href="/auth/login?next='), `${p} links to sign-in`);
         }
+        // A public page still keeps its own canonical and says it may be indexed (SEO-7's other half).
+        const home = await (await get('/')).text();
+        assert.match(home, /<link rel="canonical" href="http:\/\/bot\.test\/">/);
+        assert.match(home, /<meta name="robots" content="index, follow">/);
         const js = await get('/panel/panel.js');
         assert.strictEqual(js.status, 200);
         assert.match(js.headers.get('content-type'), /javascript/);

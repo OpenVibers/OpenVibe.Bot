@@ -80,7 +80,7 @@ const { boot, check, done } = require('./helpers/app');
 
     await check('/machines lists them, adds one with a one-time --worker command, and removes one', async () => {
         const anon = await fetch(`${t.base}/machines`, { redirect: 'manual' });
-        assert.strictEqual(anon.status, 302, 'signed out: to the sign-in');
+        assert.strictEqual(anon.status, 401, 'signed out: a gate page here, noindex (SEO-7)');
         const page = await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text();
         assert.ok(page.includes('Your machines') && page.includes('desk-pc') && page.includes('Online') && page.includes('code jobs'), page);
         assert.ok(!page.includes(bob.subject));

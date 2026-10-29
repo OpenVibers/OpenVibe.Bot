@@ -39,7 +39,7 @@ const { getProfile, listProfiles, loadProfiles } = require('../profiles');
 const { frameAncestors } = require('../config');
 const { BotError } = require('../util');
 const kits = require('../kits');
-const { renderPanel, renderEmbedRefused, renderDrivePage, renderPairingPage, renderPhonePage, renderMachinesPage, renderMachineDesksPage, renderMachineScreenPage, renderSharePage, renderShareGone, renderLinkPage, renderClaimPage, renderClaimApproved } = require('./render');
+const { renderPanel, renderEmbedRefused, renderDrivePage, renderPairingPage, renderPhonePage, renderMachinesPage, renderMachineDesksPage, renderMachineScreenPage, renderSharePage, renderShareGone, renderLinkPage, renderSignInPage, renderClaimPage, renderClaimApproved } = require('./render');
 const { createMachineScreen } = require('../machine-screen');
 const { createScreenShares } = require('../screen-shares');
 const { renderDocsIndex, renderDriversPage, renderProfilesPage, renderAutomationPage, renderComputersPage } = require('./docs');
@@ -258,7 +258,13 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     const page = (fn) => async (req, res, next) => {
         res.setHeader('Cache-Control', 'no-store');
         try { await fn(req, res); } catch (e) {
-            if (e.status === 401) return res.redirect(302, `/auth/login?next=${encodeURIComponent(req.originalUrl)}`);
+            // A gated page answers here, noindex, instead of redirecting to Network sign-in: the redirect
+            // gave a crawler openvibe.network's canonical as this page's (audit SEO-7). A form still
+            // redirects, because its session ended and sign-in brings the person back to the page.
+            if (e.status === 401) {
+                if (req.method !== 'GET' || !req.accepts('html')) return res.redirect(302, `/auth/login?next=${encodeURIComponent(req.originalUrl)}`);
+                return res.status(401).type('html').send(renderSignInPage({ next: req.path, what: 'this page' }));
+            }
             // A refusal the person can act on (a bad form value, a robot with no stream, OpenRestream not answering) says so
             // with its own status instead of the generic error page.
             if ([403, 404, 409, 422, 502, 503].includes(e.status) && e.code) return res.status(e.status).type('text/plain').send(`${e.detail || e.code}\n`);
