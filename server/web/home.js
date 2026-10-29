@@ -292,6 +292,7 @@ function framePage({ config, title, description, canonicalPath = '/', body, head
     return shell.page({
         name: SITE_NAME, service: 'bot', lang: 'en', title, siteName: SITE_NAME, description, summary: description,
         canonical: `${config.baseUrl}${canonicalPath}`, robots: 'index, follow',
+        agentLayer: require('../agent-pages').TWIN_PATH_RE.test(canonicalPath), llms: '/llms.txt',
         navbar: nav, footer: { service: 'bot', variant: 'full', mount: '#ov-footer', brandName: SITE_NAME, updates: '/updates' }, home: '/',
         navLinks: [{ label: 'Robots', href: '/robots' }, { label: 'Build', href: '/docs' }],
         head: [appIcon.headTags({ site: 'bot' }), '<link rel="manifest" href="/manifest.webmanifest">', `<link rel="apple-touch-icon" href="${require('openvibe-shared/app-icons').url('bot', 192)}">`, head].filter(Boolean).join('\n'),
@@ -329,6 +330,7 @@ function renderHome({ config, signedIn = false, models = [], robots = [], kit = 
         summary: DESCRIPTION,
         canonical: url,
         robots: 'index, follow',
+        agentLayer: true, llms: '/llms.txt',
         jsonLd: [
             seo.jsonLd.website({ name: SITE_NAME, url, description: DESCRIPTION }),
             seo.jsonLd.softwareApp({ name: SITE_NAME, url, description: DESCRIPTION, category: 'UtilitiesApplication', keywords: ['robot control panel', 'Raspberry Pi robot', 'ROS 2', 'Cozmo', 'telepresence'] }),

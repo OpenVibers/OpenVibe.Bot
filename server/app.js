@@ -176,7 +176,33 @@ function createApp(opts = {}) {
     { const legal = require('openvibe-shared/legal');
       app.get(legal.PATHS, (req, res, next) => { res.setHeader('Content-Security-Policy', HOME_CSP); next(); }, legal.handler({ id: 'bot', service: 'bot', host: 'openvibe.bot', name: 'OpenVibe.Bot', profile: 'games' })); }
     app.use(viewerMiddleware(userAuth));
-    app.use(createWebRoutes(config, { domain, sim, onvif, limits, identity, hub, log, submissions, routines, webhooks, claims, setupKeys, releaseLastmod: release.full().released_at === release.full().booted_at ? undefined : release.full().released_at }));
+    const webRoutes = createWebRoutes(config, { domain, sim, onvif, limits, identity, hub, log, submissions, routines, webhooks, claims, setupKeys, releaseLastmod: release.full().released_at === release.full().booted_at ? undefined : release.full().released_at });
+    // The agent layer (openvibe-shared/agent-layer): /.well-known/agent.json and the Markdown twins of the
+    // public pages. Only the manifest and a twin request reach it — the layer renders every page signed out,
+    // and the site's own routes answer every browser.
+    {
+        const agentRouter = express.Router();
+        require('openvibe-shared/agent-layer').mount(agentRouter, {
+            descriptor: require('./agent-descriptor'),
+            render: require('./agent-pages').createAgentPages({ router: webRoutes, host: new URL(config.baseUrl).hostname }).renderPublicPage,
+        });
+        // The page names its Markdown twin (openvibe-shared/agent-layer) and the site's llms.txt.
+        app.use((req, res, next) => {
+            if (req.method === 'GET' && require('./agent-pages').TWIN_PATH_RE.test(String(req.path || ''))) {
+                res.setHeader('Link', require('openvibe-shared/agent-layer').linkHeaderTags(config.baseUrl + req.path, config.baseUrl + '/llms.txt').header);
+            }
+            next();
+        });
+        app.use((req, res, next) => {
+            // The manifest exactly: the rest of /.well-known/ (security.txt) belongs to the app.
+            if (req.path === '/.well-known/agent.json') return agentRouter(req, res, next);
+            const p = String(req.path || '');
+            if (p.endsWith('.md') || (req.query && req.query.format === 'markdown')
+                || req.accepts(['html', 'text/markdown']) === 'text/markdown') return agentRouter(req, res, next);
+            return next();
+        });
+    }
+    app.use(webRoutes);
 
     app.use((req, res) => {
         if (req.path.startsWith('/api/') || req.path.startsWith('/internal/')) return http.sendProblem(res, 404, 'not_found', { ctx: req.ov });
