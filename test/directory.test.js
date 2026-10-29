@@ -95,8 +95,11 @@ const { loadProfiles } = require('../server/profiles');
 
     await check('/robots/new: signed in only; one choice per model, grouped by how it connects, the asked one chosen', async () => {
         const out = await get('/robots/new');
-        assert.strictEqual(out.status, 302);
-        assert.strictEqual(out.headers.get('location'), `/auth/login?next=${encodeURIComponent('/robots/new')}`);
+        const gate = await out.text();
+        // A gated page answers here with noindex (SEO-7), not a redirect to Network sign-in.
+        assert.strictEqual(out.status, 401);
+        assert.match(gate, /<meta name="robots" content="noindex, nofollow">/);
+        assert.match(gate, /href="\/auth\/login\?next=%2Frobots%2Fnew"/);
         const html = await (await get('/robots/new', alex)).text();
         for (const p of profiles) assert.ok(html.includes(`name="profile_id" value="${p.id}"`), p.id);
         assert.match(html, /value="sim\.rover" checked/, 'the simulated rover by default');

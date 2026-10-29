@@ -49,8 +49,11 @@ const { boot, check, done } = require('./helpers/app');
 
     await check('/link: sign in first, then the device, what it found, and its choices', async () => {
         const out = await get(`/link?code=${claim.user_code}`);
-        assert.strictEqual(out.status, 302);
-        assert.match(out.headers.get('location'), /^\/auth\/login\?next=%2Flink%3Fcode%3D/);
+        const gate = await out.text();
+        // A gated page answers here with noindex (SEO-7): no redirect whose destination carried another origin's canonical.
+        assert.strictEqual(out.status, 401);
+        assert.match(gate, /<meta name="robots" content="noindex, nofollow">/);
+        assert.match(gate, /href="\/auth\/login\?next=%2Flink%3Fcode%3D/);
         const r = await get(`/link?code=${claim.user_code.toLowerCase().replace('-', ' ')}`, alex);
         assert.strictEqual(r.status, 200);
         const html = await r.text();

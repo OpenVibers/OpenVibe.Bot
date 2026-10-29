@@ -63,7 +63,7 @@ const icon = (name, cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24" ar
 const AXIS_ICONS = { throttle: ['down', 'up'], y: ['down', 'up'], steer: ['left', 'right'], x: ['left', 'right'], rotation: ['ccw', 'cw'], pan: ['left', 'right'], tilt: ['down', 'up'], zoom: ['minus', 'plus'] };
 const AXIS_NAME = { throttle: 'Forward / back', y: 'Forward / back', steer: 'Steer', x: 'Sideways', rotation: 'Turn on the spot', pan: 'Pan', tilt: 'Tilt', zoom: 'Zoom' };
 
-function page(title, body, { scripts = [], bodyClass = '', description = null, canonical = null } = {}) {
+function page(title, body, { scripts = [], bodyClass = '', description = null, canonical = null, robots = null } = {}) {
     return `<!doctype html>
 <html lang="en">
 <head>
@@ -71,7 +71,8 @@ function page(title, body, { scripts = [], bodyClass = '', description = null, c
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#11151c">
-<title>${esc(title)} — OpenVibe.Bot</title>${description ? `
+<title>${esc(title)} — OpenVibe.Bot</title>${robots ? `
+<meta name="robots" content="${esc(robots)}">` : ''}${description ? `
 <meta name="description" content="${esc(description)}">
 <meta property="og:title" content="${esc(title)} — OpenVibe.Bot">
 <meta property="og:description" content="${esc(description)}">` : ''}${canonical ? `
@@ -636,6 +637,21 @@ ${first}
 }
 
 /**
+ * A gated page's answer on this origin (audit SEO-7): noindex, and a link to Network sign-in instead of a
+ * redirect there. A redirect handed a crawler openvibe.network's canonical as this page's; this keeps the
+ * page on openvibe.bot, says noindex, and a person is one click from signing in.
+ */
+function renderSignInPage({ next = '/robots', what = 'this page' } = {}) {
+    const body = `${topbar('')}
+<main class="page">
+<h1>Sign in to continue</h1>
+<p>${esc(what.charAt(0).toUpperCase() + what.slice(1))} is for OpenVibe accounts. Sign in and you come straight back here.</p>
+<p><a class="button primary" href="/auth/login?next=${esc(encodeURIComponent(next))}">Sign in with OpenVibe</a></p>
+</main>`;
+    return page('Sign in to continue', body, { robots: 'noindex, nofollow' });
+}
+
+/**
  * /link (server/claims.js): the code a device shows after `curl -fsSL https://openvibe.bot/install | sh` with no code.
  * renderLinkPage asks for it; renderClaimPage shows what that device found and the choices its robot starts with;
  * renderClaimApproved follows the device as it pairs on its own.
@@ -1003,4 +1019,4 @@ function renderPhonePage() {
     return page('This phone is a robot', body, { scripts: ['/panel/phone-device.js'], bodyClass: 'phone-page', description: 'Turn a phone into a robot on OpenVibe.Bot from its browser: its camera, voice and face, with nothing to install.', canonical: '/device/phone' });
 }
 
-module.exports = { page, renderPanel, renderPhonePage, renderMachinesPage, renderMachineDesksPage, renderMachineScreenPage, renderSharePage, renderShareGone, panelScripts, isSim, TRY_DESCRIPTION, renderEmbedRefused, renderDrivePage, renderWidget, renderRobotsPage, renderPairingPage, renderLinkPage, renderClaimPage, renderClaimApproved, camerasOf, esc };
+module.exports = { page, renderPanel, renderPhonePage, renderMachinesPage, renderMachineDesksPage, renderMachineScreenPage, renderSharePage, renderShareGone, panelScripts, isSim, TRY_DESCRIPTION, renderEmbedRefused, renderDrivePage, renderWidget, renderRobotsPage, renderPairingPage, renderLinkPage, renderSignInPage, renderClaimPage, renderClaimApproved, camerasOf, esc };
