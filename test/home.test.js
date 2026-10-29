@@ -26,19 +26,19 @@ const { boot, check, done } = require('./helpers/app');
         assert.match(html, /<link rel="canonical" href="http:\/\/bot\.test\/">/);
         assert.match(html, /href="\/auth\/login\?next=%2Frobots">Sign in with OpenVibe/);
         assert.strictEqual((html.match(/<h1[ >]/g) || []).length, 1, 'one h1');
-        // Every robot model in the catalogue (the shipped profiles) has a card under "Robots it drives today".
+        // Every robot model in the catalogue (the shipped profiles) has a card in the "Robots it drives today" rail.
         const models = (/<section class="sc-sec hm-sec" id="models"[\s\S]*?<\/section>/.exec(html) || [''])[0];
-        const names = [...models.matchAll(/<span class="hm-card-head"><b>([^<]+)<\/b>/g)].map((m) => m[1]);
+        const names = [...models.matchAll(/<a class="ovk-card-link" href="\/models\/[^"]+">([^<]+)<\/a>/g)].map((m) => m[1]);
         const shipped = fs.readdirSync(path.join(__dirname, '..', 'server', 'profiles')).filter((f) => f.endsWith('.json')).map((f) => JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'server', 'profiles', f), 'utf8')).name);
         assert.deepStrictEqual(names.slice().sort(), shipped.slice().sort(), 'one card per catalogue model');
-        assert.match(html, new RegExp(`<b>${shipped.length}</b><span>robot models</span>`), 'the stat row counts the catalogue');
+        assert.match(html, new RegExp(`<dt><a href="/models">robot models</a></dt><dd>${shipped.length}</dd>`), 'the numbers count the catalogue');
         assert.ok(!/listed robots? online/.test(html), 'no online count while nothing listed is online');
         // The simulated rover is always first under "Drive one now"; nothing else is listed yet.
         const now = (/<section class="sc-sec hm-sec" id="now"[\s\S]*?<\/section>/.exec(html) || [''])[0];
-        assert.strictEqual((now.match(/class="hm-card[ "]/g) || []).length, 1);
+        assert.strictEqual((now.match(/<article class="ovk-card/g) || []).length, 1);
         assert.match(now, /href="\/try"/);
         // The first kit's parts list, and no jobs section without OpenVibe.Search configured.
-        assert.match(html, /<h2 id="kit-h">The first kit: Adeept ADR036/);
+        assert.match(html, /<details class="ovk-fold" id="kit"><summary><span>The first kit: Adeept ADR036/);
         assert.match(html, /<b>4×<\/b><span>TT DC motors<\/span>/);
         assert.ok(!html.includes('id="jobs"'), 'a section with nothing to show is left out');
         // JSON-LD: the site, the app, the models as an ItemList, and the questions the page shows as a FAQPage.
@@ -46,14 +46,14 @@ const { boot, check, done } = require('./helpers/app');
         const types = ld.map((x) => x['@type']);
         for (const t of ['WebSite', 'WebApplication', 'ItemList', 'FAQPage']) assert.ok(types.includes(t), `JSON-LD ${t}`);
         assert.strictEqual(ld.find((x) => x['@type'] === 'ItemList').numberOfItems, shipped.length);
-        const faq = (/<section class="sc-sec hm-sec" id="faq"[\s\S]*?<\/section>/.exec(html) || [''])[0];
-        const questions = [...faq.matchAll(/<h3>([^<]+)<\/h3>/g)].map((m) => m[1].replace(/&#39;/g, "'"));
+        const faq = (/<section class="sc-sec hm-sec" id="faq">[\s\S]*?<\/section><\/section>/.exec(html) || [''])[0];
+        const questions = [...faq.matchAll(/<summary>([^<]+)<\/summary>/g)].map((m) => m[1].replace(/&#39;/g, "'"));
         assert.deepStrictEqual(ld.find((x) => x['@type'] === 'FAQPage').mainEntity.map((q) => q.name), questions, 'FAQPage holds exactly the questions shown');
         assert.ok(questions.length >= 6);
         // Your own computers: desks for your agents, desk hosts, your own models, a desk live (the Desks plan, AI on your
         // own machines), with the questions people ask about them.
-        assert.match(html, /<h2 id="computers-h">Your computers, for your agents and your AI<\/h2>/);
-        for (const card of ['A desk for each task', 'A spare computer as a desk host', 'Your own AI models', 'A desk live on your channel']) assert.ok(html.includes(`<b>${card}</b>`), card);
+        assert.match(html, /<details class="ovk-fold" id="computers"><summary><span>Your computers, for your agents and your AI/);
+        for (const card of ['A desk for each task', 'A spare computer as a desk host', 'Your own AI models', 'A desk live on your channel']) assert.ok(html.includes(`<strong>${card}</strong>`), card);
         assert.ok(questions.includes('Can my agents use my computer?') && questions.includes('Can my AI use the models on my computer?'));
         const home = await get('/home.css');
         assert.strictEqual(home.status, 200);
@@ -82,11 +82,11 @@ const { boot, check, done } = require('./helpers/app');
         await t.app.locals.sim.attach(rover.id);
         const html = await (await get('/')).text();
         const now = (/<section class="sc-sec hm-sec" id="now"[\s\S]*?<\/section>/.exec(html) || [''])[0];
-        const cards = [...now.matchAll(/<b>([^<]+)<\/b><span class="hm-state" data-state="(\w+)"/g)].map((m) => `${m[1]}:${m[2]}`);
+        const cards = [...now.matchAll(/<span class="ovk-card-badge">(Online|Offline)<\/span>[\s\S]*?<a class="ovk-card-link" href="[^"]+">([^<]+)<\/a>/g)].map((m) => `${m[2]}:${m[1].toLowerCase()}`);
         assert.deepStrictEqual(cards, ['Simulated rover:online', 'Arena rover:online', 'Garage car:offline']);
         assert.match(now, new RegExp(`href="/r/${car.id}"`));
         assert.match(now, /Adeept ADR036 4WD Smart Car · @alex/);
-        assert.match(html, /<b>1<\/b><span>listed robot online<\/span>/);
+        assert.match(html, /<dt><a href="#now">listed robot online<\/a><\/dt><dd>1<\/dd>/);
         await t.domain.robots.setListed(car.id, false);
         await t.domain.robots.setListed(rover.id, false);
     });

@@ -93,3 +93,14 @@
 @media (max-width: 520px) { .hm .sc-code pre { white-space: pre-wrap; overflow-wrap: anywhere; } .hm-term pre { font-size: 13px; } }
 @media (max-width: 420px) { .sc-hero, .sc-sec, .sc-cta { padding-left: 16px; padding-right: 16px; } }
 @media (prefers-reduced-motion: reduce) { .hm-card, .hm-stats a, .hm-rows a { transition: none; } }
+
+/* ── The short home (2026-10-29): rails, one list of ways to connect, folds for what is read once ── */
+.hm .ovk-rail { margin-top: 0; }
+.hm-under { margin: 8px 0 0; color: var(--text-secondary, #96a7c2); font-size: .92rem; line-height: 1.5; }
+.hm-more-sec .ovk-fold { margin: 10px 0 0; }
+.hm-more-sec .ovk-fold + .ovk-fold { margin-top: 8px; }
+.hm-h { margin: 0 0 6px; font-size: 1.15rem; font-weight: 800; }
+.hm-fold-lede { margin: 0 0 10px; color: var(--text-secondary, #96a7c2); line-height: 1.5; }
+.hm-more-sec .sc-sec { margin: 0; padding: 0; }
+.hm .ovk-stats { margin-top: 18px; }
+.hm .ovk-stats { font-family: var(--ovk-font); }
