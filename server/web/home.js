@@ -17,6 +17,7 @@
  */
 const shell = require('openvibe-shared/shell');
 const showcase = require('openvibe-shared/showcase');
+const kit = require('openvibe-shared/kit');
 const ovServe = require('openvibe-shared/serve');
 const frame = require('openvibe-shared/frame');
 const appIcon = require('openvibe-shared/app-icon');
@@ -73,75 +74,62 @@ function hero({ signedIn, config }) {
 <p class="hm-term-top"><span></span><span></span><span></span><b>On the robot's computer</b></p>
 <pre tabindex="0"><code><span class="hm-prompt">$</span> ${esc(install)}</code></pre>
 <ol class="hm-term-steps"><li>It finds the kit and shows a short code.</li><li>Approve the code at ${link('/link', 'openvibe.bot/link')}.</li><li>Open the robot's panel and drive.</li></ol>
-<p class="hm-term-foot">Raspberry Pi OS or any Linux. A blank microSD card? ${link('/setup/sd-card', 'Make its setup files')}, no screen needed. No robot yet? ${link('/try', 'Drive the simulated rover')}.</p></div>`;
+<p class="hm-term-foot">Raspberry Pi OS or any Linux. A blank microSD card? ${link('/setup/sd-card', 'Make its setup files')}, no screen needed.</p></div>`;
     return showcase.hero({
         eyebrow: 'OpenVibe.Bot · alpha',
         title: 'Drive your robot', accent: 'from any browser.',
         lede: 'An open control panel for robots. Pair a robot with one pasted command, then drive it with a touch joystick, '
             + 'the keyboard or a gamepad. Every command passes one gate, with roles, limits and an emergency stop that only you clear.',
+        // Two, so they sit side by side on a phone; how it works is the steps a scroll below.
         actions: signedIn
-            ? [{ label: 'Your robots', href: '/robots', primary: true }, { label: 'Try the panel', href: '/try' }, { label: 'How it works', href: '#how' }]
-            : [{ label: 'Try it now, no account', href: '/try', primary: true }, { label: 'Sign in with OpenVibe', href: '/auth/login?next=%2Frobots' }, { label: 'How it works', href: '#how' }],
+            ? [{ label: 'Your robots', href: '/robots', primary: true }, { label: 'Try the panel', href: '/try' }]
+            : [{ label: 'Try it now, no account', href: '/try', primary: true }, { label: 'Sign in with OpenVibe', href: '/auth/login?next=%2Frobots' }],
         note: 'Alpha. A paired robot sends its camera over WebRTC to OpenRestream and the panel plays it live; the first supported kit is the Adeept 4WD Smart Car for Raspberry Pi.',
         aside: { html: aside },
     });
 }
 
-/** Numbers that come straight from the catalogue and the directory. */
+/** Numbers that come straight from the catalogue and the directory: one strip (it scrolls sideways on a phone). */
 function stats({ models, robots }) {
-    const official = models.filter((m) => !m.community);
-    const community = models.length - official.length;
+    if (!models.length) return '';
+    const community = models.filter((m) => m.community).length;
     const kinds = new Set(models.map((m) => m.connect)).size;
     const caps = new Set(models.flatMap((m) => m.capabilities)).size;
     const online = robots.filter((r) => r.online).length;
-    const items = [
+    return `<section class="sc-sec hm-sec hm-stats-sec" aria-label="OpenVibe.Bot in numbers">${kit.stats([
         [models.length, models.length === 1 ? 'robot model' : 'robot models', '/models'],
         [kinds, kinds === 1 ? 'way to connect' : 'ways to connect', '#connect'],
         [caps, caps === 1 ? 'kind of control' : 'kinds of control', '#models'],
         community ? [community, community === 1 ? 'community profile' : 'community profiles', '/models#g-community'] : null,
         online ? [online, online === 1 ? 'listed robot online' : 'listed robots online', '#now'] : null,
-    ].filter(Boolean);
-    if (!models.length) return '';
-    return `<section class="sc-sec hm-stats-sec" aria-label="OpenVibe.Bot in numbers"><ul class="hm-stats">${items.map(([n, label, href]) => `<li><a href="${esc(href)}"><b>${esc(n)}</b><span>${esc(label)}</span></a></li>`).join('')}</ul></section>`;
+    ].filter(Boolean), { label: 'OpenVibe.Bot in numbers' })}</section>`;
 }
 
-const stateDot = (online) => `<span class="hm-state" data-state="${online ? 'online' : 'offline'}"><span class="hm-dot" aria-hidden="true"></span>${online ? 'Online' : 'Offline'}</span>`;
-
-/** The simulated rover anyone can drive, then the robots people list (online first). */
+/** The simulated rover anyone can drive, then the robots people list (online first), as one rail. */
 function onlineNow({ robots }) {
-    const sim = `<li class="hm-card hm-card-feature"><a class="hm-card-link" href="/try"><span class="hm-card-head"><b>Simulated rover</b>${stateDot(true)}</span>`
-        + '<span class="hm-card-text">A rover in a small arena with a camera, a range finder, line sensors, headlights and a horn. It runs in your browser.</span>'
-        + '<span class="hm-card-meta">Anyone can drive it, no account needed</span><span class="hm-go">Drive it now</span></a></li>';
-    const cards = robots.slice(0, 8).map((r) => `<li class="hm-card"><a class="hm-card-link" href="/r/${esc(r.id)}"><span class="hm-card-head"><b>${esc(r.name)}</b>${stateDot(r.online)}</span>`
-        + `<span class="hm-card-text">${esc(r.model_name)}${r.owner && r.owner.username ? ` · @${esc(r.owner.username)}` : ''}</span>`
-        + `<span class="hm-card-meta">${esc(POLICY_WORDS[r.access_policy] || '')}</span><span class="hm-go">${r.online ? 'Watch it live' : 'Its page'}</span></a></li>`).join('');
-    const lede = robots.length
-        ? 'Robots their owners list in the directory, and the simulated rover. Watch any of them live; some take visitors at the controls in turns.'
-        : 'The simulated rover is always on. Robots their owners list in the directory show here with their live panels.';
-    return sec('now', 'Drive one now', lede, `<ul class="hm-grid">${sim}${cards}</ul>`, link('/robots', 'The directory', 'hm-more'));
+    const sim = kit.card({ href: '/try', title: 'Simulated rover', type: 'game', ratio: '16/9', badge: 'Online', sub: 'Camera, range finder, line sensors, lights, horn', who: 'Anyone, no account', share: false });
+    const cards = robots.slice(0, 8).map((r) => kit.card({ href: `/r/${r.id}`, title: r.name, type: 'game', ratio: '16/9', badge: r.online ? 'Online' : 'Offline', sub: `${r.model_name}${r.owner && r.owner.username ? ` · @${r.owner.username}` : ''}`, who: POLICY_WORDS[r.access_policy] || '', share: false }));
+    return `<section class="sc-sec hm-sec" id="now">${kit.rail({ id: 'now-rail', title: 'Drive one now', more: { href: '/robots', label: robots.length ? 'The directory' : 'Browse robots' }, items: [sim].concat(cards), wrap: true })}</section>`;
 }
 
 function modelsSection({ models }) {
     if (!models.length) return '';
-    const card = (m) => `<li class="hm-card"><a class="hm-card-link" href="/models/${esc(m.id)}"><span class="hm-card-head"><b>${esc(m.name)}</b><span class="hm-badge hm-k-${esc(m.connect)}">${esc((KINDS.find((k) => k[0] === m.connect) || [, m.connect])[1])}</span></span>`
-        + `<span class="hm-card-text">${esc(short(m.description))}</span></a>`
-        + `${m.capabilities.length ? `<ul class="hm-chips">${m.capabilities.slice(0, 5).map((c) => `<li>${esc(capWord(c))}</li>`).join('')}${m.capabilities.length > 5 ? `<li>+${m.capabilities.length - 5}</li>` : ''}</ul>` : ''}</li>`;
-    return sec('models', 'Robots it drives today', `${plural(models.length, 'model has', 'models have')} a profile, and the panel draws each one's controls from it: a joystick for a base that drives, sliders for a pan-tilt head, buttons for lights and a horn.`,
-        `<ul class="hm-grid">${models.map(card).join('')}</ul>`, link('/models', 'All models', 'hm-more'));
+    const kindOf = (m) => (KINDS.find((k) => k[0] === m.connect) || [, m.connect])[1];
+    const cards = models.map((m) => kit.card({ href: `/models/${m.id}`, title: m.name, type: 'game', ratio: '16/9', badge: kindOf(m), sub: m.capabilities.slice(0, 3).map(capWord).join(' · '), peek: short(m.description), share: false }));
+    return `<section class="sc-sec hm-sec" id="models">${kit.rail({ id: 'models-rail', title: 'Robots it drives today', more: { href: '/models', label: `All ${models.length} models` }, items: cards, wrap: true })}
+<p class="hm-under">Each has a profile the panel draws its controls from: a joystick for a base that drives, sliders for a pan-tilt head, buttons for lights and a horn.</p></section>`;
 }
 
-/** The connection kinds as categories, each with the models that use it. */
+/** The connection kinds as one list, each with how many models use it. */
 function connectSection({ models }) {
     const groups = KINDS.map(([k, label, text]) => ({ k, label, text, ms: models.filter((m) => m.connect === k) })).filter((g) => g.ms.length);
     if (!groups.length) return '';
     const n = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight'][groups.length] || String(groups.length);
     return sec('connect', `${n} ${groups.length === 1 ? 'way' : 'ways'} to connect, one panel`, 'However a robot reaches OpenVibe, it gets the same panel, the same gate and the same emergency stop.',
-        `<ul class="hm-kinds">${groups.map((g) => `<li><p class="hm-kind-head"><span class="hm-badge hm-k-${esc(g.k)}">${esc(g.label)}</span><span class="hm-kind-n">${esc(plural(g.ms.length, 'model', 'models'))}</span></p>`
-            + `<p class="hm-kind-text">${esc(g.text)}</p><p class="hm-kind-models">${g.ms.map((m) => link(`/models/${m.id}`, m.name)).join(', ')}</p></li>`).join('')}</ul>`);
+        kit.list(groups.map((g) => kit.row({ href: g.ms.length === 1 ? `/models/${g.ms[0].id}` : `/models#k-${g.k}`, title: g.label, sub: g.text, meta: plural(g.ms.length, 'model', 'models') }))));
 }
 
-function startSection({ config }) {
-    const base = config.baseUrl;
+function startSection() {
     return showcase.steps({
         id: 'how',
         title: 'Online in a minute',
@@ -151,86 +139,61 @@ function startSection({ config }) {
             { title: 'Approve it', text: 'Sign in at openvibe.bot/link and enter the code. The robot\'s credential is stored hashed, and you can revoke it any time.' },
             { title: 'Drive it', text: 'Open the robot\'s panel in any browser, phone included. Share it, list it, or bind it to your OpenVibe.Live channel.' },
         ],
-    }) + showcase.code({
-        id: 'api',
-        title: 'The same robot from your own code',
-        lede: 'A REST API and the openvibe-sdk client, held to the same roles, limits and emergency stop as the panel. Profiles and kits are public reads.',
-        samples: [
-            { label: 'JavaScript (openvibe-sdk)', lang: 'js', code: "import { createClient } from 'openvibe-sdk/core';\nimport { createBotClient } from 'openvibe-sdk/bot';\n\nconst client = createClient({ credentials: 'include' });\nconst bot = createBotClient(client);\nconst { robots } = await bot.robots.list();\n\n// Half speed ahead for 300 ms, same gate as the joystick\nawait bot.robots.command(robots[0].id, {\n    kind: 'drive', value: { throttle: 0.5, steer: 0 }, ms: 300,\n});" },
-            { label: 'Public reads (curl)', lang: 'sh', code: `# Every robot model and its controls\ncurl ${base}/api/v1/profiles\n\n# The kits, with their parts lists\ncurl ${base}/api/v1/kits` },
-        ],
     });
 }
 
-function panelSection() {
-    return showcase.features({
-        id: 'panel',
-        title: 'What the panel does',
-        items: [
-            { icon: 'ov:games', title: 'Real controls', text: 'A touch joystick, the keyboard or a gamepad, plus buttons and sliders, laid out from the robot\'s profile, with a latency meter.' },
-            { icon: 'ov:error', title: 'Safe by default', text: 'Per-robot limits, cooldowns and a turn budget on every command. The emergency stop is latched: only the owner clears it, a stop pressed on the robot itself holds until it is released there, and a halt always gets through.' },
-            { icon: 'ov:history', title: 'Every command on the record', text: 'Allowed or refused, each command is audited and kept for 30 days.' },
-            { icon: 'ov:account', title: 'Share control', text: 'Add people by @username as operators or viewers, or open a queue where visitors take turns.' },
-            { icon: 'ov:live', title: 'Show it on your channel', text: 'Bind the robot to your OpenVibe.Live channel and its panel shows under your stream: viewers follow its state, and anyone allowed to drive presses Drive and takes the controls right there.' },
-            { icon: 'ov:code', title: 'An API with the same gate', text: 'A REST API for your own apps, held to the same roles, limits and e-stop as the panel.' },
-        ],
-    });
-}
-
-function automationSection() {
-    return showcase.features({
-        id: 'automate',
-        title: 'Let it run without you',
-        lede: 'Routines, webhooks and your own agent all go through the gate a person does: the same limits, the same e-stop, the same audit.',
-        items: [
-            { icon: 'ov:history', title: 'Routines', text: 'Plain step lines such as forward 2, wait 1, say Hello, run on demand, every few minutes, daily, or each time the robot comes online.', href: '/docs/automation' },
-            { icon: 'ov:bell', title: 'Signed webhooks', text: 'Online, offline, e-stop and refused commands sent to your own https address, signed like OpenVibe.Events deliveries.', href: '/docs/automation' },
-            { icon: 'ov:actor', title: 'Your agent drives', text: 'Turn on Your agent and your OpenVibe.Actor agent can see your robots and run steps on that one, as you and nobody else.', href: 'https://openvibe.actor/' },
-            { icon: 'ov:plug', title: 'Your computer, for your agents', text: 'The Node\'s computer plugin lets your agent work on your own machine, at a level you set on that machine: observe, ask, trusted or full.', href: '/docs/computers' },
-        ],
-    });
-}
-
-function kitSection({ kit, models }) {
-    if (!kit || !kit.parts || !kit.parts.length) return '';
-    const model = models.find((m) => m.id === kit.profile_id);
-    const parts = kit.parts.map((p) => `<li><b>${esc(p.qty || 1)}×</b><span>${esc(p.name)}${p.note ? `<small>${esc(p.note)}</small>` : ''}</span></li>`).join('');
-    return sec('kit', `The first kit: ${kit.name}`, 'What to get for the robot OpenVibe.Bot was built around. The OpenVibe Node drives its Robot HAT directly, publishes the Pi camera and stops the motors the moment commands stop.',
-        `<div class="hm-kit"><ul class="hm-parts">${parts}</ul><p class="hm-kit-actions">${link(kit.build_guide_url, 'Adeept\'s build guide', 'sc-btn')}${model ? ` ${link(`/models/${model.id}`, 'Its model page', 'sc-btn')}` : ''} ${link('https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/hardware-adeept.md', 'Setup guide for the Node', 'sc-btn')}</p></div>`);
-}
-
-/** The same OpenVibe Node on a person's own computers: desks for their agents, desk hosts, their own models. */
-function computersSection() {
-    const cards = [
+// The parts people read once fold away: what the panel does, automation, your computers, the API, the kit, building.
+const rows = (items) => kit.list(items.map(([href, title, text]) => kit.row({ href, title, sub: text, rel: /^https?:/.test(href) ? 'noopener' : '' })), { flush: true });
+function moreSection({ config, kit: k, models }) {
+    const base = config.baseUrl;
+    const panel = rows([
+        ['/try', 'Real controls', 'A touch joystick, the keyboard or a gamepad, plus buttons and sliders, laid out from the robot\'s profile, with a latency meter.'],
+        ['/docs/profiles', 'Safe by default', 'Per-robot limits, cooldowns and a turn budget on every command; a latched emergency stop that only the owner clears; a halt always gets through.'],
+        ['/robots', 'Every command on the record', 'Allowed or refused, each command is audited and kept for 30 days.'],
+        ['/robots', 'Share control', 'Add people by @username as operators or viewers, or open a queue where visitors take turns.'],
+        ['https://openvibe.live/', 'Show it on your channel', 'Bind the robot to your OpenVibe.Live channel: its panel shows under your stream, and anyone allowed takes the controls there.'],
+    ]);
+    const automate = rows([
+        ['/docs/automation', 'Routines', 'Plain step lines such as forward 2, wait 1, say Hello, on demand, on a schedule, or each time the robot comes online.'],
+        ['/docs/automation', 'Signed webhooks', 'Online, offline, e-stop and refused commands sent to your own https address, signed like OpenVibe.Events deliveries.'],
+        ['https://openvibe.actor/', 'Your agent drives', 'Turn on Your agent and your OpenVibe.Actor agent can run steps on that robot, as you and nobody else.'],
+    ]);
+    const computers = rows([
         ['/docs/computers#desks-h', 'A desk for each task', 'Your agents work on desks of their own on your computer, a browser or a whole screen, never yours. Watch any of them live and take it over.'],
         ['/machines', 'A spare computer as a desk host', 'An old laptop or a mini PC hosts desks for all your agents\' tasks, with no screen or sign-in, sized to its memory.'],
         ['/docs/computers#models-c-h', 'Your own AI models', 'Ollama, LM Studio or llama.cpp on your computer answers your Vibe, your AI members and your stream\'s AI viewers: free, and no port is opened.'],
         ['/docs/computers', 'A desk live on your channel', 'When you choose, an agent\'s desk shows on your OpenVibe Live channel for up to 30 minutes, so people can watch it work.'],
-    ];
-    return sec('computers', 'Your computers, for your agents and your AI', 'The same OpenVibe Node runs on your own computers. It connects out, nobody else\'s work reaches them, and the limits you set on each computer always win.',
-        `<ul class="hm-grid hm-grid-tight">${cards.map(([href, title, text]) => `<li class="hm-card"><a class="hm-card-link" href="${esc(href)}"><span class="hm-card-head"><b>${esc(title)}</b></span><span class="hm-card-text">${esc(text)}</span></a></li>`).join('')}</ul>`,
-        link('/machines', 'Your machines', 'hm-more'));
-}
-
-function docsSection() {
-    const docs = [
+    ]);
+    const api = showcase.code({
+        id: 'api', title: '', lede: 'A REST API and the openvibe-sdk client, held to the same roles, limits and emergency stop as the panel. Profiles and kits are public reads.',
+        samples: [
+            { label: 'JavaScript (openvibe-sdk)', lang: 'js', code: "import { createClient } from 'openvibe-sdk/core';\nimport { createBotClient } from 'openvibe-sdk/bot';\n\nconst bot = createBotClient(createClient({ credentials: 'include' }));\nconst { robots } = await bot.robots.list();\n\n// Half speed ahead for 300 ms, same gate as the joystick\nawait bot.robots.command(robots[0].id, {\n    kind: 'drive', value: { throttle: 0.5, steer: 0 }, ms: 300,\n});" },
+            { label: 'Public reads (curl)', lang: 'sh', code: `# Every robot model and its controls\ncurl ${base}/api/v1/profiles\n\n# The kits, with their parts lists\ncurl ${base}/api/v1/kits` },
+        ],
+    });
+    const model = k ? models.find((m) => m.id === k.profile_id) : null;
+    const kitBody = k && k.parts && k.parts.length
+        ? `<p class="hm-fold-lede">What to get for the robot OpenVibe.Bot was built around. The OpenVibe Node drives its Robot HAT directly, publishes the Pi camera and stops the motors the moment commands stop.</p><ul class="hm-parts">${k.parts.map((p) => `<li><b>${esc(p.qty || 1)}×</b><span>${esc(p.name)}${p.note ? `<small>${esc(p.note)}</small>` : ''}</span></li>`).join('')}</ul>
+<p class="hm-kit-actions">${link(k.build_guide_url, 'Adeept\'s build guide', 'sc-btn')}${model ? ` ${link(`/models/${model.id}`, 'Its model page', 'sc-btn')}` : ''} ${link('https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/hardware-adeept.md', 'Setup guide for the Node', 'sc-btn')}</p>`
+        : '';
+    const build = rows([
         ['/docs/drivers', 'Write a driver', 'A separate program in any language that speaks JSON lines with the OpenVibe Node: every message and the safety rules.'],
         ['/docs/profiles', 'Robot profiles', 'The JSON that says what a robot can do and which controls its panel shows, with a validator.'],
-        ['/docs/automation', 'Routines, webhooks and your agent', 'Steps on a schedule, signed webhooks for a robot\'s events, and the switch that lets your agent drive.'],
-        ['/docs/computers', 'Your computer for your agents', 'The Node\'s computer plugin: levels set on the computer, approvals there, desks, your own models, and the API.'],
         ['/robots/submit', 'Submit a robot', 'Describe your robot with a profile and point at its driver. Once reviewed, anyone can add one.'],
         ['https://github.com/OpenVibers/OpenVibe.Bot', 'The source', 'OpenVibe.Bot and the OpenVibe Node are open source under the AGPL-3.0.'],
-    ];
-    return sec('build', 'Build for OpenVibe.Bot', 'Write a driver for a robot, or describe one with a profile and let the panel render it.',
-        `<ul class="hm-grid hm-grid-tight">${docs.map(([href, title, text]) => `<li class="hm-card"><a class="hm-card-link" href="${esc(href)}"${/^https?:/.test(href) ? ' rel="noopener"' : ''}><span class="hm-card-head"><b>${esc(title)}</b></span><span class="hm-card-text">${esc(text)}</span></a></li>`).join('')}</ul>`,
-        link('/docs', 'All build pages', 'hm-more'));
+    ]);
+    return `<section class="sc-sec hm-sec hm-more-sec" id="more" aria-labelledby="more-h"><h2 id="more-h" class="hm-h">More on OpenVibe.Bot</h2>
+${kit.fold({ id: 'panel', title: 'What the panel does', meta: 'controls, safety, sharing', body: panel })}
+${kit.fold({ id: 'automate', title: 'Let it run without you', meta: 'routines, webhooks, your agent', body: `<p class="hm-fold-lede">They all go through the gate a person does: the same limits, the same e-stop, the same audit.</p>${automate}` })}
+${kit.fold({ id: 'computers', title: 'Your computers, for your agents and your AI', meta: 'the same Node', body: `<p class="hm-fold-lede">The same OpenVibe Node runs on your own computers. It connects out, nobody else's work reaches them, and the limits you set on each computer always win.</p>${computers}` })}
+${kit.fold({ id: 'code', title: 'The same robot from your own code', meta: 'REST and the SDK', body: api })}
+${kitBody ? kit.fold({ id: 'kit', title: `The first kit: ${k.name}`, meta: plural(k.parts.length, 'part', 'parts'), body: kitBody }) : ''}
+${kit.fold({ id: 'build', title: 'Build for OpenVibe.Bot', meta: 'drivers, profiles, the source', body: `${build}<p class="hm-fold-lede">${link('/docs', 'All build pages', 'hm-more')}</p>` })}</section>`;
 }
 
 function jobsSection({ jobs }) {
     if (!jobs || !jobs.length) return '';
-    const row = (j) => `<li><a href="${esc(j.url)}" rel="noopener"><b>${esc(j.title)}</b><span>${esc([j.location, j.remote ? 'Remote' : '', j.type].filter(Boolean).join(' · '))}</span></a></li>`;
-    return sec('jobs', 'Robotics jobs on OpenVibe.Work', 'Openings in robotics from the public job boards OpenVibe.Work gathers.',
-        `<ul class="hm-rows">${jobs.map(row).join('')}</ul>`, link('https://openvibe.work/jobs?q=robotics', 'More jobs', 'hm-more'));
+    return `<section class="sc-sec hm-sec" id="jobs">${kit.list(jobs.slice(0, 3).map((j) => kit.row({ href: j.url, rel: 'noopener', title: j.title, sub: [j.location, j.remote ? 'Remote' : '', j.type].filter(Boolean).join(' · ') })), { title: 'Robotics jobs on OpenVibe.Work', more: { href: 'https://openvibe.work/jobs?q=robotics', label: 'More jobs' } })}</section>`;
 }
 
 /** Questions people ask first, answered from what Bot does today; the model list comes from the catalogue. */
@@ -251,30 +214,22 @@ function faqItems({ models }) {
     ].filter(Boolean);
 }
 
+/** The questions, closed until opened (showcase.faq). */
 function faqSection(items) {
-    return sec('faq', 'Questions', '', `<div class="hm-faq">${items.map((f) => `<div class="hm-qa"><h3>${esc(f.q)}</h3><p>${esc(f.a)}</p></div>`).join('')}</div>`);
+    return `<section class="sc-sec hm-sec" id="faq">${showcase.faq({ id: 'faq-list', title: 'Questions', items: items.map((x) => [x.q, x.a]) })}</section>`;
 }
 
-function sections({ signedIn = false, config, models = [], robots = [], kit = null, jobs = [], faq = null } = {}) {
+function sections({ signedIn = false, config, models = [], robots = [], kit: k = null, jobs = [], faq = null } = {}) {
     return hero({ signedIn, config })
         + stats({ models, robots })
         + onlineNow({ robots })
         + modelsSection({ models })
         + connectSection({ models })
-        + startSection({ config })
-        + panelSection()
-        + automationSection()
-        + computersSection()
-        + kitSection({ kit, models })
-        + docsSection()
+        + startSection()
+        + moreSection({ config, kit: k, models })
         + jobsSection({ jobs })
         + faqSection(faq || faqItems({ models }))
-        + showcase.network({ service: 'bot' }) + showcase.cta({
-            title: 'Bring your robot online',
-            text: 'Start with the simulated rover, then pair the real one with one command.',
-            actions: signedIn ? [{ label: 'Add a robot', href: '/robots/new', primary: true }, { label: 'The directory', href: '/robots' }]
-                : [{ label: 'Try it now, no account', href: '/try', primary: true }, { label: 'Sign in and add a robot', href: '/auth/login?next=%2Frobots%2Fnew' }],
-        });
+        + showcase.network({ service: 'bot' });
 }
 
 /** The OpenVibe Frame around one of Bot's public pages (the front page, the Build docs): navbar, footer, theme. */
@@ -341,6 +296,8 @@ function renderHome({ config, signedIn = false, models = [], robots = [], kit = 
         head: [
             appIcon.headTags({ site: 'bot' }),
             '<link rel="manifest" href="/manifest.webmanifest">', `<link rel="apple-touch-icon" href="${require('openvibe-shared/app-icons').url('bot', 192)}">`,
+            `<link rel="stylesheet" href="${ovServe.url('kit.css')}">`,
+            `<link rel="stylesheet" href="${ovServe.url('room.css')}">`,
             `<link rel="stylesheet" href="${ovServe.url(showcase.STYLESHEET)}">`,
             '<link rel="stylesheet" href="/home.css">',
         ].join('\n'),
