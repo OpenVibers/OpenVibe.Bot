@@ -104,3 +104,40 @@
 .hm-more-sec .sc-sec { margin: 0; padding: 0; }
 .hm .ovk-stats { margin-top: 18px; }
 .hm .ovk-stats { font-family: var(--ovk-font); }
+
+/* Pick (the owner's short-pages rule, 2026-10-30): on a phone the home's blocks of the same kind are one at a
+   time, picked with a row of chips. Radio inputs and :has(), no script: the chips and the one-block rule live under
+   640 px and only where :has() is understood, so a wider screen, or an older browser, shows every block and no chips. */
+.pick-head { display: none; }
+.pick-row { display: none; }
+.pick-pane { min-width: 0; }
+@supports selector(:has(*)) { @media (max-width: 640px) {
+  .pick-head { display: block; }
+  .pick-head h2 { margin: 0 0 4px; font-size: 1.15rem; }
+  .pick-row { display: flex; gap: 8px; overflow-x: auto; margin: 10px -16px 0; padding: 2px 16px 4px; scrollbar-width: none; overscroll-behavior-x: contain; }
+  .pick-row::-webkit-scrollbar { display: none; }
+  .pick-row input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+  .pick-row label { display: inline-flex; align-items: center; flex: none; min-height: 44px; padding: 0 15px; border-radius: 999px; border: 1px solid var(--border, rgba(255, 255, 255, .08)); color: var(--text-secondary, #96a7c2); font-size: .9rem; font-weight: 650; white-space: nowrap; cursor: pointer; }
+  .pick-row input:checked + label { color: var(--text-primary, #e6edf7); border-color: var(--accent, #3b82f6); background: color-mix(in srgb, var(--accent, #3b82f6) 12%, transparent); }
+  .pick-row input:focus-visible + label { outline: 2px solid var(--accent, #3b82f6); outline-offset: 2px; }
+  .pick-pane { display: none; }
+  /* The chip names the block, so the block's own heading gives way to it. */
+  .hm-sec .hm-head h2 { display: none; }
+} }
+
+/* The fold (the owner's short-pages rule): closed on a phone, and where there is room it looks like the section it
+   replaces: a heading and its content, with no card around it. */
+.hm-fold-block { margin: 28px 0; }
+.hm-fold-block > summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 48px; padding: 0 16px; cursor: pointer; color: var(--text-primary, #e6edf7); font-weight: 700; list-style: none; border: 1px solid var(--border, rgba(255, 255, 255, .08)); border-radius: 14px; background: var(--bg-secondary, #101828); }
+.hm-fold-block > summary::-webkit-details-marker { display: none; }
+.hm-fold-block > summary h2 { margin: 0; padding: 0; border: 0; font-size: 1.05rem; }
+.hm-fold-block > summary span { color: var(--text-secondary, #96a7c2); font-weight: 600; font-size: .86rem; text-align: right; }
+.hm-fold-block > summary:focus-visible { outline: 2px solid var(--accent, #3b82f6); outline-offset: -2px; border-radius: 14px; }
+.hm-fold-block .sc-sec { margin: 0; }
+.hm-fold-block .sc-sec > h2, .hm-fold-block .hm-h { display: none; }
+@media (min-width: 641px) {
+  .hm-fold-block { border: 0; background: none; margin-top: 40px; }
+  .hm-fold-block > summary { display: block; min-height: 0; padding: 0; border: 0; background: none; }
+  .hm-fold-block > summary h2 { margin: 0 0 6px; font-size: 1.15rem; border-bottom: 1px solid var(--border, rgba(255, 255, 255, .08)); padding-bottom: .2em; }
+  .hm-fold-block > summary span { display: none; }
+}
