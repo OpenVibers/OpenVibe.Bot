@@ -8,9 +8,11 @@
  */
 const assert = require('assert');
 const http = require('http');
-const { createNetworkSender } = require('openvibe-sdk/account-data');
+const { createNetworkSender, uncovered } = require('openvibe-sdk/account-data');
 const { signDeliveryHeaders } = require('openvibe-sdk/events');
 const { boot, check, done } = require('./helpers/app');
+const { TABLES } = require('../server/account-data');
+const { testDb } = require('./helpers/db');
 
 const SECRET = `whsec_${'fixture'.repeat(6)}`;
 
@@ -31,6 +33,19 @@ async function startNetworkStub() {
 }
 
 (async () => {
+    await check('every table that names a person is covered or exempted with a reason', async () => {
+        const d = await testDb();
+        try {
+            const missing = await uncovered(d.db, {
+                tables: TABLES,
+               
+                taskKeyed: ["robot_routines","robot_webhooks"],
+                exempt: {"account_data_events":"the ledger of requests itself: which export and deletion Bot applied"},
+            });
+            assert.deepStrictEqual(missing, [], `a table with a person column is neither covered nor exempted: ${missing.join(', ')}`);
+        } finally { await d.close(); }
+    });
+
     const stub = await startNetworkStub();
     const t = await boot({ env: { BOT_EVENTS_SECRET: SECRET }, appOpts: { accountSend: createNetworkSender({ networkInternalUrl: stub.url, clientId: 'bot', clientSecret: 'shh' }) } });
     const alex = t.network.newUser('alex');
