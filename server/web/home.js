@@ -261,6 +261,13 @@ function sections({ signedIn = false, config, models = [], robots = [], kit: k =
         });
 }
 
+/**
+ * The footer's own script: the shared footer (openvibe-shared/footer.js) is rendered on the server, but it only folds
+ * its link columns on a phone once it is mounted in the browser (openvibe-shared/footer.js, foldOnPhones). Without
+ * this call Bot's footer stayed open on every phone: 906 px where the other sites show 470.
+ */
+const footerBoot = (footer) => `<script>document.addEventListener('DOMContentLoaded', function () { try { if (window.OpenVibeFooter) OpenVibeFooter.init(${JSON.stringify(footer)}); } catch (e) { /* the Frame is optional */ } });</script>`;
+
 /** The OpenVibe Frame around one of Bot's public pages (the front page, the Build docs): navbar, footer, theme. */
 function framePage({ config, title, description, canonicalPath = '/', body, head = '' }) {
     const nav = {
@@ -280,7 +287,7 @@ function framePage({ config, title, description, canonicalPath = '/', body, head
         navbar: nav, footer: { service: 'bot', variant: 'full', mount: '#ov-footer', brandName: SITE_NAME, updates: '/updates' }, home: '/',
         navLinks: [{ label: 'Robots', href: '/robots' }, { label: 'Build', href: '/docs' }],
         head: [appIcon.headTags({ site: 'bot' }), '<link rel="manifest" href="/manifest.webmanifest">', `<link rel="apple-touch-icon" href="${require('openvibe-shared/app-icons').url('bot', 192)}">`, head].filter(Boolean).join('\n'),
-        body: `<div id="navbar-mount"></div>\n${body}`,
+        body: `<div id="navbar-mount"></div>\n${body}\n${footerBoot({ service: 'bot', variant: 'full', mount: '#ov-footer', brandName: SITE_NAME, updates: '/updates' })}`,
     });
 }
 
@@ -337,7 +344,8 @@ function renderHome({ config, signedIn = false, models = [], robots = [], kit = 
         body: `<div id="navbar-mount"></div>
 <main id="main" class="page hm">
 ${body}
-</main>`,
+</main>
+${footerBoot(footer)}`,
     });
 }
 
