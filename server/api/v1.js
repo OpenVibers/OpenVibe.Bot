@@ -435,6 +435,13 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         return {
             id: device.id, name: device.name || null, online: !!st.online, agent_computer: !!device.agent_computer, ai_models: !!device.ai_models, watch_probe: !!device.watch_probe,
             shared_desks: !!device.shared_desks,
+            // The machine's id on Network (`nod_…`) and the OpenVibe.Node's name for it, so a caller that knows the
+            // machine from Network (Codes' fleet, a Run pin) finds this row (Codes C9c).
+            node_id: device.node_principal || null,
+            // What its coding agents have left, as its Node last reported it, and when Bot stored that reading
+            // (Codes C9c). null: the machine has reported none (no OpenVibe.Codes runner, or no reading yet).
+            fleet: json(device.fleet, null),
+            fleet_at: device.fleet_at ? new Date(device.fleet_at).toISOString() : null,
             voice: { on: !!device.voice_on, call_word: device.call_word || DEFAULT_CALL_WORD },
             computer: offered ? {
                 level: typeof sensors.computer_level === 'string' ? sensors.computer_level : ((pick('files') || pick('terminal') || pick('screen') || {}).level || null),

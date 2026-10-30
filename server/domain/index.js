@@ -863,6 +863,18 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
             [id, kind ?? null, drivers ? JSON.stringify(drivers) : null, capabilities ? JSON.stringify(capabilities) : null,
                 agentVersion !== undefined, agentVersion ?? null, iso(now())]);
     }
+    /**
+     * Keep the machine's latest fleet reading and when Bot stored it (Codes C9c). The reading is already bounded by
+     * server/fleet.js; this is the row. A machine that has stopped beating keeps its last reading, and fleet_at says
+     * how old it is.
+     */
+    async function setFleet(id, fleet) {
+        changed();
+        return db.maybe(
+            `UPDATE devices SET fleet = $2::jsonb, fleet_at = $3, updated_at = $3
+             WHERE id = $1 AND revoked_at IS NULL RETURNING *`,
+            [id, JSON.stringify(fleet), iso(now())]);
+    }
     /** Revoke a Network-paired device's principal on Network too (null: Network no longer knows it). */
     async function revokeNode(principalId) {
         if (!nodes) fail(503, 'bot.network_unavailable', 'Network-paired machines are not configured here');
@@ -1315,7 +1327,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
             localProfile, saveLocalProfile, useCatalogueProfile },
         members: { roleOf, add: addOperator, remove: removeOperator, list: listOperators },
         pairing: { create: createPairingCode, redeem, prune: prunePairingCodes, installerCommand, driverForProfile, whipUrl, onPaired },
-        devices: { byCredential, bindNode, issuePublishKey, revokeVideo, updateDeclared, revokeNode, ensureServerDevice, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, revokeByNode, touchSeen, setOnline, ownerOf, onChange },
+        devices: { byCredential, bindNode, issuePublishKey, revokeVideo, updateDeclared, setFleet, revokeNode, ensureServerDevice, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, revokeByNode, touchSeen, setOnline, ownerOf, onChange },
         machines: { mint: mintMachine, list: listMachines, workerRef, setAgentComputer, setAiModels, setWatchProbe, setVoice, setSharedDesks, listSharedDesks,
             screen: { key: screenKey, liveKey: liveScreenKey, live: screenLive, end: screenEnd, archive: screenArchive } },
         deskLeases,

@@ -37,8 +37,9 @@ const TABLES = [
     { table: 'profile_submissions', subject: 'submitter_subject', file: 'robot-submissions.json', columns: ['profile_id', 'profile_version', 'profile', 'driver_url', 'guide_url', 'license', 'notes', 'status', 'review_note', 'created_at'], order: 'created_at', erase: { keep: 'approved profiles stay in the catalogue, authorless (extraErase)' } },
     { table: 'profile_submissions', subject: 'reviewed_by', file: null, erase: anonymize },
     // Their own machines that run their jobs (plan T14/T16): exported here; revoked and made nameless and ownerless in
-    // extraErase (run jobs reference the device rows and are billing records).
-    { table: 'devices', subject: 'owner_subject', file: 'machines.json', columns: ['id', 'name', 'kind', 'agent_version', 'created_at', 'last_seen', 'revoked_at'], order: 'created_at', erase: { keep: 'revoked and made ownerless in extraErase' } },
+    // extraErase (run jobs reference the device rows and are billing records). What the machine's coding agents last
+    // reported (fleet, fleet_at; Codes C9c) is theirs too: labels, numbers and times only, never a key or a token.
+    { table: 'devices', subject: 'owner_subject', file: 'machines.json', columns: ['id', 'name', 'kind', 'agent_version', 'created_at', 'last_seen', 'revoked_at', 'fleet', 'fleet_at'], order: 'created_at', erase: { keep: 'revoked and made ownerless in extraErase' } },
 ];
 
 async function extraExport(db, subject) {

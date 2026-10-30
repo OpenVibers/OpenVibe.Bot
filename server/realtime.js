@@ -29,12 +29,16 @@ const { userPrincipal, verifyService, verifyNode, isNodeToken, PRINCIPAL_SUB, de
 const { getProfile } = require('./profiles');
 const { createVoice } = require('./voice');
 const { computerCaps } = require('./machine-ai');
+const { sanitize: sanitizeFleet } = require('./fleet');
 
 const OPEN = 1;
 const MAX_BACKLOG = 64;   // frames a device may send before its authentication completes
 const ACCESS_COOKIE = 'ov_token';
 const DEVICE_KINDS = new Set(['onboard', 'bridge', 'server']);
 const MAX_AGENT_VERSION = 40;
+// How often a machine's unchanged fleet reading is stored again (Codes C9c): its Node re-reads its agents' logins
+// every minute, so a minute is as fresh as the reading can be, and a beat every second would be a write a second.
+const FLEET_REFRESH_MS = 60_000;
 const WATCH_MAX_PAYLOAD = 4 * 1024;   // a watcher only ever sends join/leave
 // A machine's answer to a computer command (exec output, a file, a screen) is at most 512 KB of JSON in its ack
 // (OpenVibe.Node protocol.MaxAckData), so a device frame may be that large; ws closes a socket on a larger frame.
@@ -372,6 +376,23 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         for (const robotId of deviceRobotIds(conn.device)) broadcast(robotId);
     }
 
+    /**
+     * Keep what the machine's coding agents have left (Codes C9c), from the heartbeat's `fleet`. The reading is
+     * stored when it changed or is a minute old, so a machine that keeps beating keeps `fleet_at` current without a
+     * write per heartbeat, and one that stops beating keeps its last reading with an age that says so. Never awaited:
+     * the ack is the heartbeat's answer, and a machine neither waits on nor hears about a store that failed.
+     */
+    function noteFleet(conn, raw) {
+        if (conn.sim || !conn.device) return;
+        const fleet = sanitizeFleet(raw);
+        if (fleet === null) return;
+        const key = JSON.stringify(fleet);
+        if (conn.fleetKey === key && now() - conn.fleetAt < FLEET_REFRESH_MS) return;
+        conn.fleetKey = key;
+        conn.fleetAt = now();
+        domain.devices.setFleet(conn.device.id, fleet).catch((e) => log.warn(`[Bot] machine ${conn.device.id} fleet: ${e.message}`));
+    }
+
     async function handleDeviceMessage(conn, raw) {
         let msg; try { msg = JSON.parse(String(raw)); } catch { return sendError(conn, 'bot.bad_json', 'frames must be JSON'); }
         if (!msg || typeof msg !== 'object') return sendError(conn, 'bot.bad_frame', 'a frame must be an object');
@@ -383,6 +404,8 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         switch (msg.type) {
             case 'heartbeat': {
                 if (Number.isFinite(msg.rtt_ms)) conn.rttMs = Math.round(msg.rtt_ms);
+                // What the machine's coding agents have left (Codes C9c), stored for Codes' Agents page and router.
+                if (msg.fleet !== undefined) noteFleet(conn, msg.fleet);
                 // `echo` carries the device's `t` back for its RTT; the envelope `seq` stays Bot's own counter.
                 const ack = { echo: msg.t !== undefined ? msg.t : null, server_time: iso(now()) };
                 // OpenVibe.Node reads `heartbeat_ack.t` (its RTT is now - t), so echo it as `t` as well.
