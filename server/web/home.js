@@ -22,6 +22,7 @@ const ovServe = require('openvibe-shared/serve');
 const frame = require('openvibe-shared/frame');
 const appIcon = require('openvibe-shared/app-icon');
 const seo = require('openvibe-shared/seo');
+const { pickBlock, pickRules, foldBlock } = require('./short');
 
 const SITE_NAME = 'OpenVibe.Bot';
 const NETWORK_URL = 'https://openvibe.network';
@@ -121,16 +122,27 @@ function modelsSection({ models }) {
 }
 
 /** The connection kinds as one list, each with how many models use it. */
-function connectSection({ models }) {
+function connectSection({ models, rules }) {
     const groups = KINDS.map(([k, label, text]) => ({ k, label, text, ms: models.filter((m) => m.connect === k) })).filter((g) => g.ms.length);
     if (!groups.length) return '';
     const n = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight'][groups.length] || String(groups.length);
+    // The ways to connect are blocks of the same kind: on a phone a row of chips picks one of them and the chip names
+    // it, so the list is one way at a time. Every way stays in the page.
+    const panes = groups.map((g) => ({
+        id: g.k,
+        label: g.label,
+        html: kit.list([kit.row({ href: g.ms.length === 1 ? `/models/${g.ms[0].id}` : `/models#k-${g.k}`, title: g.label, sub: g.text, meta: plural(g.ms.length, 'model', 'models') })]),
+    }));
+    if (rules) rules.push(pickRules('connect', panes.map((p) => p.id)));
     return sec('connect', `${n} ${groups.length === 1 ? 'way' : 'ways'} to connect, one panel`, 'However a robot reaches OpenVibe, it gets the same panel, the same gate and the same emergency stop.',
-        kit.list(groups.map((g) => kit.row({ href: g.ms.length === 1 ? `/models/${g.ms[0].id}` : `/models#k-${g.k}`, title: g.label, sub: g.text, meta: plural(g.ms.length, 'model', 'models') }))));
+        pickBlock({ key: 'connect', label: 'The ways to connect', head: `${n} ${groups.length === 1 ? 'way' : 'ways'} to connect, one panel`, panes }));
 }
 
 function startSection() {
-    return showcase.steps({
+    return foldBlock({
+        id: 'how',
+        head: '<h2 id="how-h">Online in a minute</h2>',
+        html: showcase.steps({
         id: 'how',
         title: 'Online in a minute',
         lede: 'The robot connects out to OpenVibe, so there are no ports to open on your router and no stock control server left exposed.',
@@ -139,6 +151,7 @@ function startSection() {
             { title: 'Approve it', text: 'Sign in at openvibe.bot/link and enter the code. The robot\'s credential is stored hashed, and you can revoke it any time.' },
             { title: 'Drive it', text: 'Open the robot\'s panel in any browser, phone included. Share it, list it, or bind it to your OpenVibe.Live channel.' },
         ],
+        }),
     });
 }
 
@@ -182,18 +195,26 @@ function moreSection({ config, kit: k, models }) {
         ['/robots/submit', 'Submit a robot', 'Describe your robot with a profile and point at its driver. Once reviewed, anyone can add one.'],
         ['https://github.com/OpenVibers/OpenVibe.Bot', 'The source', 'OpenVibe.Bot and the OpenVibe Node are open source under the AGPL-3.0.'],
     ]);
-    return `<section class="sc-sec hm-sec hm-more-sec" id="more" aria-labelledby="more-h"><h2 id="more-h" class="hm-h">More on OpenVibe.Bot</h2>
+    return foldBlock({
+        id: 'more',
+        head: '<h2 id="more-h" class="hm-h">More on OpenVibe.Bot</h2>',
+        html: `<section class="sc-sec hm-sec hm-more-sec" id="more" aria-labelledby="more-h"><h2 class="hm-h">More on OpenVibe.Bot</h2>
 ${kit.fold({ id: 'panel', title: 'What the panel does', meta: 'controls, safety, sharing', body: panel })}
 ${kit.fold({ id: 'automate', title: 'Let it run without you', meta: 'routines, webhooks, your agent', body: `<p class="hm-fold-lede">They all go through the gate a person does: the same limits, the same e-stop, the same audit.</p>${automate}` })}
 ${kit.fold({ id: 'computers', title: 'Your computers, for your agents and your AI', meta: 'the same Node', body: `<p class="hm-fold-lede">The same OpenVibe Node runs on your own computers. It connects out, nobody else's work reaches them, and the limits you set on each computer always win.</p>${computers}` })}
 ${kit.fold({ id: 'code', title: 'The same robot from your own code', meta: 'REST and the SDK', body: api })}
 ${kitBody ? kit.fold({ id: 'kit', title: `The first kit: ${k.name}`, meta: plural(k.parts.length, 'part', 'parts'), body: kitBody }) : ''}
-${kit.fold({ id: 'build', title: 'Build for OpenVibe.Bot', meta: 'drivers, profiles, the source', body: `${build}<p class="hm-fold-lede">${link('/docs', 'All build pages', 'hm-more')}</p>` })}</section>`;
+${kit.fold({ id: 'build', title: 'Build for OpenVibe.Bot', meta: 'drivers, profiles, the source', body: `${build}<p class="hm-fold-lede">${link('/docs', 'All build pages', 'hm-more')}</p>` })}</section>`,
+    });
 }
 
 function jobsSection({ jobs }) {
     if (!jobs || !jobs.length) return '';
-    return `<section class="sc-sec hm-sec" id="jobs">${kit.list(jobs.slice(0, 3).map((j) => kit.row({ href: j.url, rel: 'noopener', title: j.title, sub: [j.location, j.remote ? 'Remote' : '', j.type].filter(Boolean).join(' · ') })), { title: 'Robotics jobs on OpenVibe.Work', more: { href: 'https://openvibe.work/jobs?q=robotics', label: 'More jobs' } })}</section>`;
+    return foldBlock({
+        id: 'jobs',
+        head: '<h2 id="jobs-h">Robotics jobs on OpenVibe.Work</h2>',
+        html: `<section class="sc-sec hm-sec" id="jobs">${kit.list(jobs.slice(0, 3).map((j) => kit.row({ href: j.url, rel: 'noopener', title: j.title, sub: [j.location, j.remote ? 'Remote' : '', j.type].filter(Boolean).join(' · ') })), { title: 'Robotics jobs on OpenVibe.Work', more: { href: 'https://openvibe.work/jobs?q=robotics', label: 'More jobs' } })}</section>`,
+    });
 }
 
 /** Questions people ask first, answered from what Bot does today; the model list comes from the catalogue. */
@@ -216,20 +237,28 @@ function faqItems({ models }) {
 
 /** The questions, closed until opened (showcase.faq). */
 function faqSection(items) {
-    return `<section class="sc-sec hm-sec" id="faq">${showcase.faq({ id: 'faq-list', title: 'Questions', items: items.map((x) => [x.q, x.a]) })}</section>`;
+    return foldBlock({
+        id: 'faq',
+        head: '<h2 id="faq-h">Questions</h2>',
+        html: `<section class="sc-sec hm-sec" id="faq">${showcase.faq({ id: 'faq-list', title: 'Questions', items: items.map((x) => [x.q, x.a]) })}</section>`,
+    });
 }
 
-function sections({ signedIn = false, config, models = [], robots = [], kit: k = null, jobs = [], faq = null } = {}) {
+function sections({ signedIn = false, config, models = [], robots = [], kit: k = null, jobs = [], faq = null, rules = null } = {}) {
     return hero({ signedIn, config })
         + stats({ models, robots })
         + onlineNow({ robots })
         + modelsSection({ models })
-        + connectSection({ models })
+        + connectSection({ models, rules })
         + startSection()
         + moreSection({ config, kit: k, models })
         + jobsSection({ jobs })
         + faqSection(faq || faqItems({ models }))
-        + showcase.network({ service: 'bot' });
+        + foldBlock({
+            id: 'network',
+            head: '<h2 id="network-h">Part of OpenVibe</h2>',
+            html: showcase.network({ service: 'bot' }),
+        });
 }
 
 /** The OpenVibe Frame around one of Bot's public pages (the front page, the Build docs): navbar, footer, theme. */
@@ -276,7 +305,10 @@ function renderHome({ config, signedIn = false, models = [], robots = [], kit = 
     };
     const footer = { service: 'bot', variant: 'full', mount: '#ov-footer', brandName: SITE_NAME };
     const url = `${config.baseUrl}/`;
+    // The rules that show the picked block of the pick block are written for this page.
+    const rules = [];
     const faq = faqItems({ models });
+    const body = sections({ signedIn, config, models, robots, kit, jobs, faq, rules });
     return shell.page({
         name: SITE_NAME, service: 'bot', lang: 'en',
         title: `${SITE_NAME}: drive your robot from any browser`,
@@ -300,10 +332,11 @@ function renderHome({ config, signedIn = false, models = [], robots = [], kit = 
             `<link rel="stylesheet" href="${ovServe.url('room.css')}">`,
             `<link rel="stylesheet" href="${ovServe.url(showcase.STYLESHEET)}">`,
             '<link rel="stylesheet" href="/home.css">',
+            rules.length ? `<style>@supports selector(:has(*)){@media (max-width:640px){${rules.join('')}}</style>` : '',
         ].join('\n'),
         body: `<div id="navbar-mount"></div>
 <main id="main" class="page hm">
-${sections({ signedIn, config, models, robots, kit, jobs, faq })}
+${body}
 </main>`,
     });
 }
