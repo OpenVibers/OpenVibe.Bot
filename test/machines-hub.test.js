@@ -112,19 +112,20 @@ const { boot, check, done } = require('./helpers/app');
     });
 
     await check('a machine\'s online state is reported to Network once per change', async () => {
-        const before = t.network.statuses.length;
-        const c = await t.ws('/device', { headers: { Authorization: `Bearer ${t.network.signNode(alexMachine.principal)}` } });
+        // Its own machine (another person's, so the list of alex's machines stays as it was): the reports of the
+        // other machines (a connection above, its close) are not this one's.
+        const own = await machine(sam, { name: 'attic-pi' });
+        const of = (s) => s.body.machine_id === own.id;
+        const c = await t.ws('/device', { headers: { Authorization: `Bearer ${t.network.signNode(own.principal)}` } });
         await c.waitFor((m) => m.type === 'config');
-        for (let i = 0; i < 40 && t.network.statuses.length === before; i++) await t.wait(25);
-        const online = t.network.statuses.filter((s) => s.body.online === true);
+        for (let i = 0; i < 40 && !t.network.statuses.some((s) => of(s) && s.body.online === true); i++) await t.wait(25);
+        const online = t.network.statuses.filter((s) => of(s) && s.body.online === true);
         assert.strictEqual(online.length, 1, 'the machine is reported online once');
-        assert.strictEqual(online[0].body.machine_id, alexMachine.id);
-        assert.strictEqual(online[0].body.owner, alex.subject);
+        assert.strictEqual(online[0].body.owner, sam.subject);
         c.close();
-        for (let i = 0; i < 40 && t.network.statuses.length <= before + 1; i++) await t.wait(25);
-        const offline = t.network.statuses.filter((s) => s.body.online === false);
+        for (let i = 0; i < 40 && !t.network.statuses.some((s) => of(s) && s.body.online === false); i++) await t.wait(25);
+        const offline = t.network.statuses.filter((s) => of(s) && s.body.online === false);
         assert.strictEqual(offline.length, 1, 'the machine is reported offline once');
-        assert.strictEqual(offline[0].body.machine_id, alexMachine.id);
     });
 
     await check('revoking a machine ends it for good', async () => {
