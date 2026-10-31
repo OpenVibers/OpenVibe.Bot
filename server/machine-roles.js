@@ -4,10 +4,10 @@
  * and what the hub shows — and the Node turns it on at its next check-in).
  *
  * The catalogue lives in the Contracts release: each product's service manifest carries its own roles
- * (`machineRoles`, openvibe-contracts 0.258.0), and the hub's catalogue is the union of them. Until a service
- * pins that release the copy below is the catalogue; when the pin moves, the manifests are, and this file's list
- * goes with it. Bot only ever refuses a role outside the catalogue: a role is a promise the Node has to keep, so
- * an unknown one is refused rather than stored.
+ * (`machineRoles`, openvibe-contracts 0.261.0), and the hub's catalogue is the union of them. This service pins
+ * that release, so the manifests are the catalogue; the copy below is the fallback for an older pin, and goes
+ * with it. Bot only ever refuses a role outside the catalogue: a role is a promise the Node has to keep, so an
+ * unknown one is refused rather than stored.
  *
  *   catalogue()   the roles, as [{ id, name, installs, shows }]
  *   isKnown(id)   whether the catalogue has that role
@@ -15,7 +15,7 @@
  */
 const contracts = require('openvibe-contracts');
 
-/** The catalogue while the pinned contracts are older than 0.258.0. Keep it in step with the manifests. */
+/** The fallback catalogue, for a pin that does not carry the manifests' roles. Keep it in step with them. */
 const LOCAL = [
     { id: 'codes.worker', name: 'Codes worker', installs: 'the Codes job runner (the coding agent and the job sandbox)', shows: 'Runs your coding jobs, such as a task you start on openvibe.codes.' },
     { id: 'desks.host', name: 'Desk host', installs: 'the desk sandbox (a private browser desk for every session)', shows: "Hosts desks for agents, yours and other people's." },
@@ -23,7 +23,7 @@ const LOCAL = [
     { id: 'bot.robot', name: 'Robot', installs: 'the robot drivers the profile asks for', shows: 'Drives a robot, and takes its commands.' },
 ];
 
-/** The roles the products declare, or the local copy while the pinned contracts are older than 0.258.0. */
+/** The roles the products declare (Contracts 0.261.0), or the local copy when the pin does not carry them. */
 function catalogue() {
     const declared = (contracts.services.manifests || []).flatMap((m) => Array.isArray(m.machineRoles) ? m.machineRoles : []);
     return declared.length ? declared : LOCAL;
