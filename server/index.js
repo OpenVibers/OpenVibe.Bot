@@ -54,7 +54,10 @@ async function main() {
         require('./search-index').createModelSearchIndex({ config, db, log: console }).start();
     }
 
-    const server = app.listen(config.port, config.host, () => {
+    // Socket activation (2026-10-31): systemd's .socket unit holds the listener across restarts, so a deploy
+    // queues requests in the kernel instead of answering 502. Without the socket unit, the usual listen.
+    const socketActivated = process.env.LISTEN_FDS === '1' && Number(process.env.LISTEN_PID) === process.pid;
+    const server = app.listen(...(socketActivated ? [{ fd: 3 }] : [config.port, config.host]), () => {
         console.log(`[Bot] ${config.nodeEnv} on http://${config.host}:${config.port} → ${config.baseUrl} (store ${db.store}; valkey ${valkey ? 'on' : 'off: per process'})`);
         console.log(`[Bot] profiles from server/profiles; events relay ${outbox.enabled ? `→ ${config.events.url}` : 'off (outbox accumulates)'}; usage relay ${usage.enabled ? `→ ${config.billing.url}` : 'off (readings wait)'}; heartbeat ${config.device.heartbeatMs} ms, offline after ${config.device.heartbeatMs * config.device.offlineMisses + config.device.offlineGraceMs} ms`);
     });
