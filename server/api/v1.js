@@ -74,6 +74,10 @@ const MACHINE_SERVICES = {
     // AI on your own machines (contracts 0.219.0): OpenVibe.AI runs a model on the owner's own model server, nothing else.
     'svc:ai': { kinds: new Set(['ai']), flag: 'ai_models', off: 'the owner has not let their AI use this computer\'s models', cap: 'bot.machine.ai' },
 };
+// The network's machines hub (plan L34): the one service that acts for a person on their own machines. The
+// capability alone is not enough: any service holding it could name any person in X-OV-Subject, so the hub is
+// this service and no other.
+const HUB_SERVICE = 'svc:network';
 // A model on a person's machine is OpenVibe.AI's and the owner's only: no other service sends kind ai.
 const AI_KIND = 'ai';
 
@@ -496,8 +500,9 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
     r.get('/machines', wrap(async (req, res) => {
         const subject = actedFor(req, req.query.owner);
         const svc = req.principal.kind === 'service' ? MACHINE_SERVICES[req.principal.sub] : null;
-        // The network's hub (plan L34): it fronts Bot for the person and names them in X-OV-Subject.
-        const hubService = req.principal.kind === 'service' && apiAuth.granted(req.principal, CAP.machine);
+        // The network's hub (plan L34): it fronts Bot for the person and names them in X-OV-Subject. It is the
+        // network's own service: no other one may list a person's machines as them.
+        const hubService = req.principal.kind === 'service' && req.principal.sub === HUB_SERVICE && apiAuth.granted(req.principal, CAP.machine);
         if (req.principal.kind === 'service') {
             if (!svc && !hubService) fail(403, 'bot.forbidden', 'machines are listed for their owner, their agent, their watches, their AI and the network\'s hub');
             // Each service with its own capability: OpenVibe.AI lists those whose models the owner's AI may use
@@ -598,6 +603,9 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
     // machine an id is). A person acts for themself and for nobody else.
     const hubSubject = (req) => {
         if (req.principal.kind !== 'service') fail(403, 'bot.forbidden', 'only the machine\'s owner or the network\'s hub manages a machine');
+        // The hub is the network's own service, and only that one: the capability alone would let any service
+        // that holds it name any person in X-OV-Subject and act as them.
+        if (req.principal.sub !== HUB_SERVICE) fail(403, 'bot.forbidden', 'only the network\'s hub manages a machine for a person');
         if (!apiAuth.granted(req.principal, CAP.machine)) fail(403, 'capability.denied', `${CAP.machine} not granted`);
         const s = req.headers['x-ov-subject'];
         if (!s) fail(422, 'bot.invalid_input', 'the hub acts for a person (X-OV-Subject)');

@@ -66,6 +66,28 @@ const { boot, check, done } = require('./helpers/app');
         assert.strictEqual(same.status, 404, same.text);
     });
 
+    await check('the hub is the network\'s own service: another service with the capability is refused', async () => {
+        // The capability alone must not be enough: any service holding it could name any person in X-OV-Subject
+        // and act as them, so only the network's own service may.
+        const other = (path, body) => t.call(path.method, path.url, { body, sub: 'svc:codes', cap: ['bot.machine.manage'], headers: { 'X-OV-Subject': alex.subject } });
+        const list = await other({ method: 'GET', url: '/api/v1/machines' });
+        assert.strictEqual(list.status, 403, list.text);
+        assert.strictEqual(list.json.code, 'bot.forbidden');
+        const renamed = await other({ method: 'PATCH', url: `/api/v1/machines/${alexMachine.id}` }, { name: 'Stolen' });
+        assert.strictEqual(renamed.status, 403, renamed.text);
+        assert.strictEqual(renamed.json.code, 'bot.forbidden');
+        const roles = await other({ method: 'PUT', url: `/api/v1/machines/${alexMachine.id}/roles` }, { roles: ['codes.worker'] });
+        assert.strictEqual(roles.status, 403, roles.text);
+        assert.strictEqual(roles.json.code, 'bot.forbidden');
+        const pairing = await other({ method: 'POST', url: '/api/v1/machines/pairings' }, {});
+        assert.strictEqual(pairing.status, 403, pairing.text);
+        assert.strictEqual(pairing.json.code, 'bot.forbidden');
+        // Nothing of the person's changed.
+        const row = await t.db.maybe('SELECT name, roles FROM devices WHERE id = $1', [alexMachine.id]);
+        assert.strictEqual(row.name, 'Studio');
+        assert.deepStrictEqual(row.roles, ['codes.worker']);
+    });
+
     await check('a role outside the catalogue is refused and nothing is stored', async () => {
         const before = await t.db.maybe('SELECT roles FROM devices WHERE id = $1', [alexMachine.id]);
         const bad = await hub({ method: 'PUT', url: `/api/v1/machines/${alexMachine.id}/roles` }, { body: { roles: ['codes.worker', 'nope.nope'] } });
