@@ -842,6 +842,7 @@ ${choice('Use the models you run on it', ' --ai', 'If this computer runs Ollama,
 <main class="page">
 <h1>Your machines</h1>
 <p class="muted">A machine here runs jobs for you and only you. It connects out to OpenVibe and needs no open ports. The limits in its own config and its local kill switch (<code>openvibe-node stop</code>) always win.</p>
+<p class="muted"><a href="https://openvibe.network/machines">All your machines are on openvibe.network/machines</a></p>
 ${list}
 ${add}
 </main>`;

@@ -44,6 +44,7 @@ const { http } = require('openvibe-contracts');
 const { fail, userSubject, isRobotId, json } = require('../util');
 const { createMachineScreen } = require('../machine-screen');
 const { getProfile, listProfiles, checkProfile } = require('../profiles');
+const machineRoles = require('../machine-roles');
 const kits = require('../kits');
 const resourceIndex = require('./resource-index');
 const resourceControl = require('./resource-control');
@@ -57,6 +58,8 @@ const CAP = {
     dispatch: 'bot.job.dispatch',
     computer: 'bot.computer.control',
     ai: 'bot.machine.ai',
+    // The network's machines hub (plan L34): a service acts for a person on their own machines.
+    machine: 'bot.machine.manage',
 };
 
 /** Services that act as a person's agent (plan T15/T17): they drive a robot only where its owner turned agent_control on. */
@@ -93,6 +96,8 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
     const commandControl = limits.actedFor('bot.control', { minute: 120, hour: 1200 },
         { minute: config.actorLimits.controlServiceMinute, hour: config.actorLimits.controlServiceHour });
     const pair = limits('bot.pair', { minute: 20, hour: 200 });
+    // The hub's routes: a service naming a person is counted against that person, as their own token is.
+    const machineManage = limits.actedFor('bot.machine.manage', { minute: 30, hour: 300 });
     const jobs = limits('bot.jobs', { minute: 120, hour: 1200 });
 
     const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -435,6 +440,14 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         return {
             id: device.id, name: device.name || null, online: !!st.online, agent_computer: !!device.agent_computer, ai_models: !!device.ai_models, watch_probe: !!device.watch_probe,
             shared_desks: !!device.shared_desks,
+            // What the machine does for the network (plan L34): the roles the owner gave it. The catalogue is
+            // server/machine-roles.js; the Node reads them on its next check-in.
+            roles: json(device.roles, []),
+            // The machine's kind, its operating system and the OpenVibe.Node's version, as the Node last said.
+            kind: device.kind || null,
+            os: (st.status && typeof st.status.os === 'string' && st.status.os) || null,
+            node_version: device.agent_version || null,
+            last_seen_at: device.last_seen ? new Date(device.last_seen).toISOString() : null,
             // The machine's id on Network (`nod_…`) and the OpenVibe.Node's name for it, so a caller that knows the
             // machine from Network (Codes' fleet, a Run pin) finds this row (Codes C9c).
             node_id: device.node_principal || null,
@@ -455,20 +468,46 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
             } : null,
         };
     };
+    /**
+     * What the machine is doing right now (plan L34: the hub shows it): its Codes jobs, its desks, the local models
+     * it serves and the robots it drives. Only what is true now: a machine that is offline runs nothing.
+     */
+    const machineRunning = async (device) => {
+        const st = hub.deviceState(device.id);
+        const offered = hub.computerOf(device.id);
+        const sensors = st.telemetry && st.telemetry.sensors && typeof st.telemetry.sensors === 'object' ? st.telemetry.sensors : {};
+        const ai = offered && offered.ai && typeof offered.ai === 'object' ? offered.ai : null;
+        const out = [];
+        if (st.online) {
+            const jobs = await domain.machines.runningJobs(device.id);
+            if (jobs > 0) out.push({ kind: 'codes.jobs', count: jobs });
+            const desks = Number.isInteger(sensors.computer_desks) ? sensors.computer_desks : await domain.deskLeases.count(device.id);
+            if (desks > 0) out.push({ kind: 'desks', count: desks });
+            const models = ai && Array.isArray(ai.models) ? ai.models.length : 0;
+            if (models > 0) out.push({ kind: 'models', count: models, label: ai.model || undefined });
+            const robots = json(device.robot_ids, []).length;
+            if (robots > 0) out.push({ kind: 'robots', count: robots });
+        }
+        return out;
+    };
+    /** The machine as the hub sees it: everything machineOut says, and what it does right now. */
+    const machineView = async (device) => ({ ...machineOut(device), running: await machineRunning(device) });
     // The person's machines (theirs or their robots'); an agent sees only those whose owner let it use them.
     r.get('/machines', wrap(async (req, res) => {
         const subject = actedFor(req, req.query.owner);
         const svc = req.principal.kind === 'service' ? MACHINE_SERVICES[req.principal.sub] : null;
+        // The network's hub (plan L34): it fronts Bot for the person and names them in X-OV-Subject.
+        const hubService = req.principal.kind === 'service' && apiAuth.granted(req.principal, CAP.machine);
         if (req.principal.kind === 'service') {
-            if (!svc) fail(403, 'bot.forbidden', 'machines are listed for their owner, their agent, their watches and their AI');
+            if (!svc && !hubService) fail(403, 'bot.forbidden', 'machines are listed for their owner, their agent, their watches, their AI and the network\'s hub');
             // Each service with its own capability: OpenVibe.AI lists those whose models the owner's AI may use
             // (a node credential with machine `any`, contracts 0.221.0).
-            const cap = svc.cap || CAP.computer;
+            const cap = svc ? (svc.cap || CAP.computer) : CAP.machine;
             if (!apiAuth.granted(req.principal, cap)) fail(403, 'capability.denied', `${cap} not granted`);
         }
         const rows = await domain.machines.list(subject);
         const mine = svc ? rows.filter((d) => d[svc.flag]) : rows;
-        res.json({ machines: mine.map(machineOut) });
+        res.json({ machines: await Promise.all(mine.map((d) => machineView(d))) });
     }));
     r.get('/machines/:id/computer', wrap(async (req, res) => {
         const { device } = await computerMachine(req);
@@ -550,6 +589,77 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         if (typeof req.body?.on !== 'boolean') fail(422, 'bot.invalid_input', 'on is true or false');
         const updated = await domain.machines.setAgentComputer(device.id, req.body.on);
         res.json({ machine: machineOut(updated) });
+    }));
+
+    // ── The machines hub (plan L34, step M2) ───────────────────────────────────────────────────────
+    // The machine's owner, or the network's hub (OpenVibe.Network) acting for them: a service holding
+    // bot.machine.manage and naming the person in X-OV-Subject. Bot stays the registry underneath, so the
+    // machine is the named person's own or it is not there at all (404, never 403: nobody may probe whose
+    // machine an id is). A person acts for themself and for nobody else.
+    const hubSubject = (req) => {
+        if (req.principal.kind !== 'service') fail(403, 'bot.forbidden', 'only the machine\'s owner or the network\'s hub manages a machine');
+        if (!apiAuth.granted(req.principal, CAP.machine)) fail(403, 'capability.denied', `${CAP.machine} not granted`);
+        const s = req.headers['x-ov-subject'];
+        if (!s) fail(422, 'bot.invalid_input', 'the hub acts for a person (X-OV-Subject)');
+        return userSubject(s, 'subject');
+    };
+    /** The machine, and whose it is. → { device, subject } */
+    const hubMachine = async (req) => {
+        if (req.principal.kind === 'anonymous') fail(401, 'bot.sign_in', 'sign in to do that');
+        const subject = req.principal.kind === 'user'
+            ? self(req, req.headers['x-ov-subject'], req.body?.owner)
+            : hubSubject(req);
+        const device = await domain.devices.get(String(req.params.id || '').slice(0, 64));
+        const owner = device && !device.revoked_at ? await domain.devices.ownerOf(device) : null;
+        if (!owner || owner !== subject) fail(404, 'bot.device_not_found', 'no such machine of yours');
+        return { device, subject };
+    };
+    r.get('/machines/:id', wrap(async (req, res) => {
+        const { device } = await hubMachine(req);
+        res.json({ machine: await machineView(device) });
+    }));
+    // A new name for the machine.
+    r.patch('/machines/:id', machineManage, wrap(async (req, res) => {
+        const { device } = await hubMachine(req);
+        const name = typeof req.body?.name === 'string' ? req.body.name.trim().slice(0, 80) : '';
+        if (!name) fail(422, 'bot.invalid_input', 'a name is 1 to 80 characters');
+        const updated = await domain.machines.rename(device.id, name);
+        res.json({ machine: await machineView(updated) });
+    }));
+    // The machine's roles for the network: the whole set, not a change. A role outside the catalogue is refused.
+    r.put('/machines/:id/roles', machineManage, wrap(async (req, res) => {
+        const { device } = await hubMachine(req);
+        let roles;
+        try {
+            roles = machineRoles.normalise(req.body?.roles);
+        } catch (e) {
+            if (e && e.unknown) fail(422, 'bot.unknown_role', `${e.role} is not a machine role`);
+            fail(422, 'bot.invalid_input', 'roles must be a list of machine roles');
+        }
+        const updated = await domain.machines.setRoles(device.id, roles);
+        if (hub && hub.machineChanged) await hub.machineChanged(updated);
+        res.json({ machine: await machineView(updated) });
+    }));
+    // A one-time code to pair a machine with the person's account, and the command to run on it. The code is
+    // shown once here and never again; a new code replaces an unused one.
+    r.post('/machines/pairings', pair, wrap(async (req, res) => {
+        if (req.principal.kind === 'anonymous') fail(401, 'bot.sign_in', 'sign in to do that');
+        const subject = req.principal.kind === 'user'
+            ? self(req, req.headers['x-ov-subject'], req.body?.owner)
+            : hubSubject(req);
+        const pairing = await domain.machines.mint(subject);
+        res.status(201).json({ pairing: { code: pairing.code, expires_at: pairing.expires_at, pairing_id: pairing.pairing_id, installer: pairing.installer } });
+    }));
+    // The machine is no longer the person's: its credential dies here, and its node principal on Network dies with it.
+    r.post('/machines/:id/revoke', machineManage, wrap(async (req, res) => {
+        const { device } = await hubMachine(req);
+        const revoked = await domain.devices.revoke(device.id);
+        let networkError = null;
+        if (device.node_principal) await domain.devices.revokeNode(device.node_principal).catch((e) => { networkError = e; });
+        await domain.devices.revokeVideo(device.id).catch((e) => { networkError = networkError || e; });
+        hub.closeDevice(device.id, 'revoked');
+        if (networkError) throw networkError;
+        res.json({ machine: await machineView(revoked) });
     }));
 
     // ── Steps (the owner's agent): plain step lines, run now as the owner and answered when they end ──

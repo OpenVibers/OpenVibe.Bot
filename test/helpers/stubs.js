@@ -6,7 +6,8 @@
  *                   client-credentials tokens and records every request in tokenCalls ({client_id, audience,
  *                   scope}); node principals as
  *                   GET /internal/node-principals/:id and POST …/:id/revoke answer them (addNode, signNode,
- *                   nodes, revokes), scoped to the calling service like Network's own routes. Identity
+ *                   nodes, revokes), scoped to the calling service like Network's own routes; the machine's
+ *                   online state (POST /internal/machines/status) is recorded (statuses). Identity
  *                   resolution for people (identity.subject.resolve): GET /internal/identity/resolve?username=
  *                   and POST /internal/identity/resolve-batch, over the users newUser registers; failIdentity
  *                   makes them answer a failure (Network down).
@@ -88,6 +89,9 @@ async function startNetwork() {
     let pairingFailure = null;
     const failPairings = (status) => { pairingFailure = status; };
 
+    // The machine's online state (POST /internal/machines/status): every report Bot sends is kept.
+    const statuses = [];
+
     // Identity resolution for people (identity.subject.resolve). `users` is what newUser registered;
     // failIdentity(status) makes both routes answer that status instead (Network down).
     const users = new Map();            // subject → { subject, username, display_name }
@@ -146,6 +150,15 @@ async function startNetwork() {
             pairings.push({ service, body, ...out });
             return send(res, 201, out);
         }
+        // The machine's online state (POST /internal/machines/status, plan L34): every report is kept, so a test
+        // sees that a change is reported once and a repeat is not.
+        if (req.url === '/internal/machines/status' && req.method === 'POST') {
+            const service = nodeManager(req);
+            if (!service) return send(res, 401, { code: 'token.invalid' });
+            const body = JSON.parse((await readBody(req)) || '{}');
+            statuses.push({ service, body });
+            return send(res, 200, { ok: true });
+        }
         const np = /^\/internal\/node-principals\/([^/]+)(\/revoke)?$/.exec(req.url);
         if (np && (req.method === (np[2] ? 'POST' : 'GET'))) {
             const service = nodeManager(req);
@@ -162,7 +175,7 @@ async function startNetwork() {
     });
     const url = await listen(server);
     issuer = url;
-    return { url, publicPem, signService, signUser, newUser, addNode, signNode, nodes, revokes, pairings, tokenCalls, failPairings, users, failIdentity: (status) => { identityFailure = status; }, close: () => new Promise((r) => server.close(r)) };
+    return { url, publicPem, signService, signUser, newUser, addNode, signNode, nodes, revokes, pairings, statuses, tokenCalls, failPairings, users, failIdentity: (status) => { identityFailure = status; }, close: () => new Promise((r) => server.close(r)) };
 }
 
 async function startEvents() {
