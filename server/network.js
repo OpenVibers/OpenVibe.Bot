@@ -8,8 +8,10 @@
  *             unknown kid). They verify service and node tokens (audience openvibe.bot) and the browser's Network
  *             user JWT, all offline (openvibe-sdk/auth).
  *   nodes     Network's node principals (machines paired for Bot): POST /internal/node-pairings (a pairing
- *             code, BOT_PAIRING_AUTHORITY=network), GET /internal/node-principals/:id and POST …/:id/revoke with
- *             Bot's own svc:bot token (audience openvibe.network, network.node.manage).
+ *             code, BOT_PAIRING_AUTHORITY=network), GET /internal/node-principals/:id, POST …/:id/revoke and
+ *             POST /internal/machines/status (the machine's online state, which Network publishes as the
+ *             hub's network.machine.online and network.machine.offline events) with Bot's own svc:bot token
+ *             (audience openvibe.network, network.node.manage).
  *   identity  Network's people (identity.subject.resolve): resolve a username to a subject and look up the
  *             names of subjects the robot's owner added.
  */
@@ -84,6 +86,8 @@ function createNodePrincipals(config, { fetchImpl = globalThis.fetch } = {}) {
         get: (id) => call('GET', principal(id)),
         revoke: (id) => call('POST', `${principal(id)}/revoke`),
         pair: ({ subject, ref }) => call('POST', '/internal/node-pairings', { owner: { kind: 'user', subject }, ref }),
+        // The machine's online state (plan L34): Network publishes it as the hub's machine events.
+        status: (body) => call('POST', '/internal/machines/status', body),
     };
 }
 

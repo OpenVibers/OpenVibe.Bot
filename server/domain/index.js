@@ -18,6 +18,7 @@ const {
     BotError, fail, prefixedId, iso, token, hashSecret, secretEquals, json, text, storable, isRobotId,
 } = require('../util');
 const { getProfile, validateProfile, reservedKeyReason } = require('../profiles');
+const machineRoles = require('../machine-roles');
 const { ENVELOPE } = require('../events/outbox');
 /** A person's subject (the owner a worker machine's pairing names). */
 const USER_SUBJECT = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -76,6 +77,8 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     const changeListeners = new Set();
     const onChange = (fn) => { changeListeners.add(fn); return () => changeListeners.delete(fn); };
     const changed = () => { for (const fn of changeListeners) { try { fn(); } catch { /* a listener never breaks the caller */ } } };
+    /** The last online state Bot reported to Network for a machine, so a change is reported once. */
+    const reportedState = new Map();
     const workerRef = (subject) => `worker:${subject}`;
     // ── Presenters ────────────────────────────────────────────────────────────────────────────────
     const presentRobot = (r) => (r ? {
@@ -798,6 +801,49 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     async function listSharedDesks() {
         return db.many('SELECT * FROM devices WHERE revoked_at IS NULL AND shared_desks = true ORDER BY created_at');
     }
+    /**
+     * The roles a machine has for the network (plan L34, step M4): the owner's choice, checked against the
+     * catalogue (server/machine-roles.js) and stored whole. The Node reads them on its next check-in.
+     * The owner's check is the caller's.
+     */
+    async function setMachineRoles(deviceId, roles) {
+        const wanted = machineRoles.normalise(roles);
+        return db.maybe('UPDATE devices SET roles = $2::jsonb, updated_at = $3 WHERE id = $1 AND revoked_at IS NULL RETURNING *',
+            [deviceId, JSON.stringify(wanted), iso(now())]);
+    }
+    /** The name the owner gave a machine (plan L34). The owner's check is the caller's. */
+    async function renameMachine(deviceId, name) {
+        return db.maybe('UPDATE devices SET name = $2, updated_at = $3 WHERE id = $1 AND revoked_at IS NULL RETURNING *',
+            [deviceId, name, iso(now())]);
+    }
+    /**
+     * The machine's online state, as Network publishes it (plan L34: the hub's network.machine.online and
+     * network.machine.offline events). Bot is the registry, so Bot is the one that knows; Network turns the
+     * change into an event. A Network that does not answer loses the event, never the machine's state.
+     */
+    async function reportMachineStatus(device, online) {
+        if (!nodes || !device) return null;
+        // One report per change: a machine that reconnects is one more offline and one more online, never two of
+        // the same (Network publishes an event for each report).
+        if (reportedState.get(device.id) === !!online) return null;
+        reportedState.set(device.id, !!online);
+        const owner = device.owner_subject || await ownerOf(device);
+        if (!owner) return null;
+        try {
+            return await nodes.status({
+                machine_id: device.id, principal_id: device.node_principal || null,
+                owner, online: !!online, at: iso(now()),
+            });
+        } catch (e) {
+            log.warn(`[Bot] the machine's state for Network: ${e.message}`);
+            return null;
+        }
+    }
+    /** How many jobs the machine runs right now (plan L34: what the hub shows). */
+    async function runningJobs(deviceId) {
+        const row = await db.one('SELECT count(*)::int AS n FROM run_jobs WHERE node_id = $1 AND state = $2', [deviceId, 'running']);
+        return Number(row && row.n ? row.n : 0);
+    }
 
     // ── Desk leases (contracts 0.223.0 bot.desk-lease@1, the Desks plan's D6) ──────────────────────────────────────
     const leaseOut = (r) => (r ? {
@@ -1329,6 +1375,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         pairing: { create: createPairingCode, redeem, prune: prunePairingCodes, installerCommand, driverForProfile, whipUrl, onPaired },
         devices: { byCredential, bindNode, issuePublishKey, revokeVideo, updateDeclared, setFleet, revokeNode, ensureServerDevice, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, revokeByNode, touchSeen, setOnline, ownerOf, onChange },
         machines: { mint: mintMachine, list: listMachines, workerRef, setAgentComputer, setAiModels, setWatchProbe, setVoice, setSharedDesks, listSharedDesks,
+            setRoles: setMachineRoles, rename: renameMachine, runningJobs, reportStatus: reportMachineStatus,
             screen: { key: screenKey, liveKey: liveScreenKey, live: screenLive, end: screenEnd, archive: screenArchive } },
         deskLeases,
         streaming: { get: streaming, set: setStreaming },

@@ -342,6 +342,9 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             estop_latched: robot ? !!robot.estop_latched : false,
             // Vibe by voice: the machine listens for its call word only while its owner has voice on.
             ...(conn.device.voice_on ? { voice: true, call_word: voice.callWordOf(conn.device) } : {}),
+            // What the machine does for the network (plan L34): the roles the owner gave it on the hub. The Node
+            // turns them on at its next check-in (and at once when they change while it is connected).
+            roles: json(conn.device.roles, []),
         });
     }
     /** Re-send `config` to the robot's connected devices (the owner changed its limits or allowlist, or the latch moved). */
@@ -358,7 +361,9 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     /** The online/offline event and last_seen are a real machine's: a simulator (no devices row) reports neither. */
     function reportOnline(conn, online) {
         if (conn.sim) return Promise.resolve();
-        return domain.devices.setOnline(conn.device, online).catch((e) => log.warn(`[Bot] ${online ? 'online' : 'offline'} event: ${e.message}`));
+        return domain.devices.setOnline(conn.device, online)
+            .then(() => domain.machines.reportStatus(conn.device, online))
+            .catch((e) => log.warn(`[Bot] ${online ? 'online' : 'offline'} event: ${e.message}`));
     }
     async function bringOnline(conn) {
         await reportOnline(conn, true);
