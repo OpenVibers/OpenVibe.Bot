@@ -291,12 +291,15 @@ function framePage({ config, title, description, canonicalPath = '/', body, head
     });
 }
 
+// The page's type: shell.page sets no font and showcase.css styles only its own sections, so without these rules
+// /updates fell back to the browser's Times New Roman (domain sweep, 2026-11-01). Zero specificity: any site rule wins.
+const UPDATES_FONT = "<style>:where(body){font-family:var(--ov-font,'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif)}:where(main.page){display:block;max-width:880px;margin:0 auto;padding:24px max(16px,env(safe-area-inset-right,0px)) 56px max(16px,env(safe-area-inset-left,0px))}:where(.ov-updates h1){font-size:clamp(1.6rem,5.4vw,2.2rem);line-height:1.15;margin:0 0 10px;text-wrap:balance}</style>";
+
 /** /updates: what shipped on OpenVibe.Bot, the network's shared update log (openvibe-shared/frame updatesBody). */
 function renderUpdates({ config }) {
     return framePage({
         config, title: `What shipped on ${SITE_NAME}`, description: `Every change deployed to ${SITE_NAME}, newest first.`, canonicalPath: '/updates',
-        // The site's stylesheet: without it /updates fell back to the browser's serif (domain sweep, 2026-11-01).
-        head: `<link rel="stylesheet" href="${ovServe.url(showcase.STYLESHEET)}">`,
+        head: UPDATES_FONT,
         body: `<main id="main" class="page">\n${frame.updatesBody({ service: 'bot', siteName: SITE_NAME })}\n</main>\n<script src="${ovServe.url('shipped.js')}" defer></script>`,
     });
 }
