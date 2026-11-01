@@ -87,12 +87,18 @@ Sitemap entries use the release commit time for these code-backed pages.
   (also start or stop the screen, and the mouse and keyboard). It goes where the group works, such as a workspace room's
   Screen on OpenVibe.Chat. A link shows the owner's own screen or, on a machine with one, the **private desk**
   (migration `0023_screen_share_desk.sql`): a room watches the agent work there, and a use link's clicks go to the desk.
-  - **The link** is shown once; Bot keeps its sha256. It lasts 1-365 days (30 by default), and stops at once when revoked
-    or when the machine is removed. The owner's screen page lists the links (where each went, its kind, end date, last
-    use) with a Stop button.
+  - **The link** is shown once; Bot keeps its sha256. It lasts 1-365 days (30 by default), or 5-240 minutes when the
+    caller asks for minutes (an agent's desk, watched for one turn), and stops at once when revoked or when the machine
+    is removed. The owner's screen page lists the links (where each went, its kind, end date, last use) with a Stop
+    button.
+  - **The desk** is any desk the machine has: its own screen (`main`), the **private desk** (migration
+    `0023_screen_share_desk.sql`) or an agent task's own desk (`desk-<name>`, migration
+    `0029_screen_share_desk_names.sql`): a room watches the agent work there, and a use link's clicks go to the desk.
   - **The page** `/screen/:token` plays the screen like the owner's page. Its CSP lets it sit in a frame on
-    `openvibe.chat`, `openvibe.network` and `BOT_EMBED_ORIGINS`. It sends `Referrer-Policy: no-referrer` and is noindex.
-    `GET /screen/:token/state.json` is the state.
+    `openvibe.chat`, `openvibe.network`, `openvibe.actor` and `BOT_EMBED_ORIGINS`. It sends
+    `Referrer-Policy: no-referrer` and is noindex. `GET /screen/:token/state.json` is the state.
+  - **The agent's way in**: `POST /api/v1/machines/:id/watch-links` (`bot.machine.watch_link`) gives the owner's own
+    agent a link to a desk, live, inside a chat — see the capabilities table below.
   - **Using it** (use links only, `public/screen-share.js`): `POST /screen/:token/start|stop`, and `POST /screen/:token/input` with a
     `bot.command@1` input value (click, double click, right click, move, scroll at a position in the picture, typed
     text, or a key or chord by name). Each is an `input` command to the machine **as its owner**, judged by the level
@@ -173,6 +179,7 @@ per export and deletion in `account_data_events` (migration 0008).
 | `bot.device.connect` | rotate and revoke a device credential |
 | `bot.machine.ai` | OpenVibe.AI asks a person's own machine's model for them (kind `ai` only), and lists their machines whose owner turned on "Let my AI use this computer's models" |
 | `bot.machine.manage` | the machines hub (OpenVibe.Network) acts for a person: `GET /machines`, `GET /machines/:id`, `POST /machines/pairings`, `PATCH /machines/:id`, `PUT /machines/:id/roles` and `POST /machines/:id/revoke`, naming the person in `X-OV-Subject`. Only the network's own service (`svc:network`) may: any other service with the capability is refused (`403 bot.forbidden`) |
+| `bot.machine.watch_link` | the owner's own agent (OpenVibe.Actor) asks for a link that shows the desk it works on, live, inside a chat: `POST /machines/:id/watch-links` with `{ desk, control, minutes }`, naming the person in `X-OV-Subject`. The machine must be that person's own (404, never 403), only `svc:actor` may (any other service is refused), the desk is the private desk or the agent's own `desk-<name>` (never the owner's screen, `main`), the link lives 5-240 minutes and carries the mouse and keyboard only when `control` is asked for |
 | `bot.job.dispatch` | the internal Run → Bot jobs API (`POST /jobs`, `POST /jobs/:id/cancel`, `GET /jobs/:id`); services only |
 | `bot.resource.read` | the internal authority index (`GET /api/v1/resources`, `GET /api/v1/resources/:ovrn`); services only |
 

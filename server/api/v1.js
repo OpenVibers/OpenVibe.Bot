@@ -33,6 +33,7 @@
  * | POST   /jobs, /jobs/:id/cancel, GET /jobs/:id   | bot.job.dispatch       | — (services only)                   |
  * | POST   /pair                                    | — (one-time code)      | the agent (code is the credential)  |
  * | POST   /claims                                  | — (anyone)             | a device asking to be added: a code |
+ * | POST   /machines/:id/watch-links               | bot.machine.watch_link | the owner, or their agent for them |
  * | GET    /claims/:id                              | — (X-OV-Claim-Secret)  | that device: pending, or its pairing|
  *
  * With BOT_PAIRING_AUTHORITY=network the pairing codes are Network's and POST /pair answers 410 bot.pairing_moved.
@@ -43,6 +44,7 @@ const { parseSteps, stepHelp, AGENT_MAX_STEPS, AGENT_MAX_S } = require('../routi
 const { http } = require('openvibe-contracts');
 const { fail, userSubject, isRobotId, json } = require('../util');
 const { createMachineScreen } = require('../machine-screen');
+const { createScreenShares } = require('../screen-shares');
 const { getProfile, listProfiles, checkProfile } = require('../profiles');
 const machineRoles = require('../machine-roles');
 const kits = require('../kits');
@@ -60,6 +62,8 @@ const CAP = {
     ai: 'bot.machine.ai',
     // The network's machines hub (plan L34): a service acts for a person on their own machines.
     machine: 'bot.machine.manage',
+    // A watch link to a machine's desk (plan L55): the owner's agent shows the desk it works on, inside a chat.
+    watchLink: 'bot.machine.watch_link',
 };
 
 /** Services that act as a person's agent (plan T15/T17): they drive a robot only where its owner turned agent_control on. */
@@ -80,6 +84,12 @@ const MACHINE_SERVICES = {
 const HUB_SERVICE = 'svc:network';
 // A model on a person's machine is OpenVibe.AI's and the owner's only: no other service sends kind ai.
 const AI_KIND = 'ai';
+/**
+ * The services that may make a watch link to a person's machine desk (plan L55): the owner's own agent, which shows
+ * the desk it works on in a chat. The capability alone is not enough — a service holding it could name any person in
+ * X-OV-Subject — so the service is this one, and the machine is the named person's own.
+ */
+const WATCH_LINK_SERVICES = new Set(['svc:actor']);
 
 function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, submissions = null, routines = null, webhooks = null, claims = null }) {
     const r = express.Router();
@@ -92,6 +102,9 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
     const manage = limits('bot.robot.manage', { minute: 30, hour: 300 });
     const control = limits('bot.control', { minute: 120, hour: 1200 });
     const machineScreen = createMachineScreen({ domain, hub });
+    // The share links themselves (server/screen-shares.js): the web page makes them for the owner, this route for the
+    // owner's agent, both on the same table.
+    const shares = createScreenShares({ db: domain.db, domain, hub, machineScreen });
     // The command route counts against the acted-for person, not the service token: a bound channel's chat
     // forwards many viewers' commands through one service, and each viewer gets their own bucket. A service
     // is also capped by its own token (bot.control.service, 10× the per-person bucket): the subject is only
@@ -102,6 +115,8 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
     const pair = limits('bot.pair', { minute: 20, hour: 200 });
     // The hub's routes: a service naming a person is counted against that person, as their own token is.
     const machineManage = limits.actedFor('bot.machine.manage', { minute: 30, hour: 300 });
+    // A watch link (plan L55): counted against the person whose desk it is, and against the agent's own token.
+    const watchLink = limits.actedFor('bot.machine.watch_link', { minute: 30, hour: 300 }, { minute: 60, hour: 600 });
     const jobs = limits('bot.jobs', { minute: 120, hour: 1200 });
 
     const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -594,6 +609,43 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         if (typeof req.body?.on !== 'boolean') fail(422, 'bot.invalid_input', 'on is true or false');
         const updated = await domain.machines.setAgentComputer(device.id, req.body.on);
         res.json({ machine: machineOut(updated) });
+    }));
+
+    // ── A watch link to a machine's desk (plan L55) ─────────────────────────────────────────────────
+    // The link shows the desk the agent works on, live, inside a chat turn: https://openvibe.bot/screen/<token>.
+    // The page needs no sign-in (the token is the credential) and may sit in a frame on openvibe.chat or
+    // openvibe.actor. It ends in minutes, and it is the owner's own link: the machine is the one the subject owns.
+    r.post('/machines/:id/watch-links', watchLink, wrap(async (req, res) => {
+        const subject = actedFor(req);
+        if (req.principal.kind === 'service') {
+            if (!WATCH_LINK_SERVICES.has(req.principal.sub)) fail(403, 'bot.forbidden', 'watch links are for the owner\'s agent');
+            if (!apiAuth.granted(req.principal, CAP.watchLink)) fail(403, 'capability.denied', `${CAP.watchLink} not granted`);
+        }
+        const device = await domain.devices.get(String(req.params.id || '').slice(0, 64));
+        const ownerSubject = device && !device.revoked_at ? await domain.devices.ownerOf(device) : null;
+        // 404, never 403: nobody may learn whose machine an id is.
+        if (!ownerSubject || ownerSubject !== subject) fail(404, 'bot.device_not_found', 'no such machine of yours');
+        // The agent reaches a machine only where its owner turned "Let my agent use this computer" on.
+        if (req.principal.kind === 'service' && !device.agent_computer) fail(403, 'bot.agent_not_allowed', 'the owner has not let their agent use this computer');
+        const desk = req.body?.desk == null || req.body.desk === '' ? (req.principal.kind === 'service' ? '' : 'main') : String(req.body.desk);
+        // The agent shows the desk it works on: the private desk or its own desk-<name>, never the owner's own screen
+        // (main). The owner, signed in, may link any of their desks.
+        // (A malformed name is create()'s to refuse, as bot.invalid_input.)
+        if (req.principal.kind === 'service' && (desk === '' || desk === 'main')) fail(422, 'bot.desk_not_agents', 'an agent links the private desk or its own desk-<name>, never the owner\'s screen');
+        const made = await shares.create(device, subject, {
+            label: req.body?.label || null,
+            control: req.body?.control === true,               // the mouse and keyboard only when asked for
+            minutes: req.body?.minutes == null || req.body.minutes === '' ? 60 : req.body.minutes,
+            desk,
+        });
+        await domain.audit.record({
+            robotId: device.id, deviceId: device.id, subject, operatorKind: req.principal.kind, role: 'owner',
+            kind: 'screen.share', value: { desk: made.share.desk, control: made.share.control, expires_at: made.share.expires_at }, result: 'ack',
+        });
+        res.status(201).json({
+            url: `${config.baseUrl}/screen/${made.token}`, expires_at: made.share.expires_at,
+            desk: made.share.desk, control: made.share.control, share_id: made.share.id,
+        });
     }));
 
     // ── The machines hub (plan L34, step M2) ───────────────────────────────────────────────────────

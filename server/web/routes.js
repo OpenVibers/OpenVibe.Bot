@@ -728,12 +728,12 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     const shares = createScreenShares({ db: domain && domain.db, domain, hub, machineScreen });
     // A share page may sit in OpenVibe's own workspaces (a room on OpenVibe.Chat, the admin panel) and the configured embeds.
     const shareCsp = ["default-src 'self'", `script-src 'self' ${PANEL_SCRIPT_SRC}`, `connect-src 'self' ${PANEL_CONNECT_SRC}`,
-        `frame-ancestors ${frameAncestors(config)} https://openvibe.chat https://openvibe.network`, "object-src 'none'", "base-uri 'self'"].join('; ');
+        `frame-ancestors ${frameAncestors(config)} https://openvibe.chat https://openvibe.network https://openvibe.actor`, "object-src 'none'", "base-uri 'self'"].join('; ');
     r.post('/machines/:id/shares', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
         const me = requireUser(req);
         if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
         const mine = await myMachine(req, me);
-        const made = await shares.create(mine, me.subject, { label: req.body && req.body.label, control: req.body && req.body.control === '1', days: (req.body && req.body.days) || 30, desk: req.body && req.body.desk === 'private' ? 'private' : 'main' });
+        const made = await shares.create(mine, me.subject, { label: req.body && req.body.label, control: req.body && req.body.control === '1', days: (req.body && req.body.days) || 30, desk: req.body && req.body.desk });
         res.setHeader('Content-Security-Policy', PANEL_CSP);
         res.type('html').send(renderMachineScreenPage({ machine: mine, idle: true, shares: await shares.list(mine, me.subject), madeLink: `${config.baseUrl}/screen/${made.token}`, madeShare: made.share, hasDesk: hasDesk(mine), hasScreen: hasScreen(mine) }));
     }));
@@ -759,7 +759,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         res.setHeader('Content-Security-Policy', shareCsp);
         const s = await shares.open(req.params.token).catch(() => null);
         if (!s) return res.status(404).type('html').send(renderShareGone());
-        res.type('html').send(renderSharePage({ token: req.params.token, name: s.device.name || 'A computer', control: !!s.share.control, label: s.share.label, desk: s.share.desk === 'private' ? 'private' : 'main' }));
+        res.type('html').send(renderSharePage({ token: req.params.token, name: s.device.name || 'A computer', control: !!s.share.control, label: s.share.label, desk: s.share.desk || 'main' }));
     });
     r.get('/screen/:token/state.json', shareJson(async (req) => await shares.state(req.params.token)));
     r.post('/screen/:token/start', ...shareLimit, shareJson(async (req) => await shares.start(req.params.token)));
