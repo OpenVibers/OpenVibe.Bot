@@ -77,23 +77,30 @@ const { boot, check, done } = require('./helpers/app');
         const other1 = await link(mine.deviceId, { desk: 'main' }, { token: t.network.signService({ sub: 'svc:live', cap: ['bot.machine.watch_link'] }), headers: { 'X-OV-Subject': alex.subject } });
         assert.strictEqual(other1.status, 403);
         assert.strictEqual(other1.json.code, 'bot.forbidden');
+        // The agent shows its own desk, never the owner's screen, and names the desk it means.
+        const ownScreen = await link(mine.deviceId, { desk: 'main', minutes: 30 }, asActor(actor(), alex.subject));
+        assert.strictEqual(ownScreen.status, 422);
+        assert.strictEqual(ownScreen.json.code, 'bot.desk_not_agents');
+        const unnamed = await link(mine.deviceId, { minutes: 30 }, asActor(actor(), alex.subject));
+        assert.strictEqual(unnamed.status, 422, 'no desk named is not the owner\'s screen either');
+        assert.strictEqual((await link(mine.deviceId, { desk: 'private', minutes: 30 }, asActor(actor(), alex.subject))).status, 201, 'the private desk is an agent\'s');
         // The agent without the capability has no route at all.
         const noCap = await link(mine.deviceId, { desk: 'main' }, asActor(actor(['bot.computer.control']), alex.subject));
         assert.strictEqual(noCap.status, 403);
         assert.strictEqual(noCap.json.code, 'capability.denied');
     });
 
-    await check('the link ends in minutes, and the desk is any desk the machine has', async () => {
+    await check('the link ends in minutes, and the desk is any agent desk the machine has', async () => {
         const soon = await link(mine.deviceId, { desk: 'desk-task-a', minutes: 5 }, asActor(actor(), alex.subject));
         assert.strictEqual(soon.status, 201, soon.text);
         const five = new Date(soon.json.expires_at).getTime() - Date.now();
         assert.ok(five > 4 * 60000 && five <= 5 * 60000, 'five minutes');
         for (const minutes of [4, 241, 0, 'soon', 1.5]) {
-            const bad = await link(mine.deviceId, { desk: 'main', minutes }, asActor(actor(), alex.subject));
+            const bad = await link(mine.deviceId, { desk: 'desk-task-a', minutes }, asActor(actor(), alex.subject));
             assert.strictEqual(bad.status, 422, `minutes ${minutes}`);
             assert.strictEqual(bad.json.code, 'bot.invalid_input');
         }
-        for (const desk of ['main', 'private', 'desk-task-a', 'desk-a-b-9']) {
+        for (const desk of ['private', 'desk-task-a', 'desk-a-b-9']) {
             const ok = await link(mine.deviceId, { desk, minutes: 60 }, asActor(actor(), alex.subject));
             assert.strictEqual(ok.status, 201, `desk ${desk}`);
             assert.strictEqual(ok.json.desk, desk);

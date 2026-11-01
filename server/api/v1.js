@@ -627,11 +627,16 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         if (!ownerSubject || ownerSubject !== subject) fail(404, 'bot.device_not_found', 'no such machine of yours');
         // The agent reaches a machine only where its owner turned "Let my agent use this computer" on.
         if (req.principal.kind === 'service' && !device.agent_computer) fail(403, 'bot.agent_not_allowed', 'the owner has not let their agent use this computer');
+        const desk = req.body?.desk == null || req.body.desk === '' ? (req.principal.kind === 'service' ? '' : 'main') : String(req.body.desk);
+        // The agent shows the desk it works on: the private desk or its own desk-<name>, never the owner's own screen
+        // (main). The owner, signed in, may link any of their desks.
+        // (A malformed name is create()'s to refuse, as bot.invalid_input.)
+        if (req.principal.kind === 'service' && (desk === '' || desk === 'main')) fail(422, 'bot.desk_not_agents', 'an agent links the private desk or its own desk-<name>, never the owner\'s screen');
         const made = await shares.create(device, subject, {
             label: req.body?.label || null,
             control: req.body?.control === true,               // the mouse and keyboard only when asked for
             minutes: req.body?.minutes == null || req.body.minutes === '' ? 60 : req.body.minutes,
-            desk: req.body?.desk == null || req.body.desk === '' ? 'main' : req.body.desk,
+            desk,
         });
         await domain.audit.record({
             robotId: device.id, deviceId: device.id, subject, operatorKind: req.principal.kind, role: 'owner',
