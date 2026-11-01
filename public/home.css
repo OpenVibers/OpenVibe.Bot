@@ -69,7 +69,7 @@
 /* The first kit's parts list. */
 .hm-kit { padding: 18px; border-radius: 16px; border: 1px solid var(--border, rgba(255, 255, 255, .08)); background: var(--bg-secondary, #101828); }
 .hm-sec .hm-parts { columns: 2 260px; column-gap: 28px; }
-.hm-parts li { break-inside: avoid; display: grid; grid-template-columns: 2.4em minmax(0, 1fr); gap: 4px; padding: 7px 0; border-bottom: 1px solid var(--border, rgba(255, 255, 255, .08)); font-size: 14.5px; }
+.hm-parts li { break-inside: avoid; display: grid; grid-template-columns: 2.4em minmax(0, 1fr); gap: 4px; padding: 7px 0; border-bottom: 1px solid var(--border, color-mix(in srgb, var(--text-primary, #fff) 8%, transparent)); font-size: 14.5px; }
 .hm-parts li b { color: var(--hm-accent-text); }
 .hm-parts small { display: block; color: var(--text-secondary, #96a7c2); font-size: 13px; }
 .hm-kit-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0 0; }
@@ -83,7 +83,7 @@
 
 /* Questions, answered on the page. */
 .hm-faq { display: grid; gap: 12px 28px; grid-template-columns: repeat(auto-fill, minmax(min(380px, 100%), 1fr)); }
-.hm-qa { padding: 4px 0 14px; border-bottom: 1px solid var(--border, rgba(255, 255, 255, .08)); }
+.hm-qa { padding: 4px 0 14px; border-bottom: 1px solid var(--border, color-mix(in srgb, var(--text-primary, #fff) 8%, transparent)); }
 .hm-qa h3 { margin: 0 0 6px; font-size: 16px; }
 .hm-qa p { margin: 0; font-size: 14.5px; line-height: 1.6; color: var(--text-secondary, #96a7c2); }
 
@@ -117,7 +117,7 @@
   .pick-row { display: flex; gap: 8px; overflow-x: auto; margin: 10px -16px 0; padding: 2px 16px 4px; scrollbar-width: none; overscroll-behavior-x: contain; }
   .pick-row::-webkit-scrollbar { display: none; }
   .pick-row input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
-  .pick-row label { display: inline-flex; align-items: center; flex: none; min-height: 44px; padding: 0 15px; border-radius: 999px; border: 1px solid var(--border, rgba(255, 255, 255, .08)); color: var(--text-secondary, #96a7c2); font-size: .9rem; font-weight: 650; white-space: nowrap; cursor: pointer; }
+  .pick-row label { display: inline-flex; align-items: center; flex: none; min-height: 44px; padding: 0 15px; border-radius: 999px; border: 1px solid var(--border, color-mix(in srgb, var(--text-primary, #fff) 8%, transparent)); color: var(--text-secondary, #96a7c2); font-size: .9rem; font-weight: 650; white-space: nowrap; cursor: pointer; }
   .pick-row input:checked + label { color: var(--text-primary, #e6edf7); border-color: var(--accent, #3b82f6); background: color-mix(in srgb, var(--accent, #3b82f6) 12%, transparent); }
   .pick-row input:focus-visible + label { outline: 2px solid var(--accent, #3b82f6); outline-offset: 2px; }
   .pick-pane { display: none; }
@@ -138,6 +138,6 @@
 @media (min-width: 641px) {
   .hm-fold-block { border: 0; background: none; margin-top: 40px; }
   .hm-fold-block > summary { display: block; min-height: 0; padding: 0; border: 0; background: none; }
-  .hm-fold-block > summary h2 { margin: 0 0 6px; font-size: 1.15rem; border-bottom: 1px solid var(--border, rgba(255, 255, 255, .08)); padding-bottom: .2em; }
+  .hm-fold-block > summary h2 { margin: 0 0 6px; font-size: 1.15rem; border-bottom: 1px solid var(--border, color-mix(in srgb, var(--text-primary, #fff) 8%, transparent)); padding-bottom: .2em; }
   .hm-fold-block > summary span { display: none; }
 }

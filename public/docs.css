@@ -35,7 +35,7 @@
 .docs-main button.primary { justify-self: start; font: inherit; font-weight: 700; font-size: 14px; color: var(--on-accent-strong, var(--on-accent, #fff)); background: var(--accent-strong, var(--accent, #3472d8)); border: 0; border-radius: 10px; padding: 10px 18px; cursor: pointer; }
 .docs-main button.primary:hover { filter: brightness(1.08); }
 .docs-main .error { border: 1px solid rgba(239, 68, 68, .45); background: rgba(239, 68, 68, .08); border-radius: 10px; padding: 12px 14px; }
-.docs-main [role="status"] strong { color: #22c55e; }
+.docs-main [role="status"] strong { color: var(--success-text, #22c55e); }
 .docs-foot { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--border, #1f2d47); font-size: 13.5px; }
 
 @media (max-width: 860px) {
