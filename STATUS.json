@@ -7,11 +7,11 @@
   "domain": "openvibe.bot (www -> apex; /device and /control WebSockets; /install)",
   "contracts": "openvibe-contracts v0.261.0",
   "sdk": "openvibe-sdk v0.74.0",
-  "shared": "openvibe-shared v4.67.0",
+  "shared": "openvibe-shared v4.70.0",
   "packages": [
     "openvibe-contracts v0.261.0",
     "openvibe-sdk v0.74.0",
-    "openvibe-shared v4.67.0"
+    "openvibe-shared v4.70.0"
   ],
   "capabilities": [
     "bot.robot.read",
@@ -65,5 +65,5 @@
     "a person's own machines that run their jobs (/machines: add with a --worker command, list, remove); their worker offers reported to Network as user-owned offers naming the owner; jobs reach a machine only for its owner (plan T14/T16)",
     "machines hub (plan L34): Bot stays the registry; the hub's routes (GET /api/v1/machines, GET /api/v1/machines/:id, POST /api/v1/machines/pairings, PATCH /api/v1/machines/:id, PUT /api/v1/machines/:id/roles, POST /api/v1/machines/:id/revoke) serve the person and the network's own service (svc:network, and only that one) acting for them (bot.machine.manage, X-OV-Subject), with the machine's roles (migration 0028) in the device's config frame and its online state reported to Network once per change"
   ],
-  "updated": "2026-10-31"
+  "updated": "2026-11-01"
 }
