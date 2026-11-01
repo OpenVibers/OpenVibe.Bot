@@ -20,7 +20,7 @@ const { boot, check, done } = require('./helpers/app');
 
 (async () => {
     const t = await boot({ openre: false });
-    const get = (p) => fetch(t.base + p, { redirect: 'manual' });
+    const get = (p, init = {}) => fetch(t.base + p, { redirect: 'manual', ...init });
 
     await check('GET /terms, /privacy, /dmca: OpenVibe.Bot legal pages served by the app', async () => {
         for (const p of ['/terms', '/privacy', '/dmca']) {
@@ -69,14 +69,19 @@ const { boot, check, done } = require('./helpers/app');
         assert.ok(Array.isArray(m.icons) && m.icons.length > 0, 'has icons');
     });
 
-    await check('an unknown page is the app\'s 404 HTML page; the API keeps its problem+json 404', async () => {
-        const page = await get('/no-such-page');
+    await check('an unknown page is the app\'s 404 HTML page for a browser; the API keeps its problem+json 404', async () => {
+        const page = await get('/no-such-page', { headers: { Accept: 'text/html' } });
         assert.strictEqual(page.status, 404);
         assert.match(page.headers.get('content-type'), /^text\/html/);
-        assert.match(await page.text(), /Not found/);
+        const html = await page.text();
+        assert.ok(html.includes('<h1>Page not found</h1>'), html.slice(0, 300));
+        assert.ok(html.includes('id="navbar-mount"'), 'the page is in the site Frame');
         const api = await fetch(t.base + '/api/no-such-route');
         assert.strictEqual(api.status, 404);
         assert.match(api.headers.get('content-type'), /application\/problem\+json/);
+        const notHtml = await get('/no-such-page');
+        assert.strictEqual(notHtml.status, 404);
+        assert.match(notHtml.headers.get('content-type'), /application\/problem\+json/, 'a client that does not accept HTML keeps JSON');
     });
 
     await check('the vhost no longer serves anything from a Sites checkout', async () => {
