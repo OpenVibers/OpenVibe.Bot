@@ -295,6 +295,8 @@ function framePage({ config, title, description, canonicalPath = '/', body, head
 function renderUpdates({ config }) {
     return framePage({
         config, title: `What shipped on ${SITE_NAME}`, description: `Every change deployed to ${SITE_NAME}, newest first.`, canonicalPath: '/updates',
+        // The site's stylesheet: without it /updates fell back to the browser's serif (domain sweep, 2026-11-01).
+        head: `<link rel="stylesheet" href="${ovServe.url(showcase.STYLESHEET)}">`,
         body: `<main id="main" class="page">\n${frame.updatesBody({ service: 'bot', siteName: SITE_NAME })}\n</main>\n<script src="${ovServe.url('shipped.js')}" defer></script>`,
     });
 }
