@@ -43,7 +43,7 @@ const { createJobs } = require('./jobs');
 const { createActorLimits } = require('./api/actor-limits');
 const { createSessionRoutes, viewerMiddleware } = require('./web/session');
 const { createWebRoutes } = require('./web/routes');
-const { HOME_CSP } = require('./web/home');
+const { HOME_CSP, renderNotFound } = require('./web/home');
 const { createSubmissions } = require('./submissions');
 const { createRoutines } = require('./routines');
 const { createWebhooks } = require('./webhooks');
@@ -52,18 +52,6 @@ const { inputError } = require('./util');
 const { createBotReadiness, registerBotGauges } = require('./observability');
 
 const VERSION = require('../package.json').version;
-
-/**
- * The browser-facing 404 (the API's is problem+json): a plain, JavaScript-free page with a way back.
- * The app's CSP applies, so it carries no inline styles or scripts.
- */
-const NOT_FOUND_HTML = `<!doctype html>
-<html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex"><title>Not found — OpenVibe.Bot</title></head>
-<body><main><h1>Not found</h1><p>There is nothing at this address. Go to the <a href="/">OpenVibe.Bot home page</a>.</p></main></body>
-</html>
-`;
 
 function createApp(opts = {}) {
     const config = opts.config || loadConfig();
@@ -205,8 +193,11 @@ function createApp(opts = {}) {
     app.use(webRoutes);
 
     app.use((req, res) => {
-        if (req.path.startsWith('/api/') || req.path.startsWith('/internal/')) return http.sendProblem(res, 404, 'not_found', { ctx: req.ov });
-        return res.status(404).type('html').send(NOT_FOUND_HTML);
+        if (req.path.startsWith('/api/') || req.path.startsWith('/internal/') || req.accepts(['application/json', 'text/html']) !== 'text/html') {
+            return http.sendProblem(res, 404, 'not_found', { ctx: req.ov });
+        }
+        res.setHeader('Content-Security-Policy', HOME_CSP);
+        return res.status(404).type('html').set('Cache-Control', 'no-store').set('X-Robots-Tag', 'noindex').send(renderNotFound({ config }));
     });
     // eslint-disable-next-line no-unused-vars
     app.use((err, req, res, next) => {

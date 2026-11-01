@@ -102,6 +102,25 @@ const { boot, check, done } = require('./helpers/app');
         assert.strictEqual(r.headers.get('content-security-policy'), "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; connect-src 'self' https://cloudflareinsights.com; frame-ancestors 'self'; object-src 'none'; base-uri 'self'");
     });
 
+    await check('a browser that asks for a missing page gets the site 404 page in the Frame', async () => {
+        const r = await fetch(t.base + '/no-such-page-xyz', { headers: { Accept: 'text/html,*/*;q=0.8' }, redirect: 'manual' });
+        assert.strictEqual(r.status, 404);
+        assert.match(r.headers.get('content-type'), /^text\/html/);
+        const html = await r.text();
+        assert.ok(html.includes('<h1>Page not found</h1>'), html.slice(0, 300));
+        assert.ok(html.includes('There is no page at this address on bot.test. The link may be old or mistyped.'));
+        assert.ok(html.includes('id="navbar-mount"'), 'the page is in the site Frame');
+        assert.ok(html.includes('<meta name="robots" content="noindex, follow">'));
+        assert.strictEqual(r.headers.get('x-robots-tag'), 'noindex');
+        assert.match(r.headers.get('content-security-policy'), /style-src [^;]*'unsafe-inline'/);
+        assert.ok(html.includes('class="sc-btn sc-primary" href="/"'), 'home is the first way back');
+        const api = await fetch(t.base + '/api/no-such', { headers: { Accept: 'text/html' } });
+        assert.strictEqual(api.status, 404);
+        assert.match(api.headers.get('content-type'), /problem\+json/);
+        const notHtml = await fetch(t.base + '/no-such-page-xyz', { headers: { Accept: 'application/json' } });
+        assert.match(notHtml.headers.get('content-type'), /problem\+json/);
+    });
+
     await check('the vhost proxies / and /shared/ to the app; the legal pages are the app\'s, not the Sites files', async () => {
         const conf = fs.readFileSync(path.join(__dirname, '..', 'deploy', 'nginx', 'openvibe.bot.conf'), 'utf8');
         assert.match(conf, /location \^~ \/shared\/ \{\s*proxy_pass http:\/\/127\.0\.0\.1:4630;\s*\}/);
