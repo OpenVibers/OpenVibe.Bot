@@ -269,7 +269,7 @@ function sections({ signedIn = false, config, models = [], robots = [], kit: k =
 const footerBoot = (footer) => `<script>document.addEventListener('DOMContentLoaded', function () { try { if (window.OpenVibeFooter) OpenVibeFooter.init(${JSON.stringify(footer)}); } catch (e) { /* the Frame is optional */ } });</script>`;
 
 /** The OpenVibe Frame around one of Bot's public pages (the front page, the Build docs): navbar, footer, theme. */
-function framePage({ config, title, description, canonicalPath = '/', body, head = '' }) {
+function framePage({ config, title, description, canonicalPath = '/', body, head = '', noindex = false }) {
     const nav = {
         service: 'bot',
         apiBase: NETWORK_URL,
@@ -281,13 +281,39 @@ function framePage({ config, title, description, canonicalPath = '/', body, head
         notificationsRealtime: true,
     };
     return shell.page({
-        name: SITE_NAME, service: 'bot', lang: 'en', title, siteName: SITE_NAME, description, summary: description,
-        canonical: `${config.baseUrl}${canonicalPath}`, robots: 'index, follow',
-        agentLayer: require('../agent-pages').TWIN_PATH_RE.test(canonicalPath), llms: '/llms.txt',
+        name: SITE_NAME, service: 'bot', lang: 'en', title, siteName: SITE_NAME, description,
+        ...(noindex ? {} : { summary: description }),
+        canonical: noindex ? undefined : `${config.baseUrl}${canonicalPath}`,
+        robots: noindex ? 'noindex, follow' : 'index, follow',
+        agentLayer: !noindex && require('../agent-pages').TWIN_PATH_RE.test(canonicalPath), llms: '/llms.txt',
         navbar: nav, footer: { service: 'bot', variant: 'full', mount: '#ov-footer', brandName: SITE_NAME, updates: '/updates' }, home: '/',
         navLinks: [{ label: 'Robots', href: '/robots' }, { label: 'Build', href: '/docs' }],
         head: [appIcon.headTags({ site: 'bot' }), '<link rel="manifest" href="/manifest.webmanifest">', `<link rel="apple-touch-icon" href="${require('openvibe-shared/app-icons').url('bot', 192)}">`, head].filter(Boolean).join('\n'),
         body: `<div id="navbar-mount"></div>\n${body}\n${footerBoot({ service: 'bot', variant: 'full', mount: '#ov-footer', brandName: SITE_NAME, updates: '/updates' })}`,
+    });
+}
+
+/** The page a browser gets for a path nothing serves: Bot's Frame, one way back, and no clue about what was asked for. */
+function renderNotFound({ config }) {
+    const host = String(config.baseUrl).replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+    return framePage({
+        config,
+        title: `Page not found · ${SITE_NAME}`,
+        description: `There is no page at this address on ${host}.`,
+        noindex: true,
+        head: [
+            `<link rel="stylesheet" href="${ovServe.url(showcase.STYLESHEET)}">`,
+            UPDATES_FONT,
+        ].join('\n'),
+        body: `<main id="main" class="page">
+<h1>Page not found</h1>
+<p>There is no page at this address on ${esc(host)}. The link may be old or mistyped.</p>
+<div class="sc-actions">
+<a class="sc-btn sc-primary" href="/">${SITE_NAME} home</a>
+<a class="sc-btn" href="/robots">Robots</a>
+<a class="sc-btn" href="/docs">Build</a>
+</div>
+</main>`,
     });
 }
 
@@ -354,4 +380,4 @@ ${footerBoot(footer)}`,
     });
 }
 
-module.exports = { renderHome, renderUpdates, framePage, HOME_CSP, sections, faqItems };
+module.exports = { renderHome, renderUpdates, renderNotFound, framePage, HOME_CSP, sections, faqItems };
