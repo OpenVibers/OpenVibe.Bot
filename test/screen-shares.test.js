@@ -62,6 +62,7 @@ const { boot, check, done } = require('./helpers/app');
         let r = await fetch(`${t.base}/screen/${watch}`);
         assert.strictEqual(r.status, 200);
         assert.match(r.headers.get('content-security-policy'), /frame-ancestors [^;]*https:\/\/openvibe\.chat/);
+        assert.match(r.headers.get('content-security-policy'), /frame-ancestors [^;]*https:\/\/openvibe\.actor/);
         assert.strictEqual(r.headers.get('referrer-policy'), 'no-referrer');
         let html = await r.text();
         assert.match(html, /staff-desk/);
@@ -122,6 +123,20 @@ const { boot, check, done } = require('./helpers/app');
         assert.strictEqual((await json('POST', `/screen/${desk}/input`, { action: 'click', x: 5, y: 5, width: 100, height: 100 })).status, 200);
         assert.strictEqual(seen.filter((m) => m.kind === 'input').at(-1).value.desk, 'private', 'a click on the desk, never the owner\'s screen');
         assert.strictEqual((await t.db.maybe("SELECT desk FROM machine_screen_shares WHERE label = 'Agent desk'")).desk, 'private');
+    });
+
+    await check('a link may show any desk the machine has, not only the private one (plan L55)', async () => {
+        let r = await form(`/machines/${deviceId}/shares`, alex, 'label=Task+desk&days=1&control=1&desk=desk-task-a');
+        const html = await r.text();
+        const task = linkOf(html);
+        assert.ok(task, 'a link to a named desk');
+        assert.match(html, /the desk-task-a desk/);
+        assert.match(await (await fetch(`${t.base}/screen/${task}`)).text(), /the desk-task-a desk/);
+        assert.strictEqual((await json('GET', `/screen/${task}/state.json`)).json.desk, 'desk-task-a');
+        assert.strictEqual((await t.db.maybe("SELECT desk FROM machine_screen_shares WHERE label = 'Task desk'")).desk, 'desk-task-a');
+        // A desk the machine does not have is refused by the contract, not stored.
+        r = await form(`/machines/${deviceId}/shares`, alex, 'label=Bad&days=1&desk=desk-../x');
+        assert.ok(r.status >= 400, 'not a desk name');
     });
 
     await check('a burst is slowed down; a revoked link stops at once', async () => {
