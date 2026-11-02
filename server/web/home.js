@@ -22,7 +22,7 @@ const ovServe = require('openvibe-shared/serve');
 const frame = require('openvibe-shared/frame');
 const appIcon = require('openvibe-shared/app-icon');
 const seo = require('openvibe-shared/seo');
-const { pickBlock, pickRules, foldBlock } = require('./short');
+const { pickBlock, foldBlock } = require('./short');
 
 const SITE_NAME = 'OpenVibe.Bot';
 const NETWORK_URL = 'https://openvibe.network';
@@ -122,18 +122,17 @@ function modelsSection({ models }) {
 }
 
 /** The connection kinds as one list, each with how many models use it. */
-function connectSection({ models, rules }) {
+function connectSection({ models }) {
     const groups = KINDS.map(([k, label, text]) => ({ k, label, text, ms: models.filter((m) => m.connect === k) })).filter((g) => g.ms.length);
     if (!groups.length) return '';
     const n = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight'][groups.length] || String(groups.length);
-    // The ways to connect are blocks of the same kind: on a phone a row of chips picks one of them and the chip names
-    // it, so the list is one way at a time. Every way stays in the page.
+    // The ways to connect are blocks of the same kind: every way stays in the page, stacked, and on a phone a row
+    // of chip links jumps to one.
     const panes = groups.map((g) => ({
         id: g.k,
         label: g.label,
         html: kit.list([kit.row({ href: g.ms.length === 1 ? `/models/${g.ms[0].id}` : `/models#k-${g.k}`, title: g.label, sub: g.text, meta: plural(g.ms.length, 'model', 'models') })]),
     }));
-    if (rules) rules.push(pickRules('connect', panes.map((p) => p.id)));
     return sec('connect', `${n} ${groups.length === 1 ? 'way' : 'ways'} to connect, one panel`, 'However a robot reaches OpenVibe, it gets the same panel, the same gate and the same emergency stop.',
         pickBlock({ key: 'connect', label: 'The ways to connect', head: `${n} ${groups.length === 1 ? 'way' : 'ways'} to connect, one panel`, panes }));
 }
@@ -244,12 +243,12 @@ function faqSection(items) {
     });
 }
 
-function sections({ signedIn = false, config, models = [], robots = [], kit: k = null, jobs = [], faq = null, rules = null } = {}) {
+function sections({ signedIn = false, config, models = [], robots = [], kit: k = null, jobs = [], faq = null } = {}) {
     return hero({ signedIn, config })
         + stats({ models, robots })
         + onlineNow({ robots })
         + modelsSection({ models })
-        + connectSection({ models, rules })
+        + connectSection({ models })
         + startSection()
         + moreSection({ config, kit: k, models })
         + jobsSection({ jobs })
@@ -343,10 +342,8 @@ function renderHome({ config, signedIn = false, models = [], robots = [], kit = 
     };
     const footer = { service: 'bot', variant: 'full', mount: '#ov-footer', brandName: SITE_NAME };
     const url = `${config.baseUrl}/`;
-    // The rules that show the picked block of the pick block are written for this page.
-    const rules = [];
     const faq = faqItems({ models });
-    const body = sections({ signedIn, config, models, robots, kit, jobs, faq, rules });
+    const body = sections({ signedIn, config, models, robots, kit, jobs, faq });
     return shell.page({
         name: SITE_NAME, service: 'bot', lang: 'en',
         title: `${SITE_NAME}: drive your robot from any browser`,
@@ -370,7 +367,6 @@ function renderHome({ config, signedIn = false, models = [], robots = [], kit = 
             `<link rel="stylesheet" href="${ovServe.url('room.css')}">`,
             `<link rel="stylesheet" href="${ovServe.url(showcase.STYLESHEET)}">`,
             '<link rel="stylesheet" href="/home.css">',
-            rules.length ? `<style>@supports selector(:has(*)){@media (max-width:640px){${rules.join('')}}</style>` : '',
         ].join('\n'),
         body: `<div id="navbar-mount"></div>
 <main id="main" class="page hm">
