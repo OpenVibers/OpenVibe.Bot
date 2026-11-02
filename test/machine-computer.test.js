@@ -432,6 +432,20 @@ const { boot, check, done } = require('./helpers/app');
         const rows = await t.db.many('SELECT value FROM command_audit WHERE robot_id = $1 AND kind = $2 AND result = $3', [gpu.deviceId, 'ai', 'ack']);
         assert.deepStrictEqual(rows[0].value, { model: 'llama3.1:8b', messages: 1, chars: 29 });
         assert.ok(!JSON.stringify(rows).includes('secret words'), 'never the text');
+        // Tools (contracts 0.277.0): an agent's loop on this machine's model. The command carries the tools and the
+        // calls already made; the audit counts the tools and keeps no names, arguments or results.
+        const withTools = { kind: 'ai', value: { model: 'llama3.1:8b', tools: [{ type: 'function', function: { name: 'web_search', parameters: { type: 'object' } } }], tool_choice: 'auto', messages: [
+            { role: 'user', content: 'Weather in Lisbon?' },
+            { role: 'assistant', content: '', tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'web_search', arguments: '{"q":"secret query"}' } }] },
+            { role: 'tool', tool_call_id: 'call_1', content: 'secret result' },
+        ] } };
+        const toolAsk = await cmd(gpu.deviceId, withTools, asAi(alex.subject));
+        assert.strictEqual(toolAsk.json.result, 'ack', toolAsk.text);
+        const toolRow = (await t.db.many('SELECT value FROM command_audit WHERE robot_id = $1 AND kind = $2 ORDER BY id DESC LIMIT 1', [gpu.deviceId, 'ai']))[0];
+        assert.deepStrictEqual(toolRow.value, { model: 'llama3.1:8b', messages: 3, chars: 31, tools: 1 });
+        assert.ok(!/secret (query|result)|web_search/.test(JSON.stringify(toolRow)), 'no tool names, arguments or results in the audit');
+        const orphan = await cmd(gpu.deviceId, { kind: 'ai', value: { model: 'llama3.1:8b', messages: [{ role: 'tool', content: 'x' }] } }, asAi(alex.subject));
+        assert.strictEqual(orphan.status, 422, 'a tool message needs the call it answers');
         // A real Node reports the ai plugin under its own name, and a machine may run it with no computer plugin.
         const own = await machine(alex, null);
         own.c.send(frame('status', { capabilities: { ai: { ai: { models: ['qwen2.5-1.5b-instruct'], ready: true, max_tokens: 256 } } }, drivers: [], faults: [] }));

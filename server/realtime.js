@@ -77,7 +77,8 @@ function computerSummary(kind, value) {
     if (kind === 'desk') return { action: value.action, ...(typeof value.desk === 'string' ? { desk: value.desk } : {}), ...(typeof value.kind === 'string' ? { kind: value.kind } : {}), ...(typeof value.profile === 'string' ? { profile: value.profile } : {}), ...(Number.isInteger(value.width) && Number.isInteger(value.height) ? { width: value.width, height: value.height } : {}) };
     if (kind === 'exec') return { program: String(value.argv[0]).slice(0, 120), args: value.argv.length - 1, ...where, ...(value.detach === true ? { detach: true } : {}) };
     // A model's prompt is the person's own words: the audit keeps the model, how many messages and how long, never the text.
-    if (kind === 'ai') return { model: String(value.model).slice(0, 120), messages: value.messages.length, chars: value.messages.reduce((n, m) => n + String(m.content || '').length, 0) };
+    // With tools (contracts 0.277.0): how many were offered, never their names' arguments or the results sent back.
+    if (kind === 'ai') return { model: String(value.model).slice(0, 120), messages: value.messages.length, chars: value.messages.reduce((n, m) => n + String(m.content || '').length, 0), ...(Array.isArray(value.tools) ? { tools: value.tools.length } : {}) };
     if (kind === 'fs') return { op: value.op, path: String(value.path).slice(0, 300), ...(typeof value.content_b64 === 'string' ? { bytes: Math.floor((value.content_b64.length * 3) / 4) } : {}) };
     if (kind === 'probe') { try { const u = new URL(value.target); return { scheme: u.protocol.replace(':', ''), host: u.host }; } catch { return { scheme: null }; } }
     // Typed text can be anything (a password the person asked for): the audit keeps its length, never the text.
