@@ -26,14 +26,20 @@ const TITLES = ['OpenVibe.Bot — drive your robot from any browser', 'Build for
         }
         // llms.txt links the front page; llms-full.txt lists it as a page with an absolute URL.
         const index = await (await get('/llms.txt')).text();
-        assert.ok(index.includes(`- [${TITLES[0]}](${BASE}/)`), 'llms.txt links the front page');
+        assert.ok(index.includes(`- [${TITLES[0]}](${BASE}/index.md)`), 'llms.txt links the front page at its Markdown twin (AGT-5)');
         const full = await (await get('/llms-full.txt')).text();
         assert.ok(full.includes(`### ${TITLES[0]}`) && full.includes(`URL: ${BASE}/`), 'llms-full.txt lists the front page');
     });
 
     await check('GET /llms.txt: every public page by title and absolute URL, and no API/internal/signed-in path', async () => {
         const body = await (await get('/llms.txt')).text();
-        PATHS.forEach((p, i) => assert.ok(body.includes(`- [${TITLES[i]}](${BASE}${p})`), `llms.txt lists ${p}`));
+        // AGT-5: a page with a twin is linked at it; the legal pages have none and are marked HTML, under ## Optional.
+        const legal = ['/terms', '/privacy', '/dmca'];
+        const link = (p) => (legal.includes(p) ? `${BASE}${p}) (HTML)` : `${BASE}${p === '/' ? '/index.md' : `${p}.md`})`);
+        PATHS.forEach((p, i) => assert.ok(body.includes(`- [${TITLES[i]}](${link(p)}`), `llms.txt lists ${p}`));
+        const optional = body.split('\n## Optional\n')[1] || '';
+        assert.ok(legal.every((p) => optional.includes(`${BASE}${p})`)) && optional.includes(`${BASE}/sitemap.xml`), 'the legal pages and the sitemap are optional');
+        assert.ok(body.includes(`(${BASE}/try) (HTML)`), 'the try page has no twin');
         for (const bad of ['/api', '/internal', '/panel/']) assert.ok(!body.includes(bad), `llms.txt does not name ${bad}`);
     });
 

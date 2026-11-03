@@ -67,6 +67,8 @@ const PUBLIC_PAGES = ['/', '/try', '/robots', '/models', '/docs', '/docs/drivers
 const LLMS_NAME = 'OpenVibe.Bot';
 const LLMS_SUMMARY = 'An open control panel for robots: pair a robot with one pasted command and drive it from any '
     + 'browser, with roles, limits and a latched emergency stop on every command.';
+const LLMS_NO_TWIN = new Set(['/try', '/setup/sd-card', '/terms', '/privacy', '/dmca']);
+const LLMS_LEGAL = new Set(['/terms', '/privacy', '/dmca']);
 const LLMS_PAGES = [
     {
         path: '/', title: 'OpenVibe.Bot — drive your robot from any browser',
@@ -176,9 +178,18 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     // /llms.txt and /llms-full.txt (llmstxt.org, openvibe-shared/seo): the public pages as a plain-text map for
     // language-model crawlers. Only the pages above; the signed-in pages, the API and /internal are not listed.
     // Same headers as robots.txt: text/plain and no explicit Cache-Control.
+    // AGT-5: each page that has a Markdown twin is linked at it (openvibe-shared 4.108.0's markdown mode); the try page,
+    // the SD-card setup and the legal pages have none and are marked HTML. The legal pages, the sitemap and the full text
+    // are ## Optional.
+    const llmsLink = (p) => ({ title: p.title, url: `${config.baseUrl}${p.path}`, note: p.note, ...(LLMS_NO_TWIN.has(p.path) ? { html: true } : {}) });
     r.get('/llms.txt', (req, res) => res.type('text/plain').send(seo.llmsTxt({
-        name: LLMS_NAME, summary: LLMS_SUMMARY,
-        sections: [{ title: 'Pages', links: LLMS_PAGES.map((p) => ({ title: p.title, url: `${config.baseUrl}${p.path}`, note: p.note })) }],
+        name: LLMS_NAME, summary: LLMS_SUMMARY, markdown: true, base: config.baseUrl,
+        sections: [{ title: 'Pages', links: LLMS_PAGES.filter((p) => !LLMS_LEGAL.has(p.path)).map(llmsLink) }],
+        optional: [
+            ...LLMS_PAGES.filter((p) => LLMS_LEGAL.has(p.path)).map(llmsLink),
+            { title: 'Sitemap', url: `${config.baseUrl}/sitemap.xml` },
+            { title: 'Full text for language models', url: `${config.baseUrl}/llms-full.txt` },
+        ],
     })));
     r.get('/llms-full.txt', (req, res) => res.type('text/plain').send(seo.llmsFull({
         site: LLMS_NAME, summary: LLMS_SUMMARY, base: config.baseUrl,
