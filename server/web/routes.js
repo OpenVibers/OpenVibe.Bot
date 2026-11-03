@@ -67,7 +67,7 @@ const PUBLIC_PAGES = ['/', '/try', '/robots', '/models', '/docs', '/docs/drivers
 const LLMS_NAME = 'OpenVibe.Bot';
 const LLMS_SUMMARY = 'An open control panel for robots: pair a robot with one pasted command and drive it from any '
     + 'browser, with roles, limits and a latched emergency stop on every command.';
-const LLMS_NO_TWIN = new Set(['/try', '/setup/sd-card', '/terms', '/privacy', '/dmca']);
+const LLMS_NO_TWIN = new Set(['/terms', '/privacy', '/dmca']);
 const LLMS_LEGAL = new Set(['/terms', '/privacy', '/dmca']);
 const LLMS_PAGES = [
     {
