@@ -6,6 +6,7 @@ module.exports = {
     purpose: 'Devices, pairing and control for robots: add a robot, pair it with one pasted command, then drive it from any browser through a panel laid out from its profile.',
     home: 'https://openvibe.bot', api: '/api/v1',
     docs: 'https://openvibe.bot/docs',
+    openapi: '/openapi.json',
     policy: {
         auth: ['bearer', 'Network OIDC'],
         rateLimit: 'The API is rate limited per caller and per robot; the owner\'s plan sets the numbers.',
