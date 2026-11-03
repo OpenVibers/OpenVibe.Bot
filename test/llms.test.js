@@ -39,7 +39,12 @@ const TITLES = ['OpenVibe.Bot — drive your robot from any browser', 'Build for
         PATHS.forEach((p, i) => assert.ok(body.includes(`- [${TITLES[i]}](${link(p)}`), `llms.txt lists ${p}`));
         const optional = body.split('\n## Optional\n')[1] || '';
         assert.ok(legal.every((p) => optional.includes(`${BASE}${p})`)) && optional.includes(`${BASE}/sitemap.xml`), 'the legal pages and the sitemap are optional');
-        assert.ok(body.includes(`(${BASE}/try) (HTML)`), 'the try page has no twin');
+        assert.ok(body.includes(`(${BASE}/try.md)`) && body.includes(`(${BASE}/setup/sd-card.md)`), 'the try page and the SD-card guide have twins (11-03)');
+        for (const p of ['/try.md', '/setup/sd-card.md']) {
+            const r = await get(p);
+            assert.strictEqual(r.status, 200, p);
+            assert.match(r.headers.get('content-type') || '', /^text\/markdown/, p);
+        }
         for (const bad of ['/api', '/internal', '/panel/']) assert.ok(!body.includes(bad), `llms.txt does not name ${bad}`);
     });
 
