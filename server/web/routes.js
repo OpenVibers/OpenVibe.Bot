@@ -37,7 +37,7 @@ const seo = require('openvibe-shared/seo');
 const appIcon = require('openvibe-shared/app-icon');
 const { getProfile, listProfiles, loadProfiles } = require('../profiles');
 const { frameAncestors } = require('../config');
-const { BotError } = require('../util');
+const { BotError, json } = require('../util');
 const kits = require('../kits');
 const { renderPanel, renderEmbedRefused, renderDrivePage, renderPairingPage, renderPhonePage, renderMachinesPage, renderMachineDesksPage, renderMachineScreenPage, renderSharePage, renderShareGone, renderLinkPage, renderSignInPage, renderClaimPage, renderClaimApproved, renderFirstRunPage } = require('./render');
 const { createMachineScreen } = require('../machine-screen');
@@ -113,7 +113,7 @@ const LLMS_PAGES = [
     {
         path: '/docs/automation', title: 'Routines, webhooks and your agent',
         note: 'Steps on a schedule, signed webhooks for a robot\'s events, and the switch that lets your OpenVibe.Actor agent drive.',
-        text: 'How a robot on OpenVibe.Bot moves without anyone at the controls, through the same gate as a person (limits, cooldowns, e-stop, audit). Steps are plain lines checked against the robot\'s profile: forward, back, left and right for seconds at a speed, stop, wait, say, face, show, an actuator or camera axis with a value and a hold time, and press for a button; held steps are re-sent inside the deadman window and a refused step stops the rest with its reason. Routines run steps as the owner on demand, every N minutes (at least 5), daily at a UTC time on chosen weekdays, or each time the robot comes online; one runs at a time; 60 steps, 60 seconds a step, 10 minutes in all. Webhooks send a robot\'s bot.robot.online, bot.robot.offline, bot.estop.set, bot.estop.cleared and bot.command.refused events to up to five https addresses, each with its own whsec_ secret shown once, signed like OpenVibe.Events deliveries (X-OpenVibe-Timestamp, X-OpenVibe-Signature-V2, checked with verifyDeliveryV2 from openvibe-sdk/events), to public addresses only, retried after 30 seconds, 2, 10, 30 and 120 minutes. The Your agent switch, off until the owner turns it on, lets the owner\'s OpenVibe.Actor agent see their robots and run steps on that one as the owner, never for anyone else; a steps call on Bot\'s API runs up to 20 steps and 30 seconds and answers done, or stopped with the reason.',
+        text: 'How a robot on OpenVibe.Bot moves without anyone at the controls, through the same gate as a person (limits, cooldowns, e-stop, audit). GET /api/v1/me answers a person\'s account ID (subject, username, display_name); a robot\'s answer carries owner_subject, effective_limits (max_speed, max_turn, max_command_ms, heartbeat_ms) and limits_source. Steps are plain lines checked against the robot\'s profile: forward, back, left and right for seconds at a speed, stop, wait, say, face, show, an actuator or camera axis with a value and a hold time, and press for a button; held steps are re-sent inside the deadman window and a refused step stops the rest with its reason. Routines run steps as the owner on demand, every N minutes (at least 5), daily at a UTC time on chosen weekdays, or each time the robot comes online; one runs at a time; 60 steps, 60 seconds a step, 10 minutes in all. Webhooks send a robot\'s bot.robot.online, bot.robot.offline, bot.estop.set, bot.estop.cleared and bot.command.refused events to up to five https addresses, each with its own whsec_ secret shown once, signed like OpenVibe.Events deliveries (X-OpenVibe-Timestamp, X-OpenVibe-Signature-V2, checked with verifyDeliveryV2 from openvibe-sdk/events), to public addresses only, retried after 30 seconds, 2, 10, 30 and 120 minutes. The Your agent switch, off until the owner turns it on, lets the owner\'s OpenVibe.Actor agent see their robots and run steps on that one as the owner, never for anyone else; a steps call on Bot\'s API runs up to 20 steps and 30 seconds and answers done, or stopped with the reason.',
     },
     {
         path: '/docs/computers', title: 'Your computer for your agents',
@@ -1082,7 +1082,13 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     }
     async function sendPanel(res, robot, profile, role, mode = 'page', signedIn = true, profileForm = {}) {
         await attachInProcess(robot, profile);
-        const { maxCommandMs } = domain.control.effectiveLimits(robot, profile);
+        const effective = domain.control.effectiveLimits(robot, profile);
+        const { maxCommandMs } = effective;
+        // The owner's card: what the gate and the device actually enforce, and whether each came from the
+        // profile or was set for this robot (never leave an owner reading a bare `{}` as "no limits").
+        const limitsInfo = role === 'owner' && mode === 'page'
+            ? { effective, profileName: profile.name || robot.profile_id, robotLimits: json(robot.limits, {}), subject: robot.owner_subject }
+            : null;
         // Two OpenRestream reads, run together. Only the owner's own page shows the streaming switches, greyed out
         // with a reason when OpenRestream does not answer; the live session is for the camera tile of every page,
         // where it is left a placeholder instead. A watcher is the anonymous embed and only exists when the
@@ -1108,7 +1114,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         const liveOrigin = (config.embed && config.embed.origins && config.embed.origins[0]) || null;
         res.type('html').send(renderPanel({
             robot: presentForPage(robot), profile, role, mode, signedIn, streaming, people, signaling_url,
-            profileForm, automation,
+            profileForm, automation, limitsInfo,
             // The page that frames the embed may hand it a Drive ticket (public/panel.js); the owner's page offers to put
             // the panel under their Live stream.
             parentOrigins: mode === 'embed' ? ((config.embed && config.embed.origins) || []) : [],

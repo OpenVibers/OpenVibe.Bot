@@ -488,7 +488,30 @@ function turnStrip(robot, role) {
     return `<div class="turn" data-turn hidden><span class="turn-state" data-turn-state></span><span class="turn-meta" data-turn-meta></span>${leave}${give}</div>`;
 }
 
-function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs = 150, mode = 'page', signedIn = true, streaming = null, people = null, signaling_url = null, profileForm = {}, tryIt = false, automation = null, parentOrigins = [], liveUrl = null }) {
+/**
+ * The owner's limits card: the values the gate and the device actually enforce, each with where it came
+ * from (the profile's default, or set for this robot), and the owner's account id. `robot.limits` alone
+ * can be `{}`, which reads as "no limits"; these are the numbers the robot really uses.
+ */
+function limitsCard(robot, info, profile = null) {
+    if (!info) return '';
+    const { effective, profileName, robotLimits = {}, subject } = info;
+    const row = (label, key, shown) => {
+        const source = robotLimits[key] != null ? 'set for this robot' : `from the ${profileName} profile`;
+        return `<li><b>${esc(label)}</b> <span>${esc(shown)}</span> <small>${esc(source)}</small></li>`;
+    };
+    return `<section class="setting-card" aria-labelledby="limits-h"><h2 id="limits-h">Limits</h2>
+<p class="setting-note">What this robot enforces on every command, from anyone including you. A profile value applies until you set one for this robot.</p>
+<ul class="people-list">
+${row('Top speed', 'max_speed', effective.maxSpeed)}
+${row('Turning', 'max_turn', effective.maxTurn)}
+${row('Longest command', 'max_command_ms', `${effective.maxCommandMs} ms`)}
+</ul>
+<p class="setting-note">Your account ID <code data-copy-source>${esc(subject)}</code> <button type="button" class="copy" data-copy data-copy-label="Copy"><span data-copy-label>Copy</span></button></p>
+</section>`;
+}
+
+function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs = 150, mode = 'page', signedIn = true, streaming = null, people = null, signaling_url = null, profileForm = {}, tryIt = false, automation = null, parentOrigins = [], liveUrl = null, limitsInfo = null }) {
     const embed = mode === 'embed';
     const latched = !!(robot.estop && robot.estop.latched);
     const widgets = (profile.widgets || []).map((w, i) => ({ w, i }))
@@ -515,7 +538,7 @@ ${embed && role === 'watcher' && !signedIn ? `<p class="embed-sign-in" data-driv
 <div class="widgets">
 ${widgets.join('\n')}
 </div>
-${tryIt ? tryOutro(profile) : ''}${role === 'owner' && !embed && !tryIt ? `<div class="owner-settings">${onStreamCard(robot, { liveUrl })}${localProfileForm(robot, profile, profileForm)}${automation ? routinesCard(robot, profile, automation) + webhooksCard(robot, automation) : ''}${agentForm(robot)}${listingForm(robot)}${embedForm(robot)}${streamingForm(robot, streaming)}${people ? peopleCard(robot, people) : ''}</div>` : ''}
+${tryIt ? tryOutro(profile) : ''}${role === 'owner' && !embed && !tryIt ? `<div class="owner-settings">${limitsCard(robot, limitsInfo, profile)}${onStreamCard(robot, { liveUrl })}${localProfileForm(robot, profile, profileForm)}${automation ? routinesCard(robot, profile, automation) + webhooksCard(robot, automation) : ''}${agentForm(robot)}${listingForm(robot)}${embedForm(robot)}${streamingForm(robot, streaming)}${people ? peopleCard(robot, people) : ''}</div>` : ''}
 </main>`;
     return page(tryIt ? 'Try the panel with a simulated rover' : robot.name, body, {
         scripts: panelScripts(profile, tryIt), bodyClass: embed ? 'embed-page' : 'panel-page',

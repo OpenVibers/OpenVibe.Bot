@@ -528,7 +528,7 @@ shown; a service acts for `X-OV-Subject` / the body's `owner`. A person acts onl
 anyone else (`?owner=`, the body's `owner`, `X-OV-Subject`) is `403 bot.forbidden`; `?owner=` is refused,
 never ignored, on both `GET /robots` and `POST /robots` (a service's `?owner=` on `POST /robots` must name
 the subject it acts for). Without a token, every route but `GET /profiles`, `GET /profiles/:id`, `POST /pair`
-and `POST /devices/bind` answers `401 bot.sign_in`: `GET|POST /robots`, `GET|PATCH|DELETE /robots/:id`,
+and `POST /devices/bind` answers `401 bot.sign_in`: `GET /me`, `GET|POST /robots`, `GET|PATCH|DELETE /robots/:id`,
 `POST /robots/:id/pairing-code`, `GET|POST /robots/:id/operators`, `DELETE /robots/:id/operators/:subject`,
 `GET /robots/:id/devices`, `POST /devices/:id/rotate|revoke`, `POST /robots/:id/estop`,
 `POST /robots/:id/estop/clear`, `POST /robots/:id/commands`, `GET /robots/:id/audit` and `GET|POST /robots/:id/streaming`. A node token gets `403 bot.forbidden` on the same
@@ -539,9 +539,10 @@ node token, and a service token is judged on `bot.job.dispatch` alone.
 | Method & path | Auth (capability) | Answer |
 |---|---|---|
 | `GET /profiles`, `GET /profiles/:id` | public | `{ profiles[] }` / `{ profile }` |
-| `GET /robots` | user (own robots), or `bot.robot.read` + `?owner=` | `{ robots[] }` |
+| `GET /me` | a person, or an app token (its own subject) | `{ subject, username, display_name, kind }`: the `usr_…` id an owner names |
+| `GET /robots` | user (own robots), or `bot.robot.read` + `?owner=` | `{ robots[] }`; each carries `owner_subject`, `effective_limits` and `limits_source` (below) |
 | `POST /robots` | the owner, or `bot.robot.manage` | `201 { robot, pairing{code,expires_at,installer} }`; with `BOT_PAIRING_AUTHORITY=network` the pairing is Network's and also carries `pairing_id`, and `503 bot.network_unavailable` if Network did not answer (no robot is created) |
-| `GET /robots/:id` | a member, or `bot.robot.read` | `{ robot, role }` |
+| `GET /robots/:id` | a member, or `bot.robot.read` | `{ robot, role }`; `robot` carries `owner_subject`, `effective_limits` and `limits_source` (below) |
 | `PATCH /robots/:id` | owner, or `bot.robot.manage` | `{ robot }`; new `limits` (including `allow`) re-send `config` to the connected device |
 | `DELETE /robots/:id` | owner, or `bot.robot.manage` | `204` |
 | `POST /robots/:id/pairing-code` | owner, or `bot.robot.manage` | `201 { code, expires_at, installer }`; with `BOT_PAIRING_AUTHORITY=network` `201 { code, expires_at, pairing_id, installer }` minted by Network for the robot's owner, or `503 bot.network_unavailable` |
@@ -573,6 +574,31 @@ the panel's owner-only forms `POST /robots/:id/operators` (body `username`, `rol
 (any signed-in person; the next in line is promoted)
 (`server/web/routes.js`; adding a robot and minting a code count against the `bot.robot.manage` per-person limit,
 30 a minute and 300 an hour, as on `/api/v1`; past it `429 rate_limited`).
+
+### The account ID, and a robot's real limits
+
+`GET /me` answers the caller's `usr_…` subject — the id an owner names when adding an operator, and what
+a service acts for. A person's token answers for that person; an app token answers for its own `sub`.
+The same id is on <https://openvibe.network/my>, and Network's `GET https://openvibe.network/api/auth/me`
+carries it as `user.subject_id`.
+
+A robot's `limits` is only what the owner set (often `{}`), so `GET /robots` and `GET /robots/:id` add
+the values the gate and the device really use:
+
+```json
+{ "robot": {
+  "id": "rob_…", "owner_subject": "usr_…",
+  "limits": { "max_speed": 0.4 },
+  "effective_limits": { "max_speed": 0.4, "max_turn": 0.6, "max_command_ms": 300, "heartbeat_ms": 1000 },
+  "limits_source": {
+    "profile": { "max_speed": 0.5, "max_turn": 0.6, "max_command_ms": 300, "heartbeat_ms": 1000 },
+    "robot": { "max_speed": 0.4 }
+  }
+} }
+```
+
+`effective_limits` is the same computation the command gate clamps with and the `config` frame sends, so
+it cannot disagree with what the robot does. `limits_source.robot` lists only the owner's overrides.
 
 ---
 

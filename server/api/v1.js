@@ -12,6 +12,7 @@
  * | POST   /profiles/validate                      | — (public)             | anyone (the profile validator)      |
  * | GET    /kits, /kits/:id                        | — (public)             | anyone                              |
  * | GET    /resources, /resources/:ovrn            | bot.resource.read      | — (services only, loopback)         |
+ * | GET    /me                                     | — (a person)           | anyone signed in (an app token: itself) |
  * | GET    /robots                                 | bot.robot.read         | own robots (?owner= only themself)  |
  * | POST   /robots                                 | bot.robot.manage       | the owner (new robot + pairing code)|
  * | GET    /robots/:id                             | bot.robot.read         | a member (owner/operator/viewer)    |
@@ -217,13 +218,46 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         res.json({ kit });
     }));
 
+    // ── The caller's account ─────────────────────────────────────────────────────────────────────
+    // Who this token is: the one place a person (or their agent) asks for the usr_ id an owner names
+    // elsewhere on the network. A service token answers for its own subject, never for a person.
+    r.get('/me', wrap(async (req, res) => {
+        fence(req);
+        if (req.principal.kind === 'service') {
+            return res.json({ subject: req.principal.sub, username: null, display_name: null, kind: 'service' });
+        }
+        res.json({
+            subject: req.principal.subject, username: req.principal.username || null,
+            display_name: req.principal.name || null, kind: 'user',
+        });
+    }));
+
     // ── Robots ────────────────────────────────────────────────────────────────────────────────────
+    /**
+     * A robot as /api/v1 answers it: its owner, the limits actually enforced (never a bare `{}` that reads
+     * as "no limits"), and where each came from. The gate and the device's config frame use the same
+     * computation, so this can never disagree with what the robot does.
+     */
+    async function presentRobot(robot) {
+        const row = await getProfile(domain.db, robot.profile_id, robot.profile_version);
+        const profile = row ? row.profile : null;
+        const overrides = json(robot.limits, {});
+        const fromRobot = {};
+        for (const k of ['max_speed', 'max_turn', 'max_command_ms']) if (overrides[k] != null) fromRobot[k] = overrides[k];
+        return {
+            ...domain.present.robot(robot),
+            owner_subject: robot.owner_subject,
+            effective_limits: domain.control.deviceLimits(robot, profile),
+            limits_source: { profile: (profile && profile.limits) || {}, robot: fromRobot },
+        };
+    }
+    const presentRobots = (rows) => Promise.all(rows.map(presentRobot));
     r.get('/robots', wrap(async (req, res) => {
         requireRead(req);
         const target = req.principal.kind === 'user' ? self(req, req.query.owner, req.headers['x-ov-subject'])
             : (req.query.owner ? userSubject(req.query.owner, 'owner') : null);
         if (!target) fail(422, 'bot.invalid_input', 'owner is required');
-        res.json({ robots: (await domain.robots.list(target)).map(domain.present.robot) });
+        res.json({ robots: await presentRobots(await domain.robots.list(target)) });
     }));
     r.post('/robots', manage, wrap(async (req, res) => {
         const ownerSubject = requireManage(req, req.body?.owner);
@@ -233,17 +267,17 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
             owner: ownerSubject, name: req.body?.name, profile_id: req.body?.profile_id,
             access_policy: req.body?.access_policy, limits: req.body?.limits || {},
         });
-        res.status(201).json({ robot: domain.present.robot(robot), pairing });
+        res.status(201).json({ robot: await presentRobot(robot), pairing });
     }));
     r.get('/robots/:id', wrap(async (req, res) => {
         const { robot, role } = await member(req, req.params.id);
-        res.json({ robot: domain.present.robot(robot), role });
+        res.json({ robot: await presentRobot(robot), role });
     }));
     r.patch('/robots/:id', manage, wrap(async (req, res) => {
         await owner(req, req.params.id);
         const updated = await domain.robots.update(req.params.id, { name: req.body?.name, access_policy: req.body?.access_policy, limits: req.body?.limits });
         if (req.body?.limits !== undefined) await hub.refreshConfig(req.params.id);   // the device enforces the new limits and allowlist at once
-        res.json({ robot: domain.present.robot(updated) });
+        res.json({ robot: await presentRobot(updated) });
     }));
     r.delete('/robots/:id', manage, wrap(async (req, res) => {
         await owner(req, req.params.id);

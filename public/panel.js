@@ -53,7 +53,7 @@
                 navigator.clipboard.writeText(src.textContent).then(() => {
                     b.dataset.copied = 'true';
                     if (label) label.textContent = 'Copied';
-                    setTimeout(() => { delete b.dataset.copied; if (label) label.textContent = 'Copy the command'; }, 2000);
+                    setTimeout(() => { delete b.dataset.copied; if (label) label.textContent = b.dataset.copyLabel || 'Copy the command'; }, 2000);
                 }, () => {});
             }
         });
