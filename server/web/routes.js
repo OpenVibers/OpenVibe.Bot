@@ -38,6 +38,7 @@ const appIcon = require('openvibe-shared/app-icon');
 const { getProfile, listProfiles, loadProfiles } = require('../profiles');
 const { frameAncestors } = require('../config');
 const { BotError, json } = require('../util');
+const { aiOf } = require('../machine-ai');
 const kits = require('../kits');
 const { renderPanel, renderEmbedRefused, renderDrivePage, renderPairingPage, renderPhonePage, renderMachinesPage, renderMachineDesksPage, renderMachineScreenPage, renderSharePage, renderShareGone, renderLinkPage, renderSignInPage, renderClaimPage, renderClaimApproved, renderFirstRunPage } = require('./render');
 const { createMachineScreen } = require('../machine-screen');
@@ -613,6 +614,8 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
             computer_desks: Number.isInteger(sensors.computer_desks) ? sensors.computer_desks : null,
             desk_leases: d.shared_desks ? await domain.deskLeases.count(d.id) : 0,
             ai_models: !!d.ai_models,
+            // The Node ai plugin's community offer, when it has one (models, hours, price, audience, paused, privacy).
+            ai_offer: (() => { const ai = aiOf(d.capabilities); return ai && ai.offer && typeof ai.offer === 'object' ? ai.offer : null; })(),
             // How fast its last model answered there (Node v0.29.0's ai plugin), and whether one is answering now.
             ai_speed: typeof sensors.ai_tokens_per_s === 'number' && sensors.ai_tokens_per_s > 0 && typeof sensors.ai_model === 'string'
                 ? { model: sensors.ai_model.slice(0, 120), tokens_per_s: sensors.ai_tokens_per_s } : null,
