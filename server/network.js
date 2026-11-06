@@ -15,7 +15,6 @@
  *   identity  Network's people (identity.subject.resolve): resolve a username to a subject and look up the
  *             names of subjects the robot's owner added.
  */
-const { OpenVibeAuthClient } = require('openvibe-shared/auth-client');
 const { createNetworkKeys, verifyUserToken } = require('openvibe-sdk/auth');
 const { serviceAuth } = require('openvibe-contracts');
 const { BotError } = require('./util');
@@ -25,16 +24,8 @@ function createKeyProvider(config, { fetchImpl = globalThis.fetch, log = console
     return createNetworkKeys({ network: config.network.internalUrl, publicKey: config.network.publicKey || null, fetch: fetchImpl, log });
 }
 
-/** The OAuth client of the browser session layer plus offline verification of the Network user JWT. */
+/** Offline verification of the Network user JWT (the OAuth half is openvibe-sdk/sso's, in server/web/session.js). */
 function createUserAuth(config, keys) {
-    const client = new OpenVibeAuthClient({
-        clientId: config.oauth.clientId,
-        clientSecret: config.oauth.clientSecret,
-        redirectUri: config.oauth.redirectUri,
-        publicKey: null,
-        authBase: config.network.url,
-        internalBase: config.network.internalUrl,
-    });
     /**
      * Claims of a valid user token, or null. openvibe-sdk/auth verifyUserToken refuses service, app and mod principals
      * and typed tokens (a realtime ticket, a FedCM assertion, an export token); a node token (a machine paired for Bot)
@@ -48,7 +39,7 @@ function createUserAuth(config, keys) {
         if (claims.actor_type === 'node') return null;
         return claims;
     }
-    return { client, verify };
+    return { verify };
 }
 
 /**
