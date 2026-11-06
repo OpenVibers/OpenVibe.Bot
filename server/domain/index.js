@@ -921,6 +921,60 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
              WHERE id = $1 AND revoked_at IS NULL RETURNING *`,
             [id, JSON.stringify(fleet), iso(now())]);
     }
+    // ── The guided first run (OpenVibe.Node's `openvibe-node`, docs/install.md#first-run) ──────────────
+    // One row per device and step, from the `node.first_run` telemetry events the Node already sends. The fields are
+    // an allowlist: a path, a username or an address is never stored even if a buggy client sends one.
+    const FIRST_RUN_STEPS = new Set(['installed', 'paired', 'self_check', 'first_job']);
+    const firstRunNumber = (v) => (Number.isFinite(v) && v >= 0 && v <= Number.MAX_SAFE_INTEGER ? Math.floor(v) : undefined);
+    const firstRunText = (v, max) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max) || null : null);
+    function firstRunInfo(fields) {
+        const info = {};
+        const arch = firstRunText(fields.arch, 24);
+        if (arch) info.arch = arch;
+        for (const key of ['cpus', 'memory_total_bytes', 'memory_free_bytes', 'disk_total_bytes', 'disk_free_bytes']) {
+            const n = firstRunNumber(fields[key]);
+            if (n !== undefined) info[key] = n;
+        }
+        return info;
+    }
+    /**
+     * Store the first-run steps in a telemetry frame. A resent step updates its time (the newest run wins); an event
+     * that is not `node.first_run` with a known step is ignored, never an error for the caller.
+     */
+    async function recordFirstRun(deviceId, events) {
+        if (!Array.isArray(events) || !deviceId) return 0;
+        let stored = 0;
+        for (const event of events) {
+            if (!event || event.name !== 'node.first_run' || !event.fields || typeof event.fields !== 'object') continue;
+            const step = firstRunText(event.fields.step, 20);
+            if (!FIRST_RUN_STEPS.has(step)) continue;
+            const ts = Number.isFinite(event.ts) && event.ts > 0 ? event.ts : now();
+            // A clock far in the future would make every duration meaningless; keep it on this side of the present.
+            const at = iso(Math.min(Math.max(ts, Date.UTC(2020, 0, 1)), now() + 5 * 60_000));
+            const reason = step === 'self_check' ? firstRunText(event.fields.reason, 240) : null;
+            const ok = step === 'self_check' && typeof event.fields.ok === 'boolean' ? event.fields.ok : null;
+            const info = step === 'first_job' ? firstRunInfo(event.fields) : {};
+            await db.query(
+                `INSERT INTO device_first_run (device_id, step, at, agent_version, os, ok, reason, info, received_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
+                 ON CONFLICT (device_id, step) DO UPDATE SET at = EXCLUDED.at, agent_version = EXCLUDED.agent_version,
+                     os = EXCLUDED.os, ok = EXCLUDED.ok, reason = EXCLUDED.reason, info = EXCLUDED.info,
+                     received_at = EXCLUDED.received_at`,
+                [deviceId, step, at, firstRunText(event.fields.version, 40), firstRunText(event.fields.os, 24), ok, reason,
+                    JSON.stringify(info), iso(now())]);
+            stored++;
+        }
+        return stored;
+    }
+    /** What the machine's first job found (the machines page), or null when it has not run yet. */
+    async function firstRunOf(deviceId) {
+        return db.maybe("SELECT step, at, agent_version, os, ok, reason, info FROM device_first_run WHERE device_id = $1 AND step = 'first_job'", [deviceId]);
+    }
+    /** Every stored first-run step, for the admin funnel (the page counts and times them). */
+    async function firstRunFunnel() {
+        return db.many('SELECT device_id, step, at, agent_version, os, ok, reason, info FROM device_first_run ORDER BY at, device_id, step');
+    }
+
     /** Revoke a Network-paired device's principal on Network too (null: Network no longer knows it). */
     async function revokeNode(principalId) {
         if (!nodes) fail(503, 'bot.network_unavailable', 'Network-paired machines are not configured here');
@@ -1373,7 +1427,8 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
             localProfile, saveLocalProfile, useCatalogueProfile },
         members: { roleOf, add: addOperator, remove: removeOperator, list: listOperators },
         pairing: { create: createPairingCode, redeem, prune: prunePairingCodes, installerCommand, driverForProfile, whipUrl, onPaired },
-        devices: { byCredential, bindNode, issuePublishKey, revokeVideo, updateDeclared, setFleet, revokeNode, ensureServerDevice, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, revokeByNode, touchSeen, setOnline, ownerOf, onChange },
+        devices: { byCredential, bindNode, issuePublishKey, revokeVideo, updateDeclared, setFleet, revokeNode, ensureServerDevice, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, revokeByNode, touchSeen, setOnline, ownerOf, onChange,
+            recordFirstRun, firstRunOf, firstRunFunnel },
         machines: { mint: mintMachine, list: listMachines, workerRef, setAgentComputer, setAiModels, setWatchProbe, setVoice, setSharedDesks, listSharedDesks,
             setRoles: setMachineRoles, rename: renameMachine, runningJobs, reportStatus: reportMachineStatus,
             screen: { key: screenKey, liveKey: liveScreenKey, live: screenLive, end: screenEnd, archive: screenArchive } },

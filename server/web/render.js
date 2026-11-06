@@ -813,11 +813,31 @@ function renderMachinesPage({ machines = [], pairing = null }) {
                 + `<button type="submit" class="button quiet" aria-pressed="${m.watch_probe ? 'true' : 'false'}">${m.watch_probe ? 'Stop my watches checking from here' : 'Let my watches check things from this computer'}</button></form>` : '')
             + '</div>';
     };
+    // The guided first run's one job (Node v0.39.0): what this machine is, from the first_job step Bot stored.
+    const bytesText = (n) => {
+        if (!Number.isFinite(n) || n < 0) return '';
+        const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        let v = n, i = 0;
+        while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+        return `${v >= 10 ? Math.round(v) : v.toFixed(1)} ${units[i]}`;
+    };
+    const firstRunRow = (m) => {
+        const f = m.first_run;
+        if (!f) return '';
+        const i = f.info && typeof f.info === 'object' ? f.info : {};
+        const bits = [];
+        if (Number.isInteger(i.cpus) && i.cpus > 0) bits.push(`${i.cpus} CPUs`);
+        if (Number.isFinite(i.memory_total_bytes) && i.memory_total_bytes > 0) bits.push(`${bytesText(i.memory_free_bytes)} free of ${bytesText(i.memory_total_bytes)} memory`);
+        if (Number.isFinite(i.disk_total_bytes) && i.disk_total_bytes > 0) bits.push(`${bytesText(i.disk_free_bytes)} free disk`);
+        bits.push(`${f.os || 'this machine'}${i.arch ? '/' + i.arch : ''}`);
+        return `<div class="machine-first-run"><span class="pill">First run</span><span class="muted">${esc(bits.join(' · '))}</span>`
+            + '<span class="muted small">What its first job found: OS, CPUs, memory and free disk. No file, account or address leaves the machine.</span></div>';
+    };
     const list = machines.length
         ? `<ul class="robots">${machines.map((m) => `<li class="robot-card"><span class="robot-name">${icon('plug')}<span>${esc(m.name || m.id)}</span></span>`
             + `<span class="robot-meta"><span class="pill">${m.online ? 'Online' : 'Offline'}</span>${classesOf(m).map((c) => ` <span class="pill">${esc(c)} jobs</span>`).join('')}`
             + `${m.agent_version ? ` <span class="pill">Node ${esc(m.agent_version)}</span>` : ''}${m.robot ? ` <span class="pill">Serves ${esc(m.robot)}</span>` : ''}</span>`
-            + computerRow(m) + voiceRow(m)
+            + firstRunRow(m) + computerRow(m) + voiceRow(m)
             + `<span class="robot-actions"><form method="post" action="/machines/${esc(m.id)}/remove"><button type="submit" class="button quiet">Remove</button></form></span></li>`).join('')}</ul>`
         : `<div class="empty">${icon('plug', 'icon empty-icon')}<p class="empty-title">No machines yet.</p><p>Add your computer or a server you own. It runs the jobs you start, such as a coding task on openvibe.codes, and nobody else's.</p></div>`;
     // Adding a machine is a choice of what it does, each with its own command (one copy button each), not steps.
@@ -1020,4 +1040,68 @@ function renderPhonePage() {
     return page('This phone is a robot', body, { scripts: ['/panel/phone-device.js'], bodyClass: 'phone-page', description: 'Turn a phone into a robot on OpenVibe.Bot from its browser: its camera, voice and face, with nothing to install.', canonical: '/device/phone' });
 }
 
-module.exports = { page, renderPanel, renderPhonePage, renderMachinesPage, renderMachineDesksPage, renderMachineScreenPage, renderSharePage, renderShareGone, panelScripts, isSim, TRY_DESCRIPTION, renderEmbedRefused, renderDrivePage, renderWidget, renderRobotsPage, renderPairingPage, renderLinkPage, renderSignInPage, renderClaimPage, renderClaimApproved, camerasOf, esc };
+/**
+ * /admin/first-run: the measured first run, reviewers only. One row per step the Node reported (node.first_run), so
+ * the number that reach each step and the median time between them answer whether installs get to a working machine.
+ */
+function renderFirstRunPage({ rows = [] }) {
+    const order = ['installed', 'paired', 'self_check', 'first_job'];
+    const byStep = new Map(order.map((s) => [s, []]));
+    const byDevice = new Map();
+    for (const r of rows) {
+        if (!byStep.has(r.step)) continue;
+        const at = Date.parse(r.at);
+        byStep.get(r.step).push({ ...r, ms: Number.isFinite(at) ? at : 0 });
+        if (!byDevice.has(r.device_id)) byDevice.set(r.device_id, {});
+        byDevice.get(r.device_id)[r.step] = Number.isFinite(at) ? at : 0;
+    }
+    const median = (values) => {
+        if (!values.length) return null;
+        const a = [...values].sort((x, y) => x - y);
+        const m = Math.floor(a.length / 2);
+        return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+    };
+    const span = (from, to) => median([...byDevice.values()]
+        .map((d) => (d[from] && d[to] && d[to] >= d[from] ? (d[to] - d[from]) / 1000 : null))
+        .filter((x) => x !== null));
+    const secs = (v) => {
+        if (v === null || v === undefined) return '—';
+        if (v < 1) return 'under a second';
+        if (v < 90) return `${Math.round(v)} s`;
+        const m = Math.round(v / 60 * 10) / 10;
+        return `${m} min`;
+    };
+    const count = (s) => byStep.get(s).length;
+    const checks = byStep.get('self_check');
+    const failed = checks.filter((r) => r.ok === false).length;
+    const rowsHtml = [
+        ['Installed', count('installed'), null],
+        ['Paired', count('paired'), span('installed', 'paired')],
+        ['Self-check', count('self_check'), span('paired', 'self_check')],
+        ['First job done', count('first_job'), span('self_check', 'first_job')],
+    ].map(([label, n, d]) => `<tr><th scope="row">${label}</th><td>${n}</td><td>${esc(secs(d))}</td></tr>`).join('');
+    const latest = [...byDevice.entries()].map(([id, steps]) => {
+        const last = order.filter((s) => steps[s]).at(-1) || 'installed';
+        const at = steps[last] || steps.installed || 0;
+        return { id, last, at };
+    }).sort((a, b) => b.at - a.at).slice(0, 25);
+    const recent = latest.length
+        ? `<ul class="dir-list">${latest.map(({ id, last, at }) => {
+            const row = byStep.get(last).find((r) => r.device_id === id);
+            return `<li class="dir-card"><div class="dir-card-link"><code>${esc(id)}</code><span class="dir-card-text">${esc(last.replace('_', ' '))}`
+                + `${row && row.agent_version ? ` · Node ${esc(row.agent_version)}` : ''}${row && row.os ? ` · ${esc(row.os)}` : ''}`
+                + `${at ? ` · <time datetime="${esc(new Date(at).toISOString())}" data-local-time>${esc(new Date(at).toISOString().slice(0, 16).replace('T', ' '))}</time> UTC` : ''}</span></div></li>`;
+        }).join('')}</ul>`
+        : '<p class="muted">No machine has reported a first run yet.</p>';
+    const body = `<p class="dir-crumb"><a href="/robots/submissions">Review</a> / First runs</p>
+<header class="dir-hero"><h1>First run</h1><p class="muted">How many machines reach each step of OpenVibe Node's guided first run, and the median time from the step before. A machine reports one event per step over its own device link (<code>node.first_run</code>); nothing here names a person, folder or address.</p></header>
+<section class="dir-sec"><h2>The funnel</h2>
+<table class="dir-table"><caption class="sr-only">First-run steps, machines and median time</caption>
+<thead><tr><th scope="col">Step</th><th scope="col">Machines</th><th scope="col">Median from the step before</th></tr></thead>
+<tbody>${rowsHtml}</tbody></table>
+<p class="muted">${count('self_check') - failed} self-check${count('self_check') - failed === 1 ? '' : 's'} passed${failed ? `, ${failed} failed` : ''}. A failed check is still a machine that got that far; its reason is in the machine's own record.</p></section>
+<section class="dir-sec"><h2>Most recent</h2>${recent}</section>`;
+    return page('First run', body, { description: 'The guided first run of OpenVibe Node, measured step by step.', canonical: '/admin/first-run' });
+}
+
+module.exports = { page, renderPanel, renderPhonePage, renderMachinesPage, renderMachineDesksPage, renderMachineScreenPage, renderSharePage, renderShareGone, panelScripts, isSim, TRY_DESCRIPTION, renderEmbedRefused, renderDrivePage, renderWidget, renderRobotsPage, renderPairingPage, renderLinkPage, renderSignInPage, renderClaimPage, renderClaimApproved, renderFirstRunPage, camerasOf, esc };

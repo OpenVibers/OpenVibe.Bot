@@ -492,6 +492,13 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             conn.lastTelemetry = now();
         }
         conn.telemetry = msg;
+        if (urgent && !conn.sim) {
+            // The guided first run's steps ride these events (OpenVibe.Node's docs/install.md#first-run): store the
+            // step times for the machines page and the admin funnel. Not awaited: the sensor broadcast below must
+            // keep its frame order (two telemetry frames are handled concurrently), and a storage failure must never
+            // break a robot's telemetry. The domain ignores an event that is not a known step.
+            domain.devices.recordFirstRun(conn.device.id, msg.events).catch((e) => log.warn(`[Bot] first-run steps: ${e.message}`));
+        }
         for (const robotId of deviceRobotIds(conn.device)) broadcast(robotId);
     }
 
