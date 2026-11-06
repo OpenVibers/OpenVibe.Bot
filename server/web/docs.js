@@ -299,6 +299,10 @@ app.post('/robot-events', express.text({ type: 'application/json' }), (req, res)
     res.status(204).end();
 });`;
 
+const ACCOUNT_CALL = `curl https://openvibe.bot/api/v1/me \\
+  -H "Authorization: Bearer $OPENVIBE_TOKEN"
+# → {"subject": "usr_…", "username": "alex", "display_name": "Alex"}`;
+
 const STEPS_CALL = `curl -X POST https://openvibe.bot/api/v1/robots/rob_…/steps \\
   -H "Authorization: Bearer $OPENVIBE_TOKEN" -H "Content-Type: application/json" \\
   -d '{"steps": "forward 1\\nleft 0.5\\nheadlights #00ff00\\nstop"}'
@@ -341,6 +345,11 @@ ${code(WEBHOOK_VERIFY)}
 <p>Your own token runs steps directly, and answers when they end:</p>
 ${code(STEPS_CALL)}
 <p class="muted"><code>GET /api/v1/robots/:id/steps</code> answers the robot's state and the step words it takes. A call takes at most 20 steps and 30 seconds; the agent's calls are refused with <code>403 bot.agent_not_allowed</code> while the switch is off.</p></section>
+
+<section class="card" aria-labelledby="account-h"><h2 id="account-h">Find your account ID</h2>
+<p>Every person is a <code>usr_…</code> subject, and it is what an owner names when they add an operator or hand a robot to a service. Your own token answers it:</p>
+${code(ACCOUNT_CALL)}
+<p>A robot's answer carries its owner and the limits it really enforces, so an integrator never has to read <code>limits: {}</code> as "no limits": <code>owner_subject</code>, <code>effective_limits</code> (<code>max_speed</code>, <code>max_turn</code>, <code>max_command_ms</code>, <code>heartbeat_ms</code>) and <code>limits_source</code> (<code>profile</code> and <code>robot</code>). The same ID is on <a href="https://openvibe.network/my">openvibe.network/my</a>, and Network answers it at <code>GET https://openvibe.network/api/auth/me</code> as <code>user.subject_id</code>.</p></section>
 `;
     return docsPage({ config, path: '/docs/automation', title: 'Routines, webhooks and your agent', description: 'Make a robot run steps on a schedule, send its events to your server signed, and let your OpenVibe.Actor agent drive it, all through the same gate.', content });
 }

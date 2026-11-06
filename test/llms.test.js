@@ -1,7 +1,8 @@
 'use strict';
 // /llms.txt and /llms-full.txt (llmstxt.org): the plain-text map of Bot's public pages, built with
 // openvibe-shared/seo. The same pages as the sitemap minus /install (a 302 to the installer script, not a
-// page); no signed-in or per-robot page, and nothing under the API or /internal.
+// page); no signed-in or per-robot page, and nothing under the API or /internal — except the two routes a
+// page names on purpose so an agent can find an account id and a robot's real limits (GET /me, /robots).
 const assert = require('assert');
 const { boot, check, done } = require('./helpers/app');
 
@@ -62,7 +63,9 @@ const TITLES = ['OpenVibe.Bot — drive your robot from any browser', 'Build for
         }
         TITLES.forEach((title, i) => assert.ok(body.includes(`### ${title}`), `llms-full.txt has ${title}`));
         PATHS.forEach((p) => assert.ok(body.includes(`URL: ${BASE}${p}`), `llms-full.txt has the absolute URL for ${p}`));
-        for (const bad of ['/api', '/internal', '/panel/']) assert.ok(!body.includes(bad), `llms-full.txt does not name ${bad}`);
+        for (const bad of ['/internal', '/panel/']) assert.ok(!body.includes(bad), `llms-full.txt does not name ${bad}`);
+        // The account id and a robot's real limits are named on purpose; no other API path is.
+        assert.ok(!/\/api\/v1\/(?!me\b|robots\b)/.test(body), 'llms-full.txt names no API path but /me and /robots');
     });
 
     await t.close();
