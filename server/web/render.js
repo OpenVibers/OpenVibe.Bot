@@ -511,6 +511,28 @@ ${row('Longest command', 'max_command_ms', `${effective.maxCommandMs} ms`)}
 </section>`;
 }
 
+
+/**
+ * Commissioning (owner only): raise this robot's max_speed/max_turn above the profile's defaults, up to its
+ * ceiling, and drop back to the defaults at once. One explicit form each way; nothing here applies to an
+ * operator or an agent.
+ */
+function commissionForm(robot, profile) {
+    const limits = profile.limits || {};
+    const ceiling = profile.ceiling || limits;
+    const at = robot.commissioned || null;
+    const allow = `up to ${esc(ceiling.max_speed)} speed and ${esc(ceiling.max_turn)} turn`;
+    if (at) {
+        return `<section class="setting-card" aria-labelledby="commission-h"><h2 id="commission-h">Commissioned limits</h2>
+<p class="setting-ok" role="status">Commissioned ${esc(at.at)}${at.by ? ` by <code>${esc(at.by)}</code>` : ''}. This robot may now use your own speed and turn values ${allow}.</p>
+<p class="setting-note">Set them as this robot's <code>max_speed</code> and <code>max_turn</code> (PATCH /api/v1/robots/:id). Returning to the profile's defaults (${esc(limits.max_speed)} speed, ${esc(limits.max_turn)} turn) happens at once, on the device too.</p>
+<form method="post" action="/robots/${esc(robot.id)}/uncommission"><button type="submit" class="quiet">Return to the profile defaults</button></form></section>`;
+    }
+    return `<section class="setting-card" aria-labelledby="commission-h"><h2 id="commission-h">Commissioned limits</h2>
+<p class="setting-note">The profile's speed (${esc(limits.max_speed)}) and turn (${esc(limits.max_turn)}) limits clamp every command until you commission this robot. Commissioning lets you set its own higher values ${allow}, records that you did it and when, and is yours alone: operators and your agent can never do it.</p>
+<form method="post" action="/robots/${esc(robot.id)}/commission"><input type="hidden" name="confirm" value="on"><button type="submit" class="primary">Commission this robot</button></form></section>`;
+}
+
 function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs = 150, mode = 'page', signedIn = true, streaming = null, people = null, signaling_url = null, profileForm = {}, tryIt = false, automation = null, parentOrigins = [], liveUrl = null, limitsInfo = null }) {
     const embed = mode === 'embed';
     const latched = !!(robot.estop && robot.estop.latched);
@@ -538,7 +560,7 @@ ${embed && role === 'watcher' && !signedIn ? `<p class="embed-sign-in" data-driv
 <div class="widgets">
 ${widgets.join('\n')}
 </div>
-${tryIt ? tryOutro(profile) : ''}${role === 'owner' && !embed && !tryIt ? `<div class="owner-settings">${limitsCard(robot, limitsInfo, profile)}${onStreamCard(robot, { liveUrl })}${localProfileForm(robot, profile, profileForm)}${automation ? routinesCard(robot, profile, automation) + webhooksCard(robot, automation) : ''}${agentForm(robot)}${listingForm(robot)}${embedForm(robot)}${streamingForm(robot, streaming)}${people ? peopleCard(robot, people) : ''}</div>` : ''}
+${tryIt ? tryOutro(profile) : ''}${role === 'owner' && !embed && !tryIt ? `<div class="owner-settings">${limitsCard(robot, limitsInfo, profile)}${onStreamCard(robot, { liveUrl })}${localProfileForm(robot, profile, profileForm)}${commissionForm(robot, profile)}${automation ? routinesCard(robot, profile, automation) + webhooksCard(robot, automation) : ''}${agentForm(robot)}${listingForm(robot)}${embedForm(robot)}${streamingForm(robot, streaming)}${people ? peopleCard(robot, people) : ''}</div>` : ''}
 </main>`;
     return page(tryIt ? 'Try the panel with a simulated rover' : robot.name, body, {
         scripts: panelScripts(profile, tryIt), bodyClass: embed ? 'embed-page' : 'panel-page',

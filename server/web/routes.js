@@ -17,6 +17,7 @@
  *   POST /robots/:id/embed the owner only: allow (embed_public=on) or stop (off) anonymous read-only embedding → 303 to its panel
  *   POST /robots/:id/on-stream the owner only: show the panel where it is embedded, then 303 to their Live channel's bind prompt
  *   POST /robots/:id/access the owner only: who may drive (private | invite | queue) → 303 to its panel
+ *   POST /robots/:id/commission, /uncommission  the owner only: per-robot limits above the profile default → 303
  *   POST /robots/:id/operators            the owner only: add a person by @username with a role → 303 to its panel
  *   POST /robots/:id/operators/:subject/remove   the owner only: remove a person (never the owner row) → 303
  *   POST /robots/:id/queue/leave          any signed-in person: leave the robot's turn queue → 303
@@ -113,7 +114,7 @@ const LLMS_PAGES = [
     {
         path: '/docs/automation', title: 'Routines, webhooks and your agent',
         note: 'Steps on a schedule, signed webhooks for a robot\'s events, and the switch that lets your OpenVibe.Actor agent drive.',
-        text: 'How a robot on OpenVibe.Bot moves without anyone at the controls, through the same gate as a person (limits, cooldowns, e-stop, audit). GET /api/v1/me answers a person\'s account ID (subject, username, display_name); a robot\'s answer carries owner_subject, effective_limits (max_speed, max_turn, max_command_ms, heartbeat_ms) and limits_source. Steps are plain lines checked against the robot\'s profile: forward, back, left and right for seconds at a speed, stop, wait, say, face, show, an actuator or camera axis with a value and a hold time, and press for a button; held steps are re-sent inside the deadman window and a refused step stops the rest with its reason. Routines run steps as the owner on demand, every N minutes (at least 5), daily at a UTC time on chosen weekdays, or each time the robot comes online; one runs at a time; 60 steps, 60 seconds a step, 10 minutes in all. Webhooks send a robot\'s bot.robot.online, bot.robot.offline, bot.estop.set, bot.estop.cleared and bot.command.refused events to up to five https addresses, each with its own whsec_ secret shown once, signed like OpenVibe.Events deliveries (X-OpenVibe-Timestamp, X-OpenVibe-Signature-V2, checked with verifyDeliveryV2 from openvibe-sdk/events), to public addresses only, retried after 30 seconds, 2, 10, 30 and 120 minutes. The Your agent switch, off until the owner turns it on, lets the owner\'s OpenVibe.Actor agent see their robots and run steps on that one as the owner, never for anyone else; a steps call on Bot\'s API runs up to 20 steps and 30 seconds and answers done, or stopped with the reason.',
+        text: 'How a robot on OpenVibe.Bot moves without anyone at the controls, through the same gate as a person (limits, cooldowns, e-stop, audit). GET /api/v1/me answers a person\'s account ID (subject, username, display_name); a robot\'s answer carries owner_subject, effective_limits (max_speed, max_turn, max_command_ms, heartbeat_ms) and limits_source. POST /api/v1/robots/:id/commission lets its owner raise max_speed and max_turn above the profile default, up to the profile ceiling, and POST /robots/:id/uncommission returns to the defaults; only the owner as a person may do either. Steps are plain lines checked against the robot\'s profile: forward, back, left and right for seconds at a speed, stop, wait, say, face, show, an actuator or camera axis with a value and a hold time, and press for a button; held steps are re-sent inside the deadman window and a refused step stops the rest with its reason. Routines run steps as the owner on demand, every N minutes (at least 5), daily at a UTC time on chosen weekdays, or each time the robot comes online; one runs at a time; 60 steps, 60 seconds a step, 10 minutes in all. Webhooks send a robot\'s bot.robot.online, bot.robot.offline, bot.estop.set, bot.estop.cleared and bot.command.refused events to up to five https addresses, each with its own whsec_ secret shown once, signed like OpenVibe.Events deliveries (X-OpenVibe-Timestamp, X-OpenVibe-Signature-V2, checked with verifyDeliveryV2 from openvibe-sdk/events), to public addresses only, retried after 30 seconds, 2, 10, 30 and 120 minutes. The Your agent switch, off until the owner turns it on, lets the owner\'s OpenVibe.Actor agent see their robots and run steps on that one as the owner, never for anyone else; a steps call on Bot\'s API runs up to 20 steps and 30 seconds and answers done, or stopped with the reason.',
     },
     {
         path: '/docs/computers', title: 'Your computer for your agents',
@@ -987,6 +988,29 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         await domain.robots.update(robot.id, { access_policy: policy });
         if (hub) hub.broadcast(robot.id);
         res.redirect(303, `/panel/${robot.id}#on-stream`);
+    }));
+
+    // Commissioning, on the owner's page: one form each way, and the same domain action /api/v1 calls. Only the
+    // owner as a person may do it; the device's config is re-sent by the domain at once.
+    r.post('/robots/:id/commission', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        const robot = await domain.robots.get(req.params.id);
+        if (!robot) throw new BotError(404, 'bot.robot_not_found', 'no such robot');
+        if (robot.owner_subject !== me.subject) throw new BotError(403, 'bot.forbidden', 'only the owner may commission this robot');
+        await domain.robots.commission(robot.id, { subject: me.subject, kind: 'user' }, { confirm: true });
+        if (hub) hub.broadcast(robot.id);
+        return res.redirect(303, `/panel/${robot.id}#commission`);
+    }));
+    r.post('/robots/:id/uncommission', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        const robot = await domain.robots.get(req.params.id);
+        if (!robot) throw new BotError(404, 'bot.robot_not_found', 'no such robot');
+        if (robot.owner_subject !== me.subject) throw new BotError(403, 'bot.forbidden', 'only the owner may commission this robot');
+        await domain.robots.uncommission(robot.id, { subject: me.subject, kind: 'user' });
+        if (hub) hub.broadcast(robot.id);
+        return res.redirect(303, `/panel/${robot.id}#commission`);
     }));
 
     r.post('/robots/:id/embed', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {

@@ -543,7 +543,9 @@ node token, and a service token is judged on `bot.job.dispatch` alone.
 | `GET /robots` | user (own robots), or `bot.robot.read` + `?owner=` | `{ robots[] }`; each carries `owner_subject`, `effective_limits` and `limits_source` (below) |
 | `POST /robots` | the owner, or `bot.robot.manage` | `201 { robot, pairing{code,expires_at,installer} }`; with `BOT_PAIRING_AUTHORITY=network` the pairing is Network's and also carries `pairing_id`, and `503 bot.network_unavailable` if Network did not answer (no robot is created) |
 | `GET /robots/:id` | a member, or `bot.robot.read` | `{ robot, role }`; `robot` carries `owner_subject`, `effective_limits` and `limits_source` (below) |
-| `PATCH /robots/:id` | owner, or `bot.robot.manage` | `{ robot }`; new `limits` (including `allow`) re-send `config` to the connected device |
+| `PATCH /robots/:id` | owner, or `bot.robot.manage` | `{ robot }`; new `limits` (including `allow`) re-send `config` to the connected device. A `max_speed`/`max_turn` above the profile default applies only once the robot is commissioned, and never above the profile's ceiling |
+| `POST /robots/:id/commission` | **the owner, as a person**, body `{ confirm: true }` | `{ robot }` with `commissioned: { at, by }`; records who and when, one `robot.commission` audit row, re-sends `config`. `422 bot.confirm_required` without the confirm; `403 bot.forbidden` for an operator, an agent or any service token |
+| `POST /robots/:id/uncommission` | **the owner, as a person** | `{ robot }` with `commissioned: null`: back to the profile's defaults at once, `config` re-sent, one `robot.uncommission` audit row |
 | `DELETE /robots/:id` | owner, or `bot.robot.manage` | `204` |
 | `POST /robots/:id/pairing-code` | owner, or `bot.robot.manage` | `201 { code, expires_at, installer }`; with `BOT_PAIRING_AUTHORITY=network` `201 { code, expires_at, pairing_id, installer }` minted by Network for the robot's owner, or `503 bot.network_unavailable` |
 | `GET /robots/:id/operators` | member, or `bot.robot.read` | `{ operators[] }` |
@@ -599,6 +601,24 @@ the values the gate and the device really use:
 
 `effective_limits` is the same computation the command gate clamps with and the `config` frame sends, so
 it cannot disagree with what the robot does. `limits_source.robot` lists only the owner's overrides.
+### Commissioning a robot for higher limits
+
+A profile's `limits` are every robot's defaults and stay the clamp until its owner commissions it. A profile
+may also carry a hardware `ceiling` (`{ max_speed, max_turn }`; a profile without one has its `limits` as the
+ceiling). Commissioning is a separate, owner-only action:
+
+```
+POST /api/v1/robots/rob_…/commission
+{ "confirm": true }
+→ { "robot": { …, "commissioned": { "at": "2026-11-06T…", "by": "usr_…" } } }
+```
+
+With it, `PATCH /robots/:id` may set `max_speed` and `max_turn` above the profile default and up to the
+ceiling; without it they are clamped to the default exactly as before. `max_command_ms` is never raised (it
+bounds how long a command may run). Uncommissioning returns to the defaults at once and the device is sent
+the new config. The e-stop, roles, cooldowns and turn budget are unchanged, and operators and agents can
+never commission or raise a limit: the route answers `403 bot.forbidden` for anyone but the owner's own
+person token.
 
 ---
 
@@ -610,6 +630,7 @@ reason, latency, time), kept 30 days. Bot's own halt at the end of a queue turn 
 `operator_kind` `system`, no subject and `value` `{ reason: "turn_ended" | "turn_left" | "owner_takeover", turn_of }`; a
 queue command refused because its turn ended while the gate decided is a `refused` row with reason `bot.turn_ended`. Changing a robot's streaming toggles writes one row per real change
 (`kind` `streaming.media` or `streaming.live`, `value` `{ on }`, role `owner`, result `ack`); an
-idempotent repeat writes none. The outbox publishes `bot.robot.online`, `bot.robot.offline`,
+idempotent repeat writes none. Commissioning writes `robot.commission` and uncommissioning
+`robot.uncommission`, both as the owner. The outbox publishes `bot.robot.online`, `bot.robot.offline`,
 `bot.estop.set`, `bot.estop.cleared` and `bot.command.refused` — small payloads of ids, kinds and
 results, never a credential, a pairing code, a publish key or a WHIP URL.

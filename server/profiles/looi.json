@@ -17,5 +17,6 @@
     { "type": "battery", "capability": "battery", "label": "Battery", "order": 3 },
     { "type": "latency", "label": "Latency", "order": 4 }
   ],
-  "limits": { "max_speed": 0.5, "max_turn": 0.6, "max_command_ms": 300, "heartbeat_ms": 1000 }
+  "limits": { "max_speed": 0.5, "max_turn": 0.6, "max_command_ms": 300, "heartbeat_ms": 1000 },
+  "ceiling": { "max_speed": 1, "max_turn": 1 }
 }
