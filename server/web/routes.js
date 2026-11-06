@@ -39,7 +39,7 @@ const { getProfile, listProfiles, loadProfiles } = require('../profiles');
 const { frameAncestors } = require('../config');
 const { BotError } = require('../util');
 const kits = require('../kits');
-const { renderPanel, renderEmbedRefused, renderDrivePage, renderPairingPage, renderPhonePage, renderMachinesPage, renderMachineDesksPage, renderMachineScreenPage, renderSharePage, renderShareGone, renderLinkPage, renderSignInPage, renderClaimPage, renderClaimApproved } = require('./render');
+const { renderPanel, renderEmbedRefused, renderDrivePage, renderPairingPage, renderPhonePage, renderMachinesPage, renderMachineDesksPage, renderMachineScreenPage, renderSharePage, renderShareGone, renderLinkPage, renderSignInPage, renderClaimPage, renderClaimApproved, renderFirstRunPage } = require('./render');
 const { createMachineScreen } = require('../machine-screen');
 const { createScreenShares } = require('../screen-shares');
 const { renderDocsIndex, renderDriversPage, renderProfilesPage, renderAutomationPage, renderComputersPage } = require('./docs');
@@ -461,6 +461,15 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         return res.redirect(303, '/robots/submissions');
     }));
 
+    // The guided first run's funnel, reviewers only (OpenVibe.Node docs/install.md): the Node reports one
+    // node.first_run telemetry event per step, and Bot stores one row per device and step.
+    r.get('/admin/first-run', page(async (req, res) => {
+        const me = requireUser(req);
+        if (!isReviewer(me)) throw new BotError(404, 'bot.not_found', 'no such page');
+        res.setHeader('Content-Security-Policy', HOME_CSP);
+        res.type('html').send(renderFirstRunPage({ rows: await domain.devices.firstRunFunnel() }));
+    }));
+
     r.post('/robots', ...manage, express.urlencoded({ extended: false, limit: '8kb' }), page(async (req, res) => {
         const me = requireUser(req);
         if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
@@ -591,8 +600,13 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         const robotId = Array.isArray(d.robot_ids) ? d.robot_ids[0] : null;
         const robot = robotId ? await domain.robots.get(robotId) : null;
         const sensors = hub ? ((hub.deviceState(d.id).telemetry || {}).sensors || {}) : {};
+        // Read online first: the first-run query must not make a machine look offline because the page took longer.
+        const online = !!(hub && hub.isOnline(d.id));
+        // What the guided first run's one job found on this machine (Node's node.first_run first_job event).
+        const firstRun = await domain.devices.firstRunOf(d.id);
         return {
-            ...d, online: !!(hub && hub.isOnline(d.id)), robot: robot ? robot.name : null,
+            ...d, online, robot: robot ? robot.name : null,
+            first_run: firstRun,
             computer_level: typeof sensors.computer_level === 'string' ? sensors.computer_level : null,
             computer_waiting: Number.isInteger(sensors.computer_waiting) ? sensors.computer_waiting : null,
             computer_screen_stream: sensors.computer_screen_stream === 'live' ? 'live' : 'off',

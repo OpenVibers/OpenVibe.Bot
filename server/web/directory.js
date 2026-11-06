@@ -298,7 +298,8 @@ ${mine.length ? `<ul class="dir-list">${mine.map((s) => submissionRow(s)).join('
 ${pending ? `<section class="dir-sec" aria-labelledby="queue-h"><h2 id="queue-h">Waiting for review</h2>
 ${signing ? '' : '<p class="dir-error" role="alert">No profile signing key is configured, so nothing can be approved yet (BOT_PROFILE_SIGNING_KEY).</p>'}
 <p class="muted">Check the profile's commands and limits are safe for the hardware it names, that its driver's source is public and matches, and that the guide is a real guide. Approving signs it and puts it in the catalogue.</p>
-${pending.length ? `<ul class="dir-list">${pending.map((s) => submissionRow(s, { review: true, by: names.get(s.submitter_subject) })).join('')}</ul>` : '<p class="muted">The queue is empty.</p>'}</section>` : ''}`;
+${pending.length ? `<ul class="dir-list">${pending.map((s) => submissionRow(s, { review: true, by: names.get(s.submitter_subject) })).join('')}</ul>` : '<p class="muted">The queue is empty.</p>'}
+<p class="muted"><a href="/admin/first-run">The guided first run</a>: how many machines reach each step, and how long each took.</p></section>` : ''}`;
     return shell({ config, path: '/robots/submissions', title: 'Community robots', description: 'Community robot profiles on OpenVibe.Bot.', body });
 }
 
