@@ -1,8 +1,8 @@
 'use strict';
 // /llms.txt and /llms-full.txt (llmstxt.org): the plain-text map of Bot's public pages, built with
 // openvibe-shared/seo. The same pages as the sitemap minus /install (a 302 to the installer script, not a
-// page); no signed-in or per-robot page, and nothing under the API or /internal — except the two routes a
-// page names on purpose so an agent can find an account id and a robot's real limits (GET /me, /robots).
+// page); no signed-in or per-robot page, and nothing under the API or /internal — except the routes a page
+// names on purpose so an agent finds an account id, a robot's real limits and commissioning (GET /me, /robots).
 const assert = require('assert');
 const { boot, check, done } = require('./helpers/app');
 

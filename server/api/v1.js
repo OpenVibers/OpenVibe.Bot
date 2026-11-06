@@ -17,6 +17,8 @@
  * | POST   /robots                                 | bot.robot.manage       | the owner (new robot + pairing code)|
  * | GET    /robots/:id                             | bot.robot.read         | a member (owner/operator/viewer)    |
  * | PATCH  /robots/:id                             | bot.robot.manage       | owner                               |
+ * | POST   /robots/:id/commission                  | bot.robot.manage       | the owner, as a person, { confirm: true } |
+ * | POST   /robots/:id/uncommission                | bot.robot.manage       | the owner, as a person              |
  * | DELETE /robots/:id                             | bot.robot.manage       | owner                               |
  * | POST   /robots/:id/pairing-code                | bot.robot.manage       | owner                               |
  * | GET|POST /robots/:id/operators                 | bot.robot.read/manage  | owner (write) / member (read)       |
@@ -275,9 +277,23 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
     }));
     r.patch('/robots/:id', manage, wrap(async (req, res) => {
         await owner(req, req.params.id);
-        const updated = await domain.robots.update(req.params.id, { name: req.body?.name, access_policy: req.body?.access_policy, limits: req.body?.limits });
+        const updated = await domain.robots.update(req.params.id, { name: req.body?.name, access_policy: req.body?.access_policy, limits: req.body?.limits },
+            { subject: me(req), kind: req.principal.kind });
         if (req.body?.limits !== undefined) await hub.refreshConfig(req.params.id);   // the device enforces the new limits and allowlist at once
         res.json({ robot: await presentRobot(updated) });
+    }));
+    // Commissioning (safety): the owner, as a person, may raise this robot's max_speed/max_turn above the
+    // profile's defaults and up to its ceiling. The domain refuses a service even with bot.robot.manage, so
+    // no agent or app can ever widen a robot's limits. Uncommissioning returns to the defaults at once.
+    r.post('/robots/:id/commission', manage, wrap(async (req, res) => {
+        const robot = await owner(req, req.params.id);
+        const updated = await domain.robots.commission(robot.id, { subject: me(req), kind: req.principal.kind }, { confirm: req.body?.confirm });
+        res.json({ robot: domain.present.robot(updated) });
+    }));
+    r.post('/robots/:id/uncommission', manage, wrap(async (req, res) => {
+        const robot = await owner(req, req.params.id);
+        const updated = await domain.robots.uncommission(robot.id, { subject: me(req), kind: req.principal.kind });
+        res.json({ robot: domain.present.robot(updated) });
     }));
     r.delete('/robots/:id', manage, wrap(async (req, res) => {
         await owner(req, req.params.id);

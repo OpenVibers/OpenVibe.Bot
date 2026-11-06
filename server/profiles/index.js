@@ -16,7 +16,8 @@
  *     commands: { drive: { axes: { throttle: [-1, 1], … } }, … },  // what the device accepts (COMMAND_SCHEMAS)
  *     widgets: [{ type: "drive", capability: …, label: …, command: { kind: "drive" } }],  // types in WIDGETS
  *     camera: { transport: "whip|onvif|rtsp", resolution },
- *     limits: { max_speed, max_turn, max_command_ms, heartbeat_ms } }
+ *     limits: { max_speed, max_turn, max_command_ms, heartbeat_ms },
+ *     ceiling: { max_speed, max_turn } }            // optional: what a commissioned owner may raise to
  *
  * `commands` is the contract with the device's plugin: the gate allows only the kinds declared there
  * (plus `halt`, which every profile takes) and builds every value from it, so a panel control can only
@@ -203,12 +204,24 @@ function validateProfile(p) {
     };
     if (!(limits.max_speed > 0) || !(limits.max_turn > 0)) bad(`${p.id}: max_speed and max_turn must be positive`);
     if (!(limits.max_command_ms > 0) || !(limits.heartbeat_ms > 0)) bad(`${p.id}: max_command_ms and heartbeat_ms must be positive`);
-    const contract = validate('bot.robot-profile@1', p);
+    // A hardware ceiling is what a commissioned owner may raise the two drive limits to. It defaults to the
+    // limits themselves, so a profile without one keeps today's behaviour exactly. The pinned contract does
+    // not know the field yet, so the contract check runs on the profile without it.
+    const c = p.ceiling && typeof p.ceiling === 'object' ? p.ceiling : {};
+    const ceiling = {
+        max_speed: number(c.max_speed) != null ? number(c.max_speed) : limits.max_speed,
+        max_turn: number(c.max_turn) != null ? number(c.max_turn) : limits.max_turn,
+    };
+    if (!(ceiling.max_speed > 0) || !(ceiling.max_turn > 0)) bad(`${p.id}: ceiling.max_speed and ceiling.max_turn must be positive`);
+    if (ceiling.max_speed < limits.max_speed) bad(`${p.id}: ceiling.max_speed is below limits.max_speed`);
+    if (ceiling.max_turn < limits.max_turn) bad(`${p.id}: ceiling.max_turn is below limits.max_turn`);
+    const { ceiling: _ceiling, ...contracted } = p;
+    const contract = validate('bot.robot-profile@1', contracted);
     if (!contract.valid) bad(`bot.robot-profile@1: ${JSON.stringify(contract.errors)}`);
     return {
         id: p.id, version: p.version, name: p.name.trim(), vendor: p.vendor || null, kind: p.kind || null,
         description: p.description || null, capabilities: [...p.capabilities], variants: p.variants || null,
-        mapping: p.mapping, commands, widgets, camera: p.camera || null, limits,
+        mapping: p.mapping, commands, widgets, camera: p.camera || null, limits, ceiling,
     };
 }
 
@@ -220,7 +233,8 @@ function validateProfile(p) {
  */
 function checkProfile(value) {
     if (!isObject(value)) return { valid: false, problems: ['a profile must be a JSON object'] };
-    const contract = validate('bot.robot-profile@1', value);
+    const { ceiling: _ceiling, ...contracted } = value;
+    const contract = validate('bot.robot-profile@1', contracted);
     if (!contract.valid) {
         return { valid: false, problems: (contract.errors || []).map((e) => {
             const at = String(e.path || '').replace(/^\//, '').replace(/\//g, '.');

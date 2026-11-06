@@ -84,6 +84,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     const presentRobot = (r) => (r ? {
         id: r.id, name: r.name, profile_id: r.profile_id, profile_version: r.profile_version,
         access_policy: r.access_policy, limits: json(r.limits, {}), agent_control: !!r.agent_control,
+        commissioned: r.commissioned_at ? { at: iso(new Date(r.commissioned_at).getTime()), by: r.commissioned_by || null } : null,
         estop: { latched: !!r.estop_latched, by: r.estop_by || null, at: r.estop_at ? iso(new Date(r.estop_at).getTime()) : null },
         created_at: iso(new Date(r.created_at).getTime()), updated_at: iso(new Date(r.updated_at).getTime()),
     } : null);
@@ -185,16 +186,64 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         }
         return out;
     }
-    async function updateRobot(id, { name, access_policy, limits }) {
+    async function updateRobot(id, { name, access_policy, limits }, actor = null) {
         const sets = []; const args = [id];
         if (name !== undefined) { const n = text(name, 'name', 80); if (!n) fail(422, 'bot.invalid_input', 'name cannot be empty'); args.push(n); sets.push(`name = $${args.length}`); }
         if (access_policy !== undefined) { if (!['private', 'invite', 'queue'].includes(access_policy)) fail(422, 'bot.invalid_policy', 'bad access_policy'); args.push(access_policy); sets.push(`access_policy = $${args.length}`); }
-        if (limits !== undefined) { args.push(JSON.stringify(cleanLimits(limits))); sets.push(`limits = $${args.length}::jsonb`); }
+        if (limits !== undefined) {
+            // Raising a drive limit above the profile default is the owner's own act, never an operator's, an
+            // agent's or an app token's — commissioning is only the first half. Lower values stay settable.
+            const robot = await getRobot(id);
+            const row = robot ? await getProfile(db, robot.profile_id, robot.profile_version) : null;
+            const pl = (row && row.profile && row.profile.limits) || {};
+            const aboveDefault = (limits.max_speed != null && Number(limits.max_speed) > (pl.max_speed != null ? pl.max_speed : 1))
+                || (limits.max_turn != null && Number(limits.max_turn) > (pl.max_turn != null ? pl.max_turn : 1));
+            if (aboveDefault && (!actor || actor.kind !== 'user' || actor.subject !== robot.owner_subject)) {
+                fail(403, 'bot.forbidden', 'only the owner may raise a robot\'s limits above the profile default');
+            }
+            args.push(JSON.stringify(cleanLimits(limits))); sets.push(`limits = $${args.length}::jsonb`);
+        }
         if (!sets.length) return getRobot(id);
         args.push(iso(now()));
         sets.push(`updated_at = $${args.length}`);
         await db.query(`UPDATE robots SET ${sets.join(', ')} WHERE id = $1`, args);
         return getRobot(id);
+    }
+    /**
+     * Commission a robot (safety-relevant): only its owner, as a person, and only with an explicit confirm.
+     * It records who and when, and lets effectiveLimits accept max_speed/max_turn above the profile's
+     * defaults and up to its ceiling. Operators, agents and services can never do this; the device gets the
+     * new config at once. Idempotent: commissioning a commissioned robot writes nothing new.
+     */
+    async function commissionRobot(robotId, actor, { confirm } = {}) {
+        const robot = await getRobot(robotId);
+        if (!robot) fail(404, 'bot.robot_not_found', 'no such robot');
+        if (!actor || actor.kind !== 'user' || actor.subject !== robot.owner_subject) {
+            fail(403, 'bot.forbidden', 'only the owner may commission this robot');
+        }
+        if (confirm !== true) fail(422, 'bot.confirm_required', 'commissioning needs { confirm: true }');
+        if (robot.commissioned_at) return robot;
+        const at = iso(now());
+        await db.query('UPDATE robots SET commissioned_at = $2, commissioned_by = $3, updated_at = $2 WHERE id = $1', [robotId, at, actor.subject]);
+        await auditCommand({ robotId, subject: actor.subject, operatorKind: actor.kind, role: 'owner', kind: 'robot.commission', result: 'ack' });
+        if (link && link.refreshConfig) await link.refreshConfig(robotId);
+        if (link && link.broadcast) link.broadcast(robotId);
+        return getRobot(robotId);
+    }
+    /** Drop a robot back to its profile's defaults at once (the owner only, as a person). */
+    async function uncommissionRobot(robotId, actor) {
+        const robot = await getRobot(robotId);
+        if (!robot) fail(404, 'bot.robot_not_found', 'no such robot');
+        if (!actor || actor.kind !== 'user' || actor.subject !== robot.owner_subject) {
+            fail(403, 'bot.forbidden', 'only the owner may commission this robot');
+        }
+        if (!robot.commissioned_at) return robot;
+        const at = iso(now());
+        await db.query('UPDATE robots SET commissioned_at = NULL, commissioned_by = NULL, updated_at = $2 WHERE id = $1', [robotId, at]);
+        await auditCommand({ robotId, subject: actor.subject, operatorKind: actor.kind, role: 'owner', kind: 'robot.uncommission', result: 'ack' });
+        if (link && link.refreshConfig) await link.refreshConfig(robotId);
+        if (link && link.broadcast) link.broadcast(robotId);
+        return getRobot(robotId);
     }
     async function localProfile(robotId) {
         return db.maybe('SELECT source_profile_id, profile FROM robot_profiles WHERE robot_id = $1', [robotId]);
@@ -1200,15 +1249,29 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     }
 
     // ── The control gate (ADR-043 decisions 5, 6, 8) ──────────────────────────────────────────────
-    /** The owner's limits clamped by the profile's (a profile missing one falls back to Bot's defaults). */
+    /**
+     * The one place the effective limits are decided: the command gate clamps with it and the device's
+     * `config` frame sends it, so they cannot disagree.
+     *
+     * The profile's `limits` are the defaults for everyone. Its `ceiling` (defaulting to the limits) is what
+     * a *commissioned* robot's owner may raise max_speed/max_turn to; without commissioning the defaults
+     * clamp exactly as they always did. max_command_ms is never raised: it bounds how long a command may run,
+     * so the profile's value is its ceiling too.
+     */
     const effectiveLimits = (robot, profile) => {
         const rl = json(robot.limits, {});
         const pl = (profile && profile.limits) || {};
+        const pc = (profile && profile.ceiling) || {};
         const pSpeed = pl.max_speed != null ? pl.max_speed : 1;
         const pTurn = pl.max_turn != null ? pl.max_turn : 1;
         const pMs = pl.max_command_ms != null ? pl.max_command_ms : config.control.maxCommandMs;
-        const maxSpeed = rl.max_speed != null ? Math.min(rl.max_speed, pSpeed) : pSpeed;
-        const maxTurn = rl.max_turn != null ? Math.min(rl.max_turn, pTurn) : pTurn;
+        const cSpeed = pc.max_speed != null ? Math.max(pc.max_speed, pSpeed) : pSpeed;
+        const cTurn = pc.max_turn != null ? Math.max(pc.max_turn, pTurn) : pTurn;
+        const commissioned = !!robot.commissioned_at;
+        const speedCap = commissioned ? cSpeed : pSpeed;
+        const turnCap = commissioned ? cTurn : pTurn;
+        const maxSpeed = rl.max_speed != null ? Math.min(rl.max_speed, speedCap) : pSpeed;
+        const maxTurn = rl.max_turn != null ? Math.min(rl.max_turn, turnCap) : pTurn;
         const maxCommandMs = rl.max_command_ms != null ? Math.min(rl.max_command_ms, pMs) : pMs;
         const cooldownMs = rl.cooldown_ms != null ? rl.cooldown_ms : config.control.cooldownMs;
         return { maxSpeed, maxTurn, maxCommandMs, cooldownMs };
@@ -1423,7 +1486,8 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     return {
         db, now, config, log, outbox, link,
         present: { robot: presentRobot, device: presentDevice, video: presentVideo },
-        robots: { create: createRobot, list: listRobots, get: getRobot, update: updateRobot, setEmbedPublic, setListed, listListed, setAgentControl, remove: removeRobot,
+        robots: { create: createRobot, list: listRobots, get: getRobot, update: updateRobot, commission: commissionRobot, uncommission: uncommissionRobot,
+            setEmbedPublic, setListed, listListed, setAgentControl, remove: removeRobot,
             localProfile, saveLocalProfile, useCatalogueProfile },
         members: { roleOf, add: addOperator, remove: removeOperator, list: listOperators },
         pairing: { create: createPairingCode, redeem, prune: prunePairingCodes, installerCommand, driverForProfile, whipUrl, onPaired },

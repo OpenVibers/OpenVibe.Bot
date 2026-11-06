@@ -266,6 +266,7 @@ function renderProfilesPage({ config, source = '', result = null } = {}) {
 <li><code>widgets</code> — the panel, in order. Each is <code>{ type, capability?, label?, command? }</code>; types are <code>drive</code>, <code>pan-tilt</code>, <code>servo</code>, <code>lights</code>, <code>horn</code>, <code>speaker</code>, <code>display</code>, <code>telemetry</code>, <code>battery</code>, <code>latency</code>, <code>ptz</code>, <code>camera</code>, <code>head</code>, <code>lift</code>, <code>buttons</code>, <code>video_click</code>. A widget that sends commands names them in <code>command</code>, checked against <code>commands</code> at load.</li>
 <li><code>camera</code> — optional: <code>{ transport: "whip"|"onvif"|"rtsp", resolution }</code>.</li>
 <li><code>limits</code> — optional, with defaults: <code>max_speed</code> and <code>max_turn</code> (1), <code>max_command_ms</code> (300), <code>heartbeat_ms</code> (1000). Positive; the stricter of these and the server's own limits applies.</li>
+<li><code>ceiling</code> — optional: <code>{ max_speed, max_turn }</code>, what a robot's owner may raise those two to after commissioning it. It defaults to <code>limits</code>, so a profile without one never goes above them.</li>
 </ul>
 <p class="muted">The schema is <code>bot.robot-profile@1</code>; capability and widget names are open strings checked against the registries in <code>server/profiles/index.js</code>, so a new one is one line there, never a schema change.</p></section>
 
@@ -302,6 +303,13 @@ app.post('/robot-events', express.text({ type: 'application/json' }), (req, res)
 const ACCOUNT_CALL = `curl https://openvibe.bot/api/v1/me \\
   -H "Authorization: Bearer $OPENVIBE_TOKEN"
 # → {"subject": "usr_…", "username": "alex", "display_name": "Alex"}`;
+const COMMISSION_CALL = `curl -X POST https://openvibe.bot/api/v1/robots/rob_…/commission \\
+  -H "Authorization: Bearer $OPENVIBE_TOKEN" -H "Content-Type: application/json" \\
+  -d '{"confirm": true}'
+# → {"robot": {"id": "rob_…", "commissioned": {"at": "…", "by": "usr_…"}, …}}
+# Undo it, back to the profile's defaults at once:
+curl -X POST https://openvibe.bot/api/v1/robots/rob_…/uncommission \\
+  -H "Authorization: Bearer $OPENVIBE_TOKEN"`;
 
 const STEPS_CALL = `curl -X POST https://openvibe.bot/api/v1/robots/rob_…/steps \\
   -H "Authorization: Bearer $OPENVIBE_TOKEN" -H "Content-Type: application/json" \\
@@ -350,6 +358,10 @@ ${code(STEPS_CALL)}
 <p>Every person is a <code>usr_…</code> subject, and it is what an owner names when they add an operator or hand a robot to a service. Your own token answers it:</p>
 ${code(ACCOUNT_CALL)}
 <p>A robot's answer carries its owner and the limits it really enforces, so an integrator never has to read <code>limits: {}</code> as "no limits": <code>owner_subject</code>, <code>effective_limits</code> (<code>max_speed</code>, <code>max_turn</code>, <code>max_command_ms</code>, <code>heartbeat_ms</code>) and <code>limits_source</code> (<code>profile</code> and <code>robot</code>). The same ID is on <a href="https://openvibe.network/my">openvibe.network/my</a>, and Network answers it at <code>GET https://openvibe.network/api/auth/me</code> as <code>user.subject_id</code>.</p></section>
+<section class="card" aria-labelledby="commission-h"><h2 id="commission-h">Higher limits, commissioned</h2>
+<p>A profile's <code>limits</code> are every robot's defaults and clamp its commands. If the hardware can do more, the profile names a <code>ceiling</code>, and the robot's owner may — only after commissioning that robot — set its own <code>max_speed</code> and <code>max_turn</code> above the default and up to that ceiling. Without commissioning they are clamped to the default exactly as before, and <code>max_command_ms</code> is never raised. Commissioning records who and when in the audit; uncommissioning returns the robot to the defaults at once. Operators, apps and agents can never commission a robot or raise a limit.</p>
+${code(COMMISSION_CALL)}
+<p class="muted">On the panel it is under <b>Commissioned limits</b>. The same action is <code>POST /api/v1/robots/:id/commission</code> (body <code>{ "confirm": true }</code>) and <code>POST /api/v1/robots/:id/uncommission</code>.</p></section>
 `;
     return docsPage({ config, path: '/docs/automation', title: 'Routines, webhooks and your agent', description: 'Make a robot run steps on a schedule, send its events to your server signed, and let your OpenVibe.Actor agent drive it, all through the same gate.', content });
 }
