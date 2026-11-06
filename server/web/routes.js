@@ -18,6 +18,7 @@
  *   POST /robots/:id/on-stream the owner only: show the panel where it is embedded, then 303 to their Live channel's bind prompt
  *   POST /robots/:id/access the owner only: who may drive (private | invite | queue) → 303 to its panel
  *   POST /robots/:id/commission, /uncommission  the owner only: per-robot limits above the profile default → 303
+ *   POST /robots/:id/limits                      the owner only, commissioned: this robot's top speed and turn → 303
  *   POST /robots/:id/operators            the owner only: add a person by @username with a role → 303 to its panel
  *   POST /robots/:id/operators/:subject/remove   the owner only: remove a person (never the owner row) → 303
  *   POST /robots/:id/queue/leave          any signed-in person: leave the robot's turn queue → 303
@@ -998,8 +999,27 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         const robot = await domain.robots.get(req.params.id);
         if (!robot) throw new BotError(404, 'bot.robot_not_found', 'no such robot');
         if (robot.owner_subject !== me.subject) throw new BotError(403, 'bot.forbidden', 'only the owner may commission this robot');
+        // The owner ticks what they checked; a form without it commissions nothing.
+        if (!req.body || req.body.confirm !== 'on') throw new BotError(422, 'bot.confirm_required', 'tick the box to say the robot can move faster safely');
         await domain.robots.commission(robot.id, { subject: me.subject, kind: 'user' }, { confirm: true });
         if (hub) hub.broadcast(robot.id);
+        return res.redirect(303, `/panel/${robot.id}#commission`);
+    }));
+    // A commissioned robot's own drive limits, from the owner's page: the same domain update /api/v1 PATCH makes
+    // (the raise guard and the ceiling clamp are there), then the device gets the new config.
+    r.post('/robots/:id/limits', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        const robot = await domain.robots.get(req.params.id);
+        if (!robot) throw new BotError(404, 'bot.robot_not_found', 'no such robot');
+        if (robot.owner_subject !== me.subject) throw new BotError(403, 'bot.forbidden', 'only the owner may set this robot\'s limits');
+        const num = (v) => { const n = Number(v); return Number.isFinite(n) && n > 0 && n <= 1 ? n : null; };
+        const speed = num(req.body && req.body.max_speed), turn = num(req.body && req.body.max_turn);
+        if (speed == null || turn == null) throw new BotError(422, 'bot.invalid_input', 'speed and turn are numbers above 0, at most 1');
+        const stored = typeof robot.limits === 'string' ? JSON.parse(robot.limits || '{}') : (robot.limits || {});
+        const limits = { ...stored, max_speed: speed, max_turn: turn };
+        await domain.robots.update(robot.id, { limits }, { subject: me.subject, kind: 'user' });
+        if (hub) { await hub.refreshConfig(robot.id); hub.broadcast(robot.id); }
         return res.redirect(303, `/panel/${robot.id}#commission`);
     }));
     r.post('/robots/:id/uncommission', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {

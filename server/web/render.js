@@ -521,16 +521,27 @@ function commissionForm(robot, profile) {
     const limits = profile.limits || {};
     const ceiling = profile.ceiling || limits;
     const at = robot.commissioned || null;
+    const own = robot.limits || {};
     const allow = `up to ${esc(ceiling.max_speed)} speed and ${esc(ceiling.max_turn)} turn`;
+    const when = (iso) => { const d = new Date(iso); return isNaN(d) ? esc(iso) : esc(d.toISOString().slice(0, 16).replace('T', ' ')) + ' UTC'; };
     if (at) {
-        return `<section class="setting-card" aria-labelledby="commission-h"><h2 id="commission-h">Commissioned limits</h2>
-<p class="setting-ok" role="status">Commissioned ${esc(at.at)}${at.by ? ` by <code>${esc(at.by)}</code>` : ''}. This robot may now use your own speed and turn values ${allow}.</p>
-<p class="setting-note">Set them as this robot's <code>max_speed</code> and <code>max_turn</code> (PATCH /api/v1/robots/:id). Returning to the profile's defaults (${esc(limits.max_speed)} speed, ${esc(limits.max_turn)} turn) happens at once, on the device too.</p>
-<form method="post" action="/robots/${esc(robot.id)}/uncommission"><button type="submit" class="quiet">Return to the profile defaults</button></form></section>`;
+        // Commissioned: the owner sets this robot's own drive limits here (or with PATCH /api/v1/robots/:id).
+        const field = (name, label, value, cap) => `<label class="setting-field"><span>${label}</span><input type="number" name="${name}" min="0.05" max="${esc(cap)}" step="0.05" value="${esc(value)}" required inputmode="decimal"><small>${esc(limits[name])} by default, at most ${esc(cap)}</small></label>`;
+        return `<section class="setting-card" id="commission" aria-labelledby="commission-h"><h2 id="commission-h">Commissioned limits</h2>
+<p class="setting-ok" role="status">Commissioned ${when(at.at)}. This robot may use your own speed and turn ${allow}.</p>
+<form method="post" action="/robots/${esc(robot.id)}/limits" class="setting-form">
+${field('max_speed', 'Top speed', own.max_speed != null ? own.max_speed : limits.max_speed, ceiling.max_speed)}
+${field('max_turn', 'Top turn', own.max_turn != null ? own.max_turn : limits.max_turn, ceiling.max_turn)}
+<button type="submit" class="primary">Save the limits</button></form>
+<p class="setting-note">The robot gets them at once. The e-stop, cooldowns and command length (${esc(limits.max_command_ms)} ms) stay as they are.</p>
+<form method="post" action="/robots/${esc(robot.id)}/uncommission"><button type="submit" class="quiet">Return to the profile defaults (${esc(limits.max_speed)} speed, ${esc(limits.max_turn)} turn)</button></form></section>`;
     }
-    return `<section class="setting-card" aria-labelledby="commission-h"><h2 id="commission-h">Commissioned limits</h2>
-<p class="setting-note">The profile's speed (${esc(limits.max_speed)}) and turn (${esc(limits.max_turn)}) limits clamp every command until you commission this robot. Commissioning lets you set its own higher values ${allow}, records that you did it and when, and is yours alone: operators and your agent can never do it.</p>
-<form method="post" action="/robots/${esc(robot.id)}/commission"><input type="hidden" name="confirm" value="on"><button type="submit" class="primary">Commission this robot</button></form></section>`;
+    // Not commissioned: one deliberate act, with the owner saying what they checked.
+    return `<section class="setting-card" id="commission" aria-labelledby="commission-h"><h2 id="commission-h">Commissioned limits</h2>
+<p class="setting-note">The profile's speed (${esc(limits.max_speed)}) and turn (${esc(limits.max_turn)}) limits clamp every command. Commissioning this robot lets you set its own higher values ${allow}. It records that you did it and when, and it is yours alone: operators and your agent can never do it.</p>
+<form method="post" action="/robots/${esc(robot.id)}/commission" class="setting-form">
+<label class="setting-check"><input type="checkbox" name="confirm" value="on" required> I have checked this robot can move faster safely: there is clear space around it, and I can reach its e-stop.</label>
+<button type="submit" class="primary">Commission this robot</button></form></section>`;
 }
 
 function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs = 150, mode = 'page', signedIn = true, streaming = null, people = null, signaling_url = null, profileForm = {}, tryIt = false, automation = null, parentOrigins = [], liveUrl = null, limitsInfo = null }) {

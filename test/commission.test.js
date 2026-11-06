@@ -118,6 +118,28 @@ const { loadProfiles } = require('../server/profiles');
         dev.close();
     });
 
+    await check('the owner\'s page: commissioning needs the tick; the limits form saves within the ceiling; others are refused', async () => {
+        const cookie = (user) => ({ Cookie: `ov_token=${t.network.signUser(user)}` });
+        const post = (p, user, form) => fetch(t.base + p, { method: 'POST', redirect: 'manual', body: new URLSearchParams(form).toString(),
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...(user ? cookie(user) : {}) } });
+        const { robot } = await t.robot(alex, { profile_id: 'looi' });
+        const page = await (await fetch(`${t.base}/panel/${robot.id}`, { headers: cookie(alex) })).text();
+        assert.match(page, /<input type="checkbox" name="confirm" value="on" required>/, 'the form asks the owner to say what they checked');
+        assert.strictEqual((await post(`/robots/${robot.id}/commission`, alex, {})).status, 422, 'no tick, no commissioning');
+        assert.strictEqual((await t.domain.robots.get(robot.id)).commissioned_at, null);
+        assert.strictEqual((await post(`/robots/${robot.id}/commission`, bob, { confirm: 'on' })).status, 403, 'not the owner');
+        assert.strictEqual((await post(`/robots/${robot.id}/commission`, alex, { confirm: 'on' })).status, 303);
+        assert.ok((await t.domain.robots.get(robot.id)).commissioned_at, 'the tick and the owner commission it');
+        assert.match(await (await fetch(`${t.base}/panel/${robot.id}`, { headers: cookie(alex) })).text(), /name="max_speed" min="0.05" max="1"/, 'then the page sets its own limits, up to the ceiling');
+        assert.strictEqual((await post(`/robots/${robot.id}/limits`, bob, { max_speed: '1', max_turn: '1' })).status, 403, 'others cannot set them');
+        assert.strictEqual((await post(`/robots/${robot.id}/limits`, alex, { max_speed: '2', max_turn: '1' })).status, 422, 'above 1 is refused');
+        assert.strictEqual((await post(`/robots/${robot.id}/limits`, alex, { max_speed: '0.9', max_turn: '0.8' })).status, 303);
+        assert.deepStrictEqual(await eff(robot.id), { maxSpeed: 0.9, maxTurn: 0.8, maxCommandMs: 300, cooldownMs: (await eff(robot.id)).cooldownMs }, 'saved and in force');
+        assert.strictEqual((await post(`/robots/${robot.id}/uncommission`, alex, {})).status, 303);
+        const back = await eff(robot.id);
+        assert.deepStrictEqual([back.maxSpeed, back.maxTurn], [0.5, 0.6], 'uncommissioned: the defaults at once, whatever is stored');
+    });
+
     await t.close();
     done();
 })();
