@@ -369,7 +369,7 @@ ${code(COMMISSION_CALL)}
 
 // ── GET /docs/computers ────────────────────────────────────────────────────────────────────────────
 
-const COMPUTER_INSTALL = `curl -fsSL https://openvibe.bot/install | sh -s -- \\
+const COMPUTER_INSTALL = `curl -fsSL https://node.openvibe.network/install | sh -s -- \\
   --network https://openvibe.network --pairing pair_… --code ABCD-1234 --computer ask`;
 const COMPUTER_APPROVE = `openvibe-node approvals          # what waits: id, kind, what it would do
 openvibe-node approve cmd_01J…   # let it run
@@ -389,6 +389,7 @@ function renderComputersPage({ config }) {
 <section class="card" aria-labelledby="install-h"><h2 id="install-h">Install it</h2>
 <p>On ${inLink('/machines', 'Your machines')}, choose <b>Add a machine</b> and run the command under <b>Let your agents use it</b> on the computer, from your own account (the installer uses sudo itself):</p>
 ${code(COMPUTER_INSTALL)}
+<p class="muted">The installer is also at <a href="https://openvibe.bot/install">openvibe.bot/install</a>, which keeps working. What the Node is and what it does is on <a href="https://node.openvibe.network">node.openvibe.network</a>.</p>
 <p>The Node then runs as you, never as root, and its only folder is your home folder. Linux for now; elsewhere, run the Node in your own session with the plugin in its config (${out(`${BLOB}/docs/computer.md`, 'computer.md')}).</p></section>
 
 <section class="card" aria-labelledby="levels-h"><h2 id="levels-h">Levels, set on the computer</h2>
