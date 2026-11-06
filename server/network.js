@@ -154,11 +154,15 @@ function createIdentity(config, { fetchImpl = globalThis.fetch, now = () => Date
         if (cache.size >= MAX_ENTRIES) cache.delete(cache.keys().next().value);
         cache.set(subject, { username: p.username, display_name: typeof p.display_name === 'string' && p.display_name ? p.display_name : p.username, at: now() });
     }
+    // identity.subject-projection@1: `subject` is a subject-ref, { type, id } (2026-11-06: Bot read it as a string, so every
+    // @name lookup Network answered with a person came back "No OpenVibe account is called @…").
+    const subjectId = (subject) => (typeof subject === 'string' ? subject : subject && typeof subject.id === 'string' ? subject.id : null);
     async function byUsername(name) {
         const out = await call('GET', `/internal/identity/resolve?username=${encodeURIComponent(name)}`);
-        if (!out || typeof out.subject !== 'string') return null;
-        remember(out.subject, out);
-        return { subject: out.subject, username: out.username, display_name: out.display_name || out.username };
+        const subject = out ? subjectId(out.subject) : null;
+        if (!subject) return null;
+        remember(subject, out);
+        return { subject, username: out.username, display_name: out.display_name || out.username };
     }
     async function names(subjectIds) {
         const ids = [...new Set((subjectIds || []).filter((s) => typeof s === 'string' && s))];

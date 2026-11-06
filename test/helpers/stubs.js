@@ -111,7 +111,8 @@ async function startNetwork() {
         const r = serviceAuth.verifyServiceToken(h.slice(7), { publicKey: publicPem, issuer, audience: 'openvibe.network' });
         return r.ok && (r.claims.cap || []).includes('identity.subject.resolve');
     };
-    const identityView = (u) => ({ subject: u.subject, username: u.username, display_name: u.display_name });
+    // The shape Network sends (identity.subject-projection@1): subject is a subject-ref { type, id }, never a bare string.
+    const identityView = (u) => ({ subject: { type: 'user', id: u.subject }, username: u.username, display_name: u.display_name, avatar_url: null, banned: false });
 
     const server = http.createServer(async (req, res) => {
         if (req.url === '/api/.well-known/jwks') return send(res, 200, { public_key: publicPem, algorithm: 'RS256' });
