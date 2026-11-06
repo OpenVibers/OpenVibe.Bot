@@ -175,7 +175,7 @@ function createApp(opts = {}) {
     // A computer command may carry a file to write (≤ 256 KB, base64): its route alone takes a larger body.
     app.use(/^\/api\/v1\/machines\/[^/]+\/commands$/, express.json({ limit: '400kb' }));
     app.use('/api/v1', express.json({ limit: '64kb' }), (req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); }, apiAuth.middleware, v1Router({ domain, apiAuth, limits, hub, jobs, config, submissions, routines, webhooks, claims }));
-    app.use('/auth', createSessionRoutes(config, userAuth, { fetchImpl }));
+    app.use('/auth', createSessionRoutes(config, userAuth, { fetchImpl, log }));
     // ── The legal pages: Terms, Privacy and DMCA on openvibe.bot itself (openvibe-shared/legal). ──
     // The document carries its own inline theme and OpenVibe Frame boot, which the strict site-wide CSP
     // refuses, so these three public pages get the front page's allowances (HOME_CSP). The `profile` is the

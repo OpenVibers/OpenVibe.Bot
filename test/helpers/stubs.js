@@ -46,6 +46,8 @@ async function startNetwork() {
     let n = 100;
     // Every client-credentials request Network's /oauth/token served: { client_id, audience, scope }.
     const tokenCalls = [];
+    // The sign-in codes Network issued (openvibe-sdk/sso exchanges one with the PKCE verifier): code → tokens.
+    const codes = new Map();
 
     function signService({ sub = 'svc:live', aud = ['openvibe.bot'], cap = [], expSec = 300 } = {}) {
         const now = Math.floor(Date.now() / 1000);
@@ -115,9 +117,18 @@ async function startNetwork() {
         if (req.url === '/api/.well-known/jwks') return send(res, 200, { public_key: publicPem, algorithm: 'RS256' });
         if (req.url === '/api/health') return send(res, 200, { ok: true });
         if (req.url === '/oauth/token' && req.method === 'POST') {
-            const body = Object.fromEntries(new URLSearchParams(await readBody(req)));
+            // The Network takes the token grant as JSON (openvibe-sdk/sso) or as a form (the service clients).
+            const text = await readBody(req);
+            const body = text.trim().startsWith('{') ? JSON.parse(text) : Object.fromEntries(new URLSearchParams(text));
             tokenCalls.push({ client_id: body.client_id, audience: body.audience || null, scope: body.scope || null });
             if (body.client_secret !== 'shh') return send(res, 401, { error: 'invalid_client' });
+            // A sign-in's code: the Network answers invalid_grant for a code it never issued.
+            if (body.grant_type === 'authorization_code') {
+                const c = codes.get(String(body.code || ''));
+                if (!c) return send(res, 400, { error: 'invalid_grant', error_description: 'unknown or expired code' });
+                codes.delete(String(body.code));
+                return send(res, 200, { access_token: c.access_token, refresh_token: c.refresh_token || null, token_type: 'Bearer', expires_in: 300 });
+            }
             const cap = String(body.scope || '').split(/\s+/).filter(Boolean);
             return send(res, 200, { access_token: signService({ sub: `svc:${body.client_id}`, aud: [body.audience || 'openvibe.bot'], cap }), token_type: 'Bearer', expires_in: 300 });
         }
@@ -175,7 +186,13 @@ async function startNetwork() {
     });
     const url = await listen(server);
     issuer = url;
-    return { url, publicPem, signService, signUser, newUser, addNode, signNode, nodes, revokes, pairings, statuses, tokenCalls, failPairings, users, failIdentity: (status) => { identityFailure = status; }, close: () => new Promise((r) => server.close(r)) };
+    /** A sign-in code the stand-in Network accepts: the code the browser comes back with. */
+    function issueCode({ access_token = null, refresh_token = 'refresh_test' } = {}) {
+        const code = `code_${crypto.randomBytes(8).toString('hex')}`;
+        codes.set(code, { access_token: access_token || signUser({ subject: 'usr_test', username: 'someone' }), refresh_token });
+        return code;
+    }
+    return { url, publicPem, signService, signUser, newUser, addNode, signNode, nodes, revokes, pairings, statuses, tokenCalls, issueCode, failPairings, users, failIdentity: (status) => { identityFailure = status; }, close: () => new Promise((r) => server.close(r)) };
 }
 
 async function startEvents() {
