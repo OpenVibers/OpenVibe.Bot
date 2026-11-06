@@ -53,6 +53,7 @@ const machineRoles = require('../machine-roles');
 const kits = require('../kits');
 const resourceIndex = require('./resource-index');
 const resourceControl = require('./resource-control');
+const { aiOf } = require('../machine-ai');
 const deskLeases = require('./desk-leases');
 
 const CAP = {
@@ -78,9 +79,22 @@ const AGENT_SERVICES = new Set(['svc:actor']);
 const MACHINE_SERVICES = {
     'svc:actor': { kinds: null, flag: 'agent_computer', off: 'the owner has not let their agent use this computer' },
     'svc:watch': { kinds: new Set(['probe']), flag: 'watch_probe', off: 'the owner has not let their watches check things from this computer' },
-    // AI on your own machines (contracts 0.219.0): OpenVibe.AI runs a model on the owner's own model server, nothing else.
-    'svc:ai': { kinds: new Set(['ai']), flag: 'ai_models', off: 'the owner has not let their AI use this computer\'s models', cap: 'bot.machine.ai' },
+    // AI (contracts 0.219.0): OpenVibe.AI runs a model on the owner's own model server for the owner, or — only for a
+    // machine whose ai plugin offers its models to the network — a community request that opted in (below).
+    // A command that says `community: true` runs on the machine's offer to the network instead, so the Node ai plugin's
+    // own opt-in (capabilities.ai.offer.enabled) stands in for the "Let my AI use this computer's models" switch.
+    'svc:ai': { kinds: new Set(['ai']), flag: 'ai_models', off: 'the owner has not let their AI use this computer\'s models', cap: 'bot.machine.ai', community: true },
 };
+/**
+ * A machine offering its models to the network (OpenVibe.Node ai plugin 0.3.0): the owner turned on "Offer to the
+ * network" and the offer names its models. Hours, concurrency and price are the plugin's to enforce; Bot only decides
+ * whether AI may send a community run here at all.
+ */
+function communityAi(capabilities) {
+    const ai = aiOf(capabilities);
+    const offer = ai && ai.offer;
+    return Boolean(offer && offer.enabled === true && Array.isArray(offer.models) && offer.models.length);
+}
 // The network's machines hub (plan L34): the one service that acts for a person on their own machines. The
 // capability alone is not enough: any service holding it could name any person in X-OV-Subject, so the hub is
 // this service and no other.
@@ -498,7 +512,12 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         const device = await domain.devices.get(String(req.params.id || '').slice(0, 64));
         const ownerSubject = device && !device.revoked_at ? await domain.devices.ownerOf(device) : null;
         if (!ownerSubject || ownerSubject !== subject) fail(404, 'bot.device_not_found', 'no such machine of yours');
-        if (agentNeedsOptIn && svc && !device[svc.flag]) fail(403, 'bot.agent_not_allowed', svc.off);
+        // A community run is the machine's own offer to the network, which is its own opt-in; anything else AI asks
+        // of it (the owner's own models) still needs "Let my AI use this computer's models".
+        const community = Boolean(svc && svc.community && req.body && req.body.value && typeof req.body.value.model === 'string' && req.body.value.model.startsWith('community/'));
+        if (agentNeedsOptIn && svc && !device[svc.flag] && !(community && communityAi(device.capabilities))) {
+            fail(403, 'bot.agent_not_allowed', community ? 'the owner has not offered this computer\'s models to the network' : svc.off);
+        }
         return { device, subject };
     }
     const machineOut = (device) => {

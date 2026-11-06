@@ -793,7 +793,9 @@ function renderMachinesPage({ machines = [], pairing = null }) {
         const caps = m.capabilities && typeof m.capabilities === 'object' ? m.capabilities : {};
         // Its own models (OpenVibe Node's ai plugin, server/machine-ai.js): what it offers, and whether a model server answers.
         const models = aiOf(caps);
-        const ai = models ? { models: Array.isArray(models.models) ? models.models.slice(0, 20).map(String) : [], ready: models.ready === true } : null;
+        const ai = models ? { models: Array.isArray(models.models) ? models.models.slice(0, 20).map(String) : [], ready: models.ready === true,
+            offer: models.offer && typeof models.offer === 'object' ? models.offer : null,
+            speed: models.speed && typeof models.speed === 'object' ? models.speed : null } : null;
         const c = caps.computer;
         if (!c || typeof c !== 'object') return ai ? { on: false, ai } : null;
         const level = m.computer_level || ((c.files || c.terminal || c.screen || {}).level) || null;
@@ -848,6 +850,14 @@ function renderMachinesPage({ machines = [], pairing = null }) {
             // Turned on: OpenVibe.Chat's "Your AI key" comes filled in with this computer and its first model (saved only there).
             // With several such machines, any of them (contracts 0.221.0): the fastest that is on answers.
             + (m.ai_models && c.ai.models.length ? `<a class="button quiet" href="https://openvibe.chat/settings?own=node&amp;machine=${modelMachines > 1 ? 'any' : encodeURIComponent(m.id)}&amp;model=${encodeURIComponent(c.ai.models[0])}#oc-ai-key">Use these models in OpenVibe.Chat</a>` : '')
+            + (() => {
+                const o = c.ai.offer;
+                if (!o || o.enabled !== true) return '';
+                const speed = c.ai.speed && typeof c.ai.speed === 'object' ? Object.entries(c.ai.speed).slice(0, 3).map(([model, rate]) => `${model} ${rate} tok/s`).join(', ') : '';
+                return `<div class="machine-share"><span class="pill">${o.paused ? 'Offer paused: this machine is in use' : 'Offering its models to the network'}</span>`
+                    + `<span class="muted">${esc(o.privacy || 'A community machine sees the prompt. Only requests that allow community capacity are sent here, and every answer is labelled Community.')}</span>`
+                    + `${speed ? `<span class="muted">${esc(speed)}</span>` : ''}</div>`;
+            })()
             + '</div>' : '';
         // A machine that offers only its models (the ai plugin, no computer plugin): just them.
         if (!c.on) return `<div class="machine-computer">${aiRow}</div>`;

@@ -90,7 +90,11 @@ function createApp(opts = {}) {
     // started by server/index.js with the other jobs. Without Network credentials nothing is reported.
     const offerReporter = opts.offerReporter !== undefined ? opts.offerReporter
         : (config.oauth.clientSecret ? createOfferReporter(config, { fetchImpl }) : null);
-    const offers = createOfferPublisher({ db, hub, reporter: offerReporter, log, now, firstPartyOwners: (config.deskHosts && config.deskHosts.firstPartyOwners) || [] });
+    // A test that injects its own worker reporter gets no real Network client for AI offers unless it injects that too.
+    const aiOfferReporter = opts.aiOfferReporter !== undefined ? opts.aiOfferReporter
+        : (opts.offerReporter !== undefined ? null : (config.oauth.clientSecret ? require('./network').createAiOfferReporter(config, { fetchImpl }) : null));
+    const offers = createOfferPublisher({ db, hub, reporter: offerReporter, aiReporter: aiOfferReporter, log, now,
+        firstPartyOwners: (config.deskHosts && config.deskHosts.firstPartyOwners) || [] });
     domain.devices.onChange(() => offers.poke());
     const sim = opts.sim || createSimulator({ config, domain, hub, now, log });
     // Server-side ONVIF cameras (server/onvif): the same in-process attach as the simulator, but with a real
