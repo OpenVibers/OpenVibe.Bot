@@ -89,7 +89,7 @@ function createNodePrincipals(config, { fetchImpl = globalThis.fetch } = {}) {
  *   report(offers) → Network's answer { source, offers, marked_down }
  * A failure throws 503 bot.network_unavailable.
  */
-function createOfferReporter(config, { fetchImpl = globalThis.fetch } = {}) {
+function createOfferReporter(config, { fetchImpl = globalThis.fetch, path = '/internal/resources/report' } = {}) {
     const tokens = serviceAuth.createTokenClient({
         tokenUrl: `${config.network.internalUrl}/oauth/token`, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret,
         audience: 'openvibe.network', scope: 'network.resource.report', fetchImpl,
@@ -97,7 +97,7 @@ function createOfferReporter(config, { fetchImpl = globalThis.fetch } = {}) {
     async function report(offers) {
         let res;
         try {
-            res = await fetchImpl(`${config.network.internalUrl}/internal/resources/report`, {
+            res = await fetchImpl(`${config.network.internalUrl}${path}`, {
                 method: 'POST', headers: { ...(await tokens.authHeaders()), Accept: 'application/json', 'Content-Type': 'application/json' },
                 body: JSON.stringify({ source: 'bot', offers }), signal: AbortSignal.timeout(8000),
             });
@@ -186,4 +186,9 @@ function createIdentity(config, { fetchImpl = globalThis.fetch, now = () => Date
     return { byUsername, names };
 }
 
-module.exports = { createKeyProvider, createUserAuth, createNodePrincipals, createIdentity, createOfferReporter };
+/** The community AI offers Bot reports (design: "Offer to the network"; Network /internal/ai/offers/report). */
+function createAiOfferReporter(config, { fetchImpl = globalThis.fetch } = {}) {
+    return createOfferReporter(config, { fetchImpl, path: '/internal/ai/offers/report' });
+}
+
+module.exports = { createKeyProvider, createUserAuth, createNodePrincipals, createIdentity, createOfferReporter, createAiOfferReporter };

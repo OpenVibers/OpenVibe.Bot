@@ -9,6 +9,12 @@
  *
  *   createOfferPublisher({ db, hub, reporter, log, now, intervalMs, settleMs }) → { build, publish, start, stop, poke }
  *
+ * The same set carries a community AI offer (the design's "Offer to the network"): a machine whose OpenVibe.Node ai
+ * plugin advertises `capabilities.ai.offer.enabled` with models, hours, concurrency, a credit price and an audience is
+ * one user-owned provider offer, `ai:<device>`, whose detail.kind is `ai` and whose health follows its connection and
+ * its own open/ready flags. Network validates the detail; OpenVibe.AI reads the internal list and places only requests
+ * that opt in to community capacity on it.
+ *
  * An offer that does not match the contract is left out (Network would refuse the whole report for one bad offer).
  * Without a reporter (no Network credentials) nothing is reported.
  */
@@ -18,7 +24,25 @@ const { json } = require('../util');
 const CONTRACT = 'platform.resource-offer@1';
 const CLASSES = new Set(['function', 'code', 'browser', 'linux', 'desktop', 'gpu']);
 
-function createOfferPublisher({ db, hub, reporter = null, log = console, now = () => Date.now(), intervalMs = 60_000, settleMs = 2_000, firstPartyOwners = [] }) {
+/** The ai plugin's offer, or null when it is off or incomplete (an incomplete one is left out, never half reported). */
+function aiOfferOf(capabilities) {
+    // The Node reports each plugin's describe under its name, so the ai plugin's {ai: {models, offer}} arrives as
+    // capabilities.ai.ai; a direct capabilities.ai.offer is accepted too (an older/other reporter).
+    let ai = json(capabilities, {}).ai;
+    if (ai && ai.ai) ai = ai.ai;
+    const offer = ai && ai.offer;
+    if (!offer || offer.enabled !== true || !Array.isArray(offer.models) || !offer.models.length) return null;
+    if (!offer.hours || typeof offer.hours !== 'object' || !offer.price || typeof offer.price !== 'object') return null;
+    if (!Number.isInteger(offer.concurrency) || offer.concurrency < 1 || offer.concurrency > 8) return null;
+    if (!['everyone', 'followers', 'group'].includes(offer.audience)) return null;
+    if (offer.audience === 'group' && (typeof offer.group !== 'string' || !offer.group.trim())) return null;
+    for (const key of ['in_per_million', 'out_per_million']) {
+        if (typeof offer.price[key] !== 'number' || !Number.isFinite(offer.price[key]) || offer.price[key] < 0) return null;
+    }
+    return offer;
+}
+
+function createOfferPublisher({ db, hub, reporter = null, aiReporter = null, log = console, now = () => Date.now(), intervalMs = 60_000, settleMs = 2_000, firstPartyOwners = [] }) {
     const firstParty = new Set(firstPartyOwners);
     let timer = null;
     let soon = null;
@@ -80,33 +104,64 @@ function createOfferPublisher({ db, hub, reporter = null, log = console, now = (
         return offers;
     }
 
+    /** The community AI offers: one per machine whose Node ai plugin advertises an enabled offer. */
+    async function buildAi() {
+        const rows = await db.many(
+            `SELECT d.id, d.capabilities, d.owner_subject, r.owner_subject AS robot_owner
+             FROM devices d LEFT JOIN robots r ON r.id = d.robot_ids ->> 0
+             WHERE d.revoked_at IS NULL AND (d.capabilities -> 'ai' -> 'ai' -> 'offer' ->> 'enabled' = 'true'
+                 OR d.capabilities -> 'ai' -> 'offer' ->> 'enabled' = 'true')
+             ORDER BY d.id`);
+        const at = new Date(now()).toISOString();
+        const offers = [];
+        for (const row of rows) {
+            const offer = aiOfferOf(row.capabilities);
+            const owner = row.owner_subject || row.robot_owner;
+            if (!offer || !owner) continue;
+            const online = Boolean(hub && hub.isOnline(row.id));
+            offers.push({
+                offer_id: `ai:${row.id}`, machine_id: row.id, owner,
+                models: offer.models.slice(0, 40),
+                hours: { start: offer.hours.start, end: offer.hours.end, tz: offer.hours.tz },
+                concurrency: offer.concurrency,
+                price: { in_per_million: offer.price.in_per_million, out_per_million: offer.price.out_per_million },
+                audience: offer.audience, group: offer.audience === 'group' ? offer.group : null,
+                ready: online && offer.ready === true,
+                health: { status: online && offer.ready === true ? 'up' : 'down', checked_at: at },
+            });
+        }
+        return offers;
+    }
+
     /** Report the whole set now (one report at a time; a change during one reports again after it). */
     async function publish() {
-        if (!reporter) return null;
+        if (!reporter && !aiReporter) return null;
         if (running) { again = true; return running; }
         running = (async () => {
+            const out = {};
             try {
-                return await reporter.report(await build());
-            } catch (e) {
-                log.warn(`[Bot] offers report: ${e.message}`);
-                return null;
-            } finally {
-                running = null;
-                if (again) { again = false; poke(); }
-            }
-        })();
+                if (reporter) out.offers = await reporter.report(await build());
+            } catch (e) { log.warn(`[Bot] offers report: ${e.message}`); }
+            try {
+                if (aiReporter) out.ai = await aiReporter.report(await buildAi());
+            } catch (e) { log.warn(`[Bot] ai offers report: ${e.message}`); }
+            return out;
+        })().finally(() => {
+            running = null;
+            if (again) { again = false; poke(); }
+        });
         return running;
     }
 
     /** A device changed: report a moment later (changes in a burst are reported once). Only once started. */
     function poke() {
-        if (!reporter || !timer || soon) return;
+        if ((!reporter && !aiReporter) || !timer || soon) return;
         soon = setTimeout(() => { soon = null; void publish(); }, settleMs);
         if (soon.unref) soon.unref();
     }
 
     function start() {
-        if (!reporter || timer) return;
+        if ((!reporter && !aiReporter) || timer) return;
         timer = setInterval(() => { void publish(); }, intervalMs);
         if (timer.unref) timer.unref();
         poke();
@@ -117,7 +172,7 @@ function createOfferPublisher({ db, hub, reporter = null, log = console, now = (
         timer = null;
         soon = null;
     }
-    return { build, publish, start, stop, poke };
+    return { build, buildAi, publish, start, stop, poke };
 }
 
-module.exports = { createOfferPublisher };
+module.exports = { createOfferPublisher, aiOfferOf };
