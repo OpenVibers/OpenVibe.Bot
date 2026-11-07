@@ -348,9 +348,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
             })))).sort((a, b) => Number(b.online) - Number(a.online));
             const kit = kits.list()[0] || null;
             res.setHeader('Content-Security-Policy', HOME_CSP);
-            // Signed out, the page is the same for everybody: a minute of reuse, then a stale copy
-            // while the next one is fetched. Signed in, it names the person and stays private.
-            res.setHeader('Cache-Control', req.viewer ? cache.htmlHeaders({ private: true }) : cache.htmlHeaders({ maxAge: 60 }));
+            res.setHeader('Cache-Control', 'private, no-cache');
             res.setHeader('Vary', 'Cookie');
             res.type('html').send(renderHome({ config, signedIn: !!req.viewer, models: sortModels(models), robots, kit, jobs }));
         } catch (e) { next(e); }
