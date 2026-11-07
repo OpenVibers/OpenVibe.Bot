@@ -35,14 +35,15 @@ const { renderPhoneLinkPage } = require('../server/web/render');
         const p = await t.domain.phone.mint(alex.subject);
         assert.match(p.code, /^[0-9A-Z]{4}-?[0-9A-Z]{4}$/);
         assert.match(p.pairing_id, /^pair_/);
-        assert.strictEqual(p.qr, `openvibe-link://pair?code=${encodeURIComponent(p.code)}&pairing=${encodeURIComponent(p.pairing_id)}&network=${encodeURIComponent(t.config.network.url)}`);
+        assert.strictEqual(p.qr, `openvibe-link://pair?code=${encodeURIComponent(p.code)}&pairing=${encodeURIComponent(p.pairing_id)}`, 'no server in the link: the app has its own');
+        assert.doesNotMatch(p.qr, /network=/);
     });
 
     await check('/link/phone is the person\'s own page, and it shows the code and the app link', async () => {
         const guest = await t.call('GET', '/link/phone');
         assert.ok([302, 401].includes(guest.status), `a guest got ${guest.status}`);
         const html = renderPhoneLinkPage({
-            pairing: { code: 'ABCD-1234', expires_at: '2026-11-07T12:00:00Z', qr: 'openvibe-link://pair?code=ABCD-1234&network=https%3A%2F%2Fopenvibe.network' },
+            pairing: { code: 'ABCD-1234', expires_at: '2026-11-07T12:00:00Z', qr: 'openvibe-link://pair?code=ABCD-1234&pairing=pair_01JD2C3D4E5F6G7H8J9K0MNPQR' },
         });
         assert.match(html, /ABCD-1234/);
         assert.match(html, /qr-box/);
