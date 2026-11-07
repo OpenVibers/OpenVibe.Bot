@@ -956,6 +956,7 @@ ${choice('Use the models you run on it', ' --ai', 'If this computer runs Ollama,
 <p class="muted"><a href="https://openvibe.network/machines">All your machines are on openvibe.network/machines</a></p>
 ${list}
 ${add}
+<p class="muted">In your pocket: <a href="/link/phone">Link on your phone</a> adds the Android app, which shows your agents' approvals and takes files from any share sheet.</p>
 </main>`;
     return page('Your machines', body, { scripts: pairing ? ['/panel/panel.js'] : [], description: 'Your own machines that run your jobs on OpenVibe.', canonical: '/machines' });
 }
