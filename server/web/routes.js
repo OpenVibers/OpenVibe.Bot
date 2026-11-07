@@ -36,6 +36,7 @@ const { validCallWord } = require('../voice');
 const path = require('path');
 const express = require('express');
 const seo = require('openvibe-shared/seo');
+const cache = require('openvibe-shared/cache-policy');
 const appIcon = require('openvibe-shared/app-icon');
 const { getProfile, listProfiles, loadProfiles } = require('../profiles');
 const { frameAncestors } = require('../config');
@@ -210,7 +211,10 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     });
     if (!domain) return r;
 
-    const asset = (file, type) => (req, res) => { res.setHeader('Cache-Control', 'no-cache'); res.type(type).sendFile(path.join(PUBLIC, file)); };
+    // These have no content hash in their URL, so they are not immutable: the shared policy gives a
+    // browser five minutes of reuse and a day of stale-while-revalidate instead of a revalidation
+    // round trip on every page view.
+    const asset = (file, type) => (req, res) => { res.setHeader('Cache-Control', cache.assetHeaders(req.path, { hashed: false })); res.type(type).sendFile(path.join(PUBLIC, file)); };
     r.get('/panel/panel.js', asset('panel.js', 'application/javascript'));
     r.get('/panel/panel.css', asset('panel.css', 'text/css'));
     r.get('/panel/screen-share.js', asset('screen-share.js', 'application/javascript'));
