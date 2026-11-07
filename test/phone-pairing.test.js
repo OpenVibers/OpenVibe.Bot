@@ -42,12 +42,24 @@ const { renderPhoneLinkPage } = require('../server/web/render');
     await check('/link/phone is the person\'s own page, and it shows the code and the app link', async () => {
         const guest = await t.call('GET', '/link/phone');
         assert.ok([302, 401].includes(guest.status), `a guest got ${guest.status}`);
-        const html = renderPhoneLinkPage({
-            pairing: { code: 'ABCD-1234', expires_at: '2026-11-07T12:00:00Z', qr: 'openvibe-link://pair?code=ABCD-1234&pairing=pair_01JD2C3D4E5F6G7H8J9K0MNPQR' },
-        });
+        const pairing = { code: 'ABCD-1234', expires_at: new Date(Date.now() + 15 * 60000).toISOString(), qr: 'openvibe-link://pair?code=ABCD-1234&pairing=pair_01JD2C3D4E5F6G7H8J9K0MNPQR' };
+        const apkUrl = 'https://github.com/OpenVibers/OpenVibe.Node/releases/download/v0.46.0/openvibe-link.apk';
+        const html = renderPhoneLinkPage({ pairing, apkUrl });
         assert.match(html, /ABCD-1234/);
         assert.match(html, /qr-box/);
         assert.match(html, /kind <b>phone<\/b>/);
+        assert.ok(html.includes(`href="${apkUrl}"`), 'the install link is the published download');
+        assert.match(html, /for the next 15 minutes \(until <time datetime="[^"]+">\d\d:\d\d UTC<\/time>\)/, 'the expiry in plain words');
+    });
+
+    await check('before the Android app is published, /link/phone says so and mints no code; /machines does not link it', async () => {
+        const html = renderPhoneLinkPage({ pairing: null, apkUrl: null });
+        assert.match(html, /in testing and not published yet/);
+        assert.doesNotMatch(html, /qr-box|class="code"/, 'no QR and no code for an app nobody can install');
+        assert.doesNotMatch(html, /releases"/, 'no link to a release that has no APK');
+        const { renderMachinesPage } = require('../server/web/render');
+        assert.doesNotMatch(renderMachinesPage({ machines: [] }), /href="\/link\/phone"/);
+        assert.match(renderMachinesPage({ machines: [], phoneReady: true }), /href="\/link\/phone"/);
     });
 
     done();
