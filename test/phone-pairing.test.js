@@ -35,7 +35,7 @@ const { renderPhoneLinkPage } = require('../server/web/render');
         const p = await t.domain.phone.mint(alex.subject);
         assert.match(p.code, /^[0-9A-Z]{4}-?[0-9A-Z]{4}$/);
         assert.match(p.pairing_id, /^pair_/);
-        assert.strictEqual(p.qr, `openvibe-link://pair?code=${encodeURIComponent(p.code)}&network=${encodeURIComponent(t.config.network.url)}`);
+        assert.strictEqual(p.qr, `openvibe-link://pair?code=${encodeURIComponent(p.code)}&pairing=${encodeURIComponent(p.pairing_id)}&network=${encodeURIComponent(t.config.network.url)}`);
     });
 
     await check('/link/phone is the person\'s own page, and it shows the code and the app link', async () => {

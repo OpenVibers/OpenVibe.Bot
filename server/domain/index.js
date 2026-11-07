@@ -753,7 +753,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         if (!p || typeof p.pairing_id !== 'string' || typeof p.code !== 'string') fail(503, 'bot.network_unavailable', 'Network answered no pairing code');
         return {
             code: p.code, expires_at: p.expires_at, pairing_id: p.pairing_id,
-            qr: `openvibe-link://pair?code=${encodeURIComponent(p.code)}&network=${encodeURIComponent(config.network.url)}`,
+            qr: `openvibe-link://pair?code=${encodeURIComponent(p.code)}&pairing=${encodeURIComponent(p.pairing_id)}&network=${encodeURIComponent(config.network.url)}`,
         };
     }
     // ── The live screen (plan T14, contracts 0.182.0) ──────────────────────────────────────────────────────
