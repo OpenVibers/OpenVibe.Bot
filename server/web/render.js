@@ -728,6 +728,31 @@ ${error ? `<p class="error" role="alert">${esc(error)}</p>` : ''}
     return page('Add a device', body);
 }
 
+/**
+ * /link/phone (plan 2026-11-07 §13.2): link the Android app to this account. The code is Network's one-time pairing
+ * code; the QR carries it in the app's own link, so scanning it opens OpenVibe Link with the code filled in.
+ */
+function renderPhoneLinkPage({ pairing }) {
+    const qr = pairing && pairing.qr ? qrSvg(pairing.qr, { label: 'Opens OpenVibe Link with this pairing code' }) : '';
+    const body = `${topbar('<span class="crumb">Link on your phone</span>')}
+<main class="page pairing">
+<h1>Link on your phone</h1>
+<p>OpenVibe Link puts your agents' approvals in your pocket, shows the Dock's activity, and adds <b>Send to OpenVibe</b>
+to every app's share sheet. Install it on your Android phone first: <a href="https://github.com/OpenVibers/OpenVibe.Node/releases">the latest APK</a>.</p>
+<ol class="steps">
+<li class="card phone-pair"><h2>Scan this with the phone</h2>
+<div class="qr-box">${qr}</div>
+<p class="muted">The phone's camera opens OpenVibe Link with the code filled in. No account password is typed on the phone here: the code pairs the device, and the app asks you to sign in separately.</p></li>
+<li class="card"><h2>Or type the code in the app</h2>
+<p><strong class="code">${esc(pairing.code)}</strong></p>
+<p class="muted">Valid until <time datetime="${esc(pairing.expires_at)}">${esc(pairing.expires_at)}</time>. It works once.</p></li>
+</ol>
+<p class="muted">The phone shows up on your account as a device of kind <b>phone</b>. It holds no camera and no screen capture:
+nothing on the phone is automated. <a href="/machines">Your machines</a> · <a href="/robots">Your robots</a></p>
+</main>`;
+    return page('Link on your phone', body, { description: 'Pair the OpenVibe Link Android app with a one-time code or its QR code.' });
+}
+
 function renderClaimPage({ claim, models = [], values = {}, error = null, now = Date.now() }) {
     const hw = claim.hardware || {};
     const minutes = (ms) => Math.max(0, Math.round(ms / 60000));
@@ -1170,4 +1195,4 @@ function renderFirstRunPage({ rows = [] }) {
     return page('First run', body, { description: 'The guided first run of OpenVibe Node, measured step by step.', canonical: '/admin/first-run' });
 }
 
-module.exports = { page, renderPanel, renderPhonePage, renderMachinesPage, renderMachineDesksPage, renderMachineScreenPage, renderSharePage, renderShareGone, panelScripts, isSim, TRY_DESCRIPTION, renderEmbedRefused, renderDrivePage, renderWidget, renderRobotsPage, renderPairingPage, renderLinkPage, renderSignInPage, renderClaimPage, renderClaimApproved, renderFirstRunPage, camerasOf, esc };
+module.exports = { page, renderPanel, renderPhonePage, renderMachinesPage, renderMachineDesksPage, renderMachineScreenPage, renderSharePage, renderShareGone, panelScripts, isSim, TRY_DESCRIPTION, renderEmbedRefused, renderDrivePage, renderWidget, renderRobotsPage, renderPairingPage, renderPhoneLinkPage, renderLinkPage, renderSignInPage, renderClaimPage, renderClaimApproved, renderFirstRunPage, camerasOf, esc };

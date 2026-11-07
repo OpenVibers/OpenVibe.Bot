@@ -43,7 +43,7 @@ const { frameAncestors } = require('../config');
 const { BotError, json } = require('../util');
 const { aiOf } = require('../machine-ai');
 const kits = require('../kits');
-const { renderPanel, renderEmbedRefused, renderDrivePage, renderPairingPage, renderPhonePage, renderMachinesPage, renderMachineDesksPage, renderMachineScreenPage, renderSharePage, renderShareGone, renderLinkPage, renderSignInPage, renderClaimPage, renderClaimApproved, renderFirstRunPage } = require('./render');
+const { renderPanel, renderEmbedRefused, renderDrivePage, renderPairingPage, renderPhonePage, renderPhoneLinkPage, renderMachinesPage, renderMachineDesksPage, renderMachineScreenPage, renderSharePage, renderShareGone, renderLinkPage, renderSignInPage, renderClaimPage, renderClaimApproved, renderFirstRunPage } = require('./render');
 const { createMachineScreen } = require('../machine-screen');
 const { createScreenShares } = require('../screen-shares');
 const { renderDocsIndex, renderDriversPage, renderProfilesPage, renderAutomationPage, renderComputersPage } = require('./docs');
@@ -804,6 +804,15 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         const me = requireUser(req);
         res.setHeader('Vary', 'Cookie');
         res.type('html').send(renderMachinesPage({ machines: await machineRows(me.subject) }));
+    }));
+    // Link on your phone (plan 2026-11-07 §13.2): the code the Android app pairs with, and the QR it can scan. A code
+    // is minted on the visit, never for a cross-site navigation or a prefetch (the same rule as /pair/:id).
+    r.get('/link/phone', ...manage, page(async (req, res) => {
+        const me = requireUser(req);
+        if (crossSiteOrPrefetch(req)) return res.redirect(303, '/machines');
+        res.setHeader('Vary', 'Cookie');
+        const pairing = await domain.phone.mint(me.subject);
+        res.type('html').send(renderPhoneLinkPage({ pairing }));
     }));
     r.post('/machines', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
         const me = requireUser(req);
