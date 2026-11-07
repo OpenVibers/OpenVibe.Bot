@@ -137,7 +137,7 @@ function createApp(opts = {}) {
         res.setHeader('X-Content-Type-Options', 'nosniff');
         res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
         // Cloudflare's edge adds its Web Analytics beacon to HTML pages: its script and its report are the only outside sources.
-        res.setHeader('Content-Security-Policy', ["default-src 'self'", "script-src 'self' https://static.cloudflareinsights.com", "connect-src 'self' https://cloudflareinsights.com",
+        res.setHeader('Content-Security-Policy', ["default-src 'self'", "script-src 'self' https://static.cloudflareinsights.com", "connect-src 'self' https://openvibe.chat https://cloudflareinsights.com",
             "frame-ancestors 'self'", "object-src 'none'", "base-uri 'self'"].join('; '));
         next();
     });
