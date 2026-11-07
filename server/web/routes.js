@@ -43,7 +43,13 @@ const { frameAncestors } = require('../config');
 const { BotError, json } = require('../util');
 const { aiOf } = require('../machine-ai');
 const kits = require('../kits');
-const { renderPanel, renderEmbedRefused, renderDrivePage, renderPairingPage, renderPhonePage, renderMachinesPage, renderMachineDesksPage, renderMachineScreenPage, renderSharePage, renderShareGone, renderLinkPage, renderSignInPage, renderClaimPage, renderClaimApproved, renderFirstRunPage } = require('./render');
+// The Android app's published download: an https URL on GitHub releases or openvibe.link, or nothing (the app is in
+// testing). Read on each request, so setting it in the env file and restarting is all a release needs.
+function linkApkUrl() {
+    const v = String(process.env.LINK_ANDROID_APK_URL || '').trim();
+    return /^https:\/\/(github\.com\/OpenVibers\/OpenVibe\.Node\/releases\/|openvibe\.link\/)[^\s"'<>]+$/.test(v) ? v : null;
+}
+const { renderPanel, renderEmbedRefused, renderDrivePage, renderPairingPage, renderPhonePage, renderPhoneLinkPage, renderMachinesPage, renderMachineDesksPage, renderMachineScreenPage, renderSharePage, renderShareGone, renderLinkPage, renderSignInPage, renderClaimPage, renderClaimApproved, renderFirstRunPage } = require('./render');
 const { createMachineScreen } = require('../machine-screen');
 const { createScreenShares } = require('../screen-shares');
 const { renderDocsIndex, renderDriversPage, renderProfilesPage, renderAutomationPage, renderComputersPage } = require('./docs');
@@ -803,13 +809,25 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     r.get('/machines', frameCsp, page(async (req, res) => {
         const me = requireUser(req);
         res.setHeader('Vary', 'Cookie');
-        res.type('html').send(renderMachinesPage({ machines: await machineRows(me.subject) }));
+        res.type('html').send(renderMachinesPage({ machines: await machineRows(me.subject), phoneReady: !!linkApkUrl() }));
+    }));
+    // Link on your phone (plan 2026-11-07 §13.2): the code the Android app pairs with, and the QR it can scan. A code
+    // is minted on the visit, never for a cross-site navigation or a prefetch (the same rule as /pair/:id).
+    r.get('/link/phone', ...manage, page(async (req, res) => {
+        const me = requireUser(req);
+        if (crossSiteOrPrefetch(req)) return res.redirect(303, '/machines');
+        res.setHeader('Vary', 'Cookie');
+        // Until the Android app has a published download (LINK_ANDROID_APK_URL, the signed release), the page says it is
+        // in testing and mints no code: a QR for an app nobody can install is a dead end (Opus, 11-07).
+        const apkUrl = linkApkUrl();
+        const pairing = apkUrl ? await domain.phone.mint(me.subject) : null;
+        res.type('html').send(renderPhoneLinkPage({ pairing, apkUrl }));
     }));
     r.post('/machines', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
         const me = requireUser(req);
         if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
         const pairing = await domain.machines.mint(me.subject);
-        res.status(201).type('html').send(renderMachinesPage({ machines: await machineRows(me.subject), pairing }));
+        res.status(201).type('html').send(renderMachinesPage({ machines: await machineRows(me.subject), pairing, phoneReady: !!linkApkUrl() }));
     }));
     // The owner lets their watches (OpenVibe.Watch's node source) probe from this machine, or stops them.
     r.post('/machines/:id/watch-probe', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {

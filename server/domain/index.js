@@ -80,6 +80,8 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     /** The last online state Bot reported to Network for a machine, so a change is reported once. */
     const reportedState = new Map();
     const workerRef = (subject) => `worker:${subject}`;
+    // The phone app (plan 2026-11-07 §13.2): its pairing names the person, and its device is kind 'phone'.
+    const phoneRef = (subject) => `phone:${subject}`;
     // ── Presenters ────────────────────────────────────────────────────────────────────────────────
     const presentRobot = (r) => (r ? {
         id: r.id, name: r.name, profile_id: r.profile_id, profile_version: r.profile_version,
@@ -697,8 +699,10 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         // A worker machine (plan T14/T16) runs its owner's own jobs and serves no robot: its pairing names the owner
         // (ref `worker:<owner>`), and the device keeps that owner.
         const worker = !!(p.owner && p.owner.kind === 'user' && USER_SUBJECT.test(String(p.owner.subject)) && p.paired_for.ref === workerRef(p.owner.subject));
-        const robot = !worker && isRobotId(p.paired_for.ref) ? await getRobot(p.paired_for.ref) : null;
-        if (!worker && (!robot || !p.owner || p.owner.kind !== 'user' || p.owner.subject !== robot.owner_subject)) refuse("the machine was not paired for one of its owner's robots");
+        // A phone pairs for its person, not for a robot: it is a device of kind 'phone' with no robot and no video.
+        const phone = !!(p.owner && p.owner.kind === 'user' && USER_SUBJECT.test(String(p.owner.subject)) && p.paired_for.ref === phoneRef(p.owner.subject));
+        const robot = !worker && !phone && isRobotId(p.paired_for.ref) ? await getRobot(p.paired_for.ref) : null;
+        if (!worker && !phone && (!robot || !p.owner || p.owner.kind !== 'user' || p.owner.subject !== robot.owner_subject)) refuse("the machine was not paired for one of its owner's robots");
         const at = iso(now());
         const name = typeof p.name === 'string' ? storable(p.name).trim().slice(0, 80) || null : null;
         // Two first connections at once: the unique index lets one insert win, and the other reads it.
@@ -706,8 +710,8 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
             `INSERT INTO devices (id, robot_ids, name, kind, agent_version, drivers, capabilities, credential_hash, node_principal, owner_subject, created_at, updated_at)
              VALUES ($1, $2::jsonb, $3, $4, NULL, '[]'::jsonb, '{}'::jsonb, NULL, $5, $6, $7, $7)
              ON CONFLICT (node_principal) WHERE node_principal IS NOT NULL AND revoked_at IS NULL DO NOTHING RETURNING *`,
-            [prefixedId('dev', now()), JSON.stringify(worker ? [] : [robot.id]), name, worker ? 'server' : 'onboard', principalId,
-                worker ? p.owner.subject : null, at]);
+            [prefixedId('dev', now()), JSON.stringify(worker || phone ? [] : [robot.id]), name, worker ? 'server' : phone ? 'phone' : 'onboard', principalId,
+                worker || phone ? p.owner.subject : null, at]);
         changed();
         return inserted || db.maybe('SELECT * FROM devices WHERE node_principal = $1 AND revoked_at IS NULL', [principalId]);
     }
@@ -732,9 +736,26 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     async function listMachines(subject) {
         return db.many(
             `SELECT d.* FROM devices d
-             WHERE d.revoked_at IS NULL AND (d.owner_subject = $1 OR (d.capabilities -> 'worker' IS NOT NULL AND EXISTS (
+             WHERE d.revoked_at IS NULL AND d.kind <> 'phone' AND (d.owner_subject = $1 OR (d.capabilities -> 'worker' IS NOT NULL AND EXISTS (
                  SELECT 1 FROM robots r WHERE r.owner_subject = $1 AND d.robot_ids @> jsonb_build_array(r.id))))
              ORDER BY d.created_at DESC`, [subject]);
+    }
+    // ── Link on the phone (plan 2026-11-07 §13.2) ──────────────────────────────────────────────────
+    /**
+     * A one-time code for the person's phone (OpenVibe Link for Android). Network pairs it with ref `phone:<owner>`;
+     * the app redeems the code there and binds on Bot with a node token, and the device it makes is kind 'phone',
+     * with that owner and no robot. Network keeps one live code per ref, so a new one replaces an unused one.
+     * → { code, expires_at, pairing_id, qr }: `qr` is what openvibe.bot/link/phone draws, and what the app's scanner reads.
+     */
+    async function mintPhone(ownerSubject) {
+        if (!nodes) fail(503, 'bot.network_unavailable', 'Network pairing is not configured here');
+        const p = await nodes.pair({ subject: ownerSubject, ref: phoneRef(ownerSubject) });
+        if (!p || typeof p.pairing_id !== 'string' || typeof p.code !== 'string') fail(503, 'bot.network_unavailable', 'Network answered no pairing code');
+        return {
+            code: p.code, expires_at: p.expires_at, pairing_id: p.pairing_id,
+            // No network=: the app talks only to its own build's server, and a link naming another is refused.
+            qr: `openvibe-link://pair?code=${encodeURIComponent(p.code)}&pairing=${encodeURIComponent(p.pairing_id)}`,
+        };
     }
     // ── The live screen (plan T14, contracts 0.182.0) ──────────────────────────────────────────────────────
     /**
@@ -934,7 +955,9 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     async function issuePublishKey(id) {
         const live = await db.maybe('SELECT * FROM devices WHERE id = $1 AND revoked_at IS NULL', [id]);
         if (!live) fail(404, 'bot.device_not_found', 'no live device');
-        const robot = await getRobot(json(live.robot_ids, [])[0]);
+        const robotIds = json(live.robot_ids, []);
+        // A phone (kind 'phone') serves no robot, so there is no stream key to issue for it.
+        const robot = robotIds.length ? await getRobot(robotIds[0]) : null;
         const issued = await newStreamKey(robot);
         const device = await db.tx(async (t) => {
             if (issued) await keepStream(t, robot.id, issued.streamId, id);
@@ -1496,6 +1519,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         machines: { mint: mintMachine, list: listMachines, workerRef, setAgentComputer, setAiModels, setWatchProbe, setVoice, setSharedDesks, listSharedDesks,
             setRoles: setMachineRoles, rename: renameMachine, runningJobs, reportStatus: reportMachineStatus,
             screen: { key: screenKey, liveKey: liveScreenKey, live: screenLive, end: screenEnd, archive: screenArchive } },
+        phone: { mint: mintPhone, ref: phoneRef },
         deskLeases,
         streaming: { get: streaming, set: setStreaming },
         video: { live: liveVideo },

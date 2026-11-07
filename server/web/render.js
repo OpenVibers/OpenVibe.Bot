@@ -728,6 +728,43 @@ ${error ? `<p class="error" role="alert">${esc(error)}</p>` : ''}
     return page('Add a device', body);
 }
 
+/**
+ * /link/phone (plan 2026-11-07 §13.2): link the Android app to this account. The code is Network's one-time pairing
+ * code; the QR carries it in the app's own link, so scanning it opens OpenVibe Link with the code filled in.
+ */
+function renderPhoneLinkPage({ pairing = null, apkUrl = null } = {}) {
+    if (!apkUrl || !pairing) {
+        const body = `${topbar('<span class="crumb">Link on your phone</span>')}
+<main class="page pairing">
+<h1>Link on your phone</h1>
+<p>OpenVibe Link for Android puts your agents' approvals in your pocket and adds <b>Send to OpenVibe</b> to every app's
+share sheet. It is in testing and not published yet: when it is, you install it from here and pair it with a code.</p>
+<p class="muted"><a href="/machines">Your machines</a> · <a href="/robots">Your robots</a></p>
+</main>`;
+        return page('Link on your phone', body, { description: 'OpenVibe Link for Android: in testing, not published yet.' });
+    }
+    const qr = pairing.qr ? qrSvg(pairing.qr, { label: 'Opens OpenVibe Link with this pairing code' }) : '';
+    const minutes = Math.max(1, Math.round((Date.parse(pairing.expires_at) - Date.now()) / 60000)) || 15;
+    const body = `${topbar('<span class="crumb">Link on your phone</span>')}
+<main class="page pairing">
+<h1>Link on your phone</h1>
+<p>OpenVibe Link puts your agents' approvals in your pocket and adds <b>Send to OpenVibe</b> to every app's share sheet.
+First <a href="${esc(apkUrl)}" rel="noopener">install it on your Android phone</a>, then scan or type the code below.</p>
+<ol class="steps">
+<li class="card phone-pair"><h2>Scan this with the phone</h2>
+<div class="qr-box">${qr}</div>
+<p class="muted">The phone's camera opens OpenVibe Link with the code filled in. No password is typed on the phone here:
+the code pairs the device, and the app asks you to sign in separately.</p></li>
+<li class="card"><h2>Or type the code in the app</h2>
+<p><strong class="code">${esc(pairing.code)}</strong></p>
+<p class="muted">It works once, for the next ${minutes} ${minutes === 1 ? 'minute' : 'minutes'} (until <time datetime="${esc(pairing.expires_at)}">${esc(String(pairing.expires_at).slice(11, 16))} UTC</time>).</p></li>
+</ol>
+<p class="muted">The phone shows up on your account as a device of kind <b>phone</b>. It has no camera or screen access, and
+nothing on the phone is automated. <a href="/machines">Your machines</a> · <a href="/robots">Your robots</a></p>
+</main>`;
+    return page('Link on your phone', body, { description: 'Pair the OpenVibe Link Android app with a one-time code or its QR code.' });
+}
+
 function renderClaimPage({ claim, models = [], values = {}, error = null, now = Date.now() }) {
     const hw = claim.hardware || {};
     const minutes = (ms) => Math.max(0, Math.round(ms / 60000));
@@ -782,7 +819,7 @@ ${chatUrl ? `<li class="card"><h2>Drive it from your chat</h2><p class="muted">L
  * /machines (plan T14/T16): a person's own machines that run jobs for them, and the command that adds one. A machine
  * here runs its owner's jobs only (Bot refuses anyone else's), connects out, and keeps its local limits and kill switch.
  */
-function renderMachinesPage({ machines = [], pairing = null }) {
+function renderMachinesPage({ machines = [], pairing = null, phoneReady = false }) {
     const classesOf = (m) => {
         const w = (m.capabilities && typeof m.capabilities === 'object' ? m.capabilities : {}).worker || {};
         return Array.isArray(w.runtime_classes) ? w.runtime_classes : [];
@@ -931,6 +968,7 @@ ${choice('Use the models you run on it', ' --ai', 'If this computer runs Ollama,
 <p class="muted"><a href="https://openvibe.network/machines">All your machines are on openvibe.network/machines</a></p>
 ${list}
 ${add}
+${phoneReady ? '<p class="muted">In your pocket: <a href="/link/phone">Link on your phone</a> adds the Android app, which shows your agents\' approvals and takes files from any share sheet.</p>' : ''}
 </main>`;
     return page('Your machines', body, { scripts: pairing ? ['/panel/panel.js'] : [], description: 'Your own machines that run your jobs on OpenVibe.', canonical: '/machines' });
 }
@@ -1170,4 +1208,4 @@ function renderFirstRunPage({ rows = [] }) {
     return page('First run', body, { description: 'The guided first run of OpenVibe Node, measured step by step.', canonical: '/admin/first-run' });
 }
 
-module.exports = { page, renderPanel, renderPhonePage, renderMachinesPage, renderMachineDesksPage, renderMachineScreenPage, renderSharePage, renderShareGone, panelScripts, isSim, TRY_DESCRIPTION, renderEmbedRefused, renderDrivePage, renderWidget, renderRobotsPage, renderPairingPage, renderLinkPage, renderSignInPage, renderClaimPage, renderClaimApproved, renderFirstRunPage, camerasOf, esc };
+module.exports = { page, renderPanel, renderPhonePage, renderMachinesPage, renderMachineDesksPage, renderMachineScreenPage, renderSharePage, renderShareGone, panelScripts, isSim, TRY_DESCRIPTION, renderEmbedRefused, renderDrivePage, renderWidget, renderRobotsPage, renderPairingPage, renderPhoneLinkPage, renderLinkPage, renderSignInPage, renderClaimPage, renderClaimApproved, renderFirstRunPage, camerasOf, esc };
