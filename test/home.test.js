@@ -99,7 +99,7 @@ const { boot, check, done } = require('./helpers/app');
 
     await check('the rest of the site keeps its own CSP', async () => {
         const r = await get('/pair/rob_nothing', alex);
-        assert.strictEqual(r.headers.get('content-security-policy'), "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; connect-src 'self' https://cloudflareinsights.com; frame-ancestors 'self'; object-src 'none'; base-uri 'self'");
+        assert.strictEqual(r.headers.get('content-security-policy'), "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; connect-src 'self' https://openvibe.chat https://cloudflareinsights.com; frame-ancestors 'self'; object-src 'none'; base-uri 'self'");
     });
 
     await check('a browser that asks for a missing page gets the site 404 page in the Frame', async () => {
