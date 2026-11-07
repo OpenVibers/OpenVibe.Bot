@@ -55,6 +55,7 @@ const resourceIndex = require('./resource-index');
 const resourceControl = require('./resource-control');
 const { aiOf } = require('../machine-ai');
 const deskLeases = require('./desk-leases');
+const agentSteps = require('../agent-steps');
 
 const CAP = {
     read: 'bot.robot.read',
@@ -481,6 +482,12 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
     r.post('/robots/:id/commands', commandControl, wrap(async (req, res) => {
         requireControlCap(req);
         const subject = actedFor(req);
+        // S7: the agent stream's own chat never drives a robot. Chat's bound-channel commands keep their existing
+        // path (a viewer's role); an S5/S6 call that names the agent-stream surface is refused before the gate.
+        const surface = String((req.body && req.body.surface) || req.get('x-ov-surface') || '');
+        if (surface === 'agent-stream' && /(^|:)chat$/.test(String(req.principal.sub || ''))) {
+            fail(403, 'bot.chat_cannot_drive', 'Only the owner\'s agent drives a robot from an agent stream; chat cannot');
+        }
         // The owner's agent (OpenVibe.Actor) drives only a robot its owner opened to it, and only as that owner.
         if (req.principal.kind === 'service' && AGENT_SERVICES.has(req.principal.sub)) {
             const robot = await domain.robots.get(req.params.id);
@@ -492,6 +499,15 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         const result = await hub.operatorCommand(req.params.id, principal, subject, {
             id: req.body?.id, kind: req.body?.kind, value: req.body?.value, ms: req.body?.ms,
         });
+        // S7: after Bot's own gate answered, the command is also a step on the agent's stream. A recording failure
+        // never changes the command's answer.
+        try {
+            const robot = await domain.robots.get(req.params.id);
+            await agentSteps.record(domain.db, {
+                robot, subject, streamId: (req.body && req.body.agent_stream_id) || req.get('x-ov-agent-stream') || null,
+                body: req.body || {}, result,
+            });
+        } catch (err) { console.warn('[Bot] agent step:', err && err.message); }
         if (result.result === 'refused') fail(commandRefusalStatus(result.code), result.code, result.reason || null);
         res.json({ robot_id: req.params.id, ...result });
     }));
@@ -816,6 +832,9 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         res.json({
             robot_id: robot.id, name: robot.name, profile_id: robot.profile_id, online: st.online, estop: st.estop, battery: st.battery, sensors,
             steps: stepHelp(profile), max_steps: AGENT_MAX_STEPS, max_seconds: AGENT_MAX_S,
+            // S7: the commands an agent drove through Bot, as steps ("Drive forward 1 m": passed). A command that
+            // named its stream is filterable with ?agent_stream=ags_…; the list never carries a second way to command.
+            commands: await agentSteps.recent(domain.db, robot.id, { streamId: req.query.agent_stream || null, limit: req.query.limit }),
         });
     }));
     r.post('/robots/:id/steps', commandControl, wrap(async (req, res) => {

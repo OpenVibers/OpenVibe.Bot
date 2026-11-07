@@ -165,6 +165,31 @@ function createApp(opts = {}) {
     };
     app.post('/internal/events', accountData.consumer({ secrets: config.events.secrets, send: accountSend, onEvent, log }));
 
+    // ── OpenVibe.Live's kill switch reaches the robot (Agent Streams S7) ──
+    // When an agent stream ends, Live e-stops the robot its channel is bound to. The call is loopback-only (nginx
+    // answers 404 for /internal/) and carries the deployment's shared secret; it can only latch the e-stop, never
+    // clear it. No person token, no chat token, and no route in the public API reaches this.
+    app.post('/internal/robots/:id/estop', express.json({ limit: '4kb' }), async (req, res) => {
+        const secret = String(process.env.BOT_KILL_SECRET || '');
+        const given = String(req.get('x-ov-bot-kill') || '');
+        const a = Buffer.from(given);
+        const b = Buffer.from(secret);
+        if (!secret || a.length !== b.length || !require('crypto').timingSafeEqual(a, b)) {
+            return res.status(401).json({ error: 'kill.auth', detail: 'the kill switch secret is not valid' });
+        }
+        const id = String(req.params.id || '');
+        if (!/^rob_[A-Za-z0-9_-]{4,60}$/.test(id)) return res.status(404).json({ error: 'bot.robot_not_found' });
+        try {
+            const robot = await domain.robots.get(id);
+            if (!robot) return res.status(404).json({ error: 'bot.robot_not_found' });
+            if (!robot.estop_latched) await domain.estop.set(id, { latched: true, by: 'openvibe.live', principalKind: 'service' });
+            return res.json({ ok: true, robot_id: id, estop: { latched: true } });
+        } catch (err) {
+            log.error('[Bot] the kill switch failed:', err && err.message);
+            return res.status(500).json({ error: 'bot.kill_failed' });
+        }
+    });
+
     // The OpenVibe Frame's scripts and the showcase stylesheet the front page links (content-hashed URLs).
     app.use('/shared', require('openvibe-shared/serve').handler());
 
