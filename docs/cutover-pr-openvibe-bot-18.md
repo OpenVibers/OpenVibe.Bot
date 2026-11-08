@@ -6,8 +6,8 @@ runbook for PR #18: what runs in which order, what is backed up, how the result 
 
 ## Scope — what this PR actually changes
 
-PR #18 changes the default target of the `GET /install` redirect so it points at OpenVibe.Node's **released**
-installer asset instead of a path on OpenVibe.Node's `main` branch:
+PR #18 changes the default target of the `GET /install` redirect so it points at OpenVibe Link's **released**
+installer asset instead of a path on OpenVibe Link's `main` branch:
 
 - `server/config.js` — the `BOT_INSTALLER_SOURCE_URL` fallback becomes
   `https://github.com/OpenVibers/OpenVibe.Node/releases/latest/download/install.sh` (was

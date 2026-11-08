@@ -2,7 +2,7 @@
   "id": "adeept.adr036",
   "name": "Adeept ADR036 4WD Smart Car Kit for Raspberry Pi",
   "vendor": "Adeept",
-  "description": "The first curated OpenVibe robot: the Adeept 4WD Smart Car with the Robot HAT — four DC motors and pan/tilt servos on a PCA9685, an ADS7830 battery readout, WS2812 lights, a buzzer, ultrasound and line tracking. The OpenVibe Node agent drives the HAT directly, so the kit's stock control server is never exposed.",
+  "description": "The first curated OpenVibe robot: the Adeept 4WD Smart Car with the Robot HAT — four DC motors and pan/tilt servos on a PCA9685, an ADS7830 battery readout, WS2812 lights, a buzzer, ultrasound and line tracking. The OpenVibe Link agent drives the HAT directly, so the kit's stock control server is never exposed.",
   "profile_id": "adeept.adr036",
   "build_guide_url": "https://www.adeept.com/learn/detail-97.html",
   "parts": [

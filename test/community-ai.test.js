@@ -1,5 +1,5 @@
 'use strict';
-// "Offer to the network" (the design's community machines; plan E4): a Node ai plugin advertises its owner's models,
+// "Offer to the network" (the design's community machines; plan E4): a Link ai plugin advertises its owner's models,
 // hours, concurrency, price and audience in status.capabilities.ai.offer; Bot reports it as a user-owned provider offer
 // whose detail.kind is `ai`, and AI may send a community run to that machine even with "Let my AI use this computer's
 // models" off, because the offer is the opt-in. Without the offer the same run is refused. This is Bot's half: the

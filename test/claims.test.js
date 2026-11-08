@@ -19,7 +19,7 @@ const { boot, check, done } = require('./helpers/app');
     const start = (body) => t.call('POST', '/api/v1/claims', { token: null, body });
     const poll = (c, secret = c.secret) => t.call('GET', `/api/v1/claims/${c.id}`, { token: null, headers: { 'X-OV-Claim-Secret': secret } });
     const streamOf = (robotId) => [...t.openre.streams.values()].find((s) => s.refs.some((r) => r.type === 'robot' && r.id === robotId));
-    // What OpenVibe.Node's installer sends after looking at an Adeept ADR036 on a Pi 4.
+    // What OpenVibe Link's installer sends after looking at an Adeept ADR036 on a Pi 4.
     const pi = {
         hostname: 'raspi',
         hardware: { model: 'Raspberry Pi 4 Model B Rev 1.4', os: 'Debian GNU/Linux 12 (bookworm)', arch: 'aarch64', kit: 'adeept.adr036',

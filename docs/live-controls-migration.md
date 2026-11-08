@@ -2,7 +2,7 @@
 
 Status: **done** (updated 2026-10-27). Every step below is built and in production:
 - steps 1–3 and 5: Contracts 0.109.0 and Bot, 2026-10-07;
-- step 4: OpenVibe.Node's `relay` plugin (`plugins/relay`);
+- step 4: OpenVibe Link's `relay` plugin (`plugins/relay`);
 - step 6: Live deleted its controls (`0011_drop_live_controls`). Its old hardware socket `/ws/control` answers
   **410 Gone**, naming OpenVibe.Bot, so a client that still connects there learns where to go
   (Live `server/net/ws-paths.js`).
@@ -17,7 +17,7 @@ one priority"):
 - **Chat commands reach a button robot.** `!forward`, `!left` … press the robot's buttons of the same name when it
   has no drive, and any other `!word` that is not a channel sound presses the button of that name (Live#383,
   Chat#194).
-- **The Node's lifecycle:** `openvibe-node quit` ends a running Node cleanly with nothing latched (Node 0.16.0), for
+- **The Link's lifecycle:** `openvibe-node quit` ends a running Link cleanly with nothing latched (Link 0.16.0), for
   launchers that start and stop it with the rest of a stream setup. `stop` stays the kill switch.
 
 ## What Live has today
@@ -48,7 +48,7 @@ lines) let viewers drive a streamer's hardware from the channel page:
 | Controls on/off, login required | The robot's access policy (`private` / `invite` / `queue`); controls are never anonymous |
 | Whitelist | Operators added by @username (built) |
 | Per-viewer rate limit, cooldowns | The command gate's per-robot limits and cooldowns (built), plus the per-button `cooldown_ms` |
-| The hardware client and its stream-key socket | The OpenVibe **Node** paired to the robot, running a **relay** plugin (below); the stream key stops being a robot credential |
+| The hardware client and its stream-key socket | The OpenVibe **Link** paired to the robot, running a **relay** plugin (below); the stream key stops being a robot credential |
 | The controls panel under the video | Bot's panel embedded on the Live channel page (`/panel/:id/embed`, `LIVE_BOT_EMBED`), already built |
 
 ## What has to be built
@@ -121,7 +121,7 @@ if anything, needs redoing by hand.
    `point` (`{x, y}`) commands to the script in the shape Live's hardware clients already speak. The Live
    command behind each Bot button name is in the robot's audit (`live_conversions.detail` too), so the mapping
    is one line.
-3. Point the Pi script at the paired Node instead of Live's stream-key socket. The stream key is no longer a
+3. Point the Pi script at the paired Link instead of Live's stream-key socket. The stream key is no longer a
    robot credential.
 4. Robot page → **On your stream** → **Put the buttons under my OpenVibe.Live stream**, and choose who may drive.
 

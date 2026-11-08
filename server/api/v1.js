@@ -82,12 +82,12 @@ const MACHINE_SERVICES = {
     'svc:watch': { kinds: new Set(['probe']), flag: 'watch_probe', off: 'the owner has not let their watches check things from this computer' },
     // AI (contracts 0.219.0): OpenVibe.AI runs a model on the owner's own model server for the owner, or — only for a
     // machine whose ai plugin offers its models to the network — a community request that opted in (below).
-    // A command that says `community: true` runs on the machine's offer to the network instead, so the Node ai plugin's
+    // A command that says `community: true` runs on the machine's offer to the network instead, so the Link ai plugin's
     // own opt-in (capabilities.ai.offer.enabled) stands in for the "Let my AI use this computer's models" switch.
     'svc:ai': { kinds: new Set(['ai']), flag: 'ai_models', off: 'the owner has not let their AI use this computer\'s models', cap: 'bot.machine.ai', community: true },
 };
 /**
- * A machine offering its models to the network (OpenVibe.Node ai plugin 0.3.0): the owner turned on "Offer to the
+ * A machine offering its models to the network (OpenVibe Link ai plugin 0.3.0): the owner turned on "Offer to the
  * network" and the offer names its models. Hours, concurrency and price are the plugin's to enforce; Bot only decides
  * whether AI may send a community run here at all.
  */
@@ -512,7 +512,7 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         res.json({ robot_id: req.params.id, ...result });
     }));
 
-    // ── A person's own computer (the Node's computer plugin, plan T14/T17) ─────────────────────────────
+    // ── A person's own computer (the Link's computer plugin, plan T14/T17) ─────────────────────────────
     // The machine's owner, or their agent (an agent service with bot.computer.control, acting for that owner) where the
     // owner turned "Let my agent use this computer" on. What may happen there is the owner's level on the machine.
     async function computerMachine(req, { agentNeedsOptIn = true, kind = null } = {}) {
@@ -545,17 +545,17 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
             id: device.id, name: device.name || null, online: !!st.online, agent_computer: !!device.agent_computer, ai_models: !!device.ai_models, watch_probe: !!device.watch_probe,
             shared_desks: !!device.shared_desks,
             // What the machine does for the network (plan L34): the roles the owner gave it. The catalogue is
-            // server/machine-roles.js; the Node reads them on its next check-in.
+            // server/machine-roles.js; the Link reads them on its next check-in.
             roles: json(device.roles, []),
-            // The machine's kind, its operating system and the OpenVibe.Node's version, as the Node last said.
+            // The machine's kind, its operating system and the OpenVibe Link's version, as the Link last said.
             kind: device.kind || null,
             os: (st.status && typeof st.status.os === 'string' && st.status.os) || null,
             node_version: device.agent_version || null,
             last_seen_at: device.last_seen ? new Date(device.last_seen).toISOString() : null,
-            // The machine's id on Network (`nod_…`) and the OpenVibe.Node's name for it, so a caller that knows the
+            // The machine's id on Network (`nod_…`) and the OpenVibe Link's name for it, so a caller that knows the
             // machine from Network (Codes' fleet, a Run pin) finds this row (Codes C9c).
             node_id: device.node_principal || null,
-            // What its coding agents have left, as its Node last reported it, and when Bot stored that reading
+            // What its coding agents have left, as its Link last reported it, and when Bot stored that reading
             // (Codes C9c). null: the machine has reported none (no OpenVibe.Codes runner, or no reading yet).
             fleet: json(device.fleet, null),
             fleet_at: device.fleet_at ? new Date(device.fleet_at).toISOString() : null,
@@ -564,9 +564,9 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
                 level: typeof sensors.computer_level === 'string' ? sensors.computer_level : ((pick('files') || pick('terminal') || pick('screen') || {}).level || null),
                 terminal: pick('terminal'), files: pick('files'), screen: pick('screen'), probe: pick('probe'), input: pick('input'), browser: pick('browser'), desk: pick('desk'), ai: pick('ai'),
                 waiting: Number.isInteger(sensors.computer_waiting) ? sensors.computer_waiting : null,
-                // Desks running now (the Node's telemetry): where an agent's next desk has room (Desks plan D6, placement).
+                // Desks running now (the Link's telemetry): where an agent's next desk has room (Desks plan D6, placement).
                 desks_running: Number.isInteger(sensors.computer_desks) ? sensors.computer_desks : null,
-                // How fast its last model answered there (Node v0.29.0's ai plugin): for choosing where a model runs.
+                // How fast its last model answered there (Link v0.29.0's ai plugin): for choosing where a model runs.
                 ai_speed: typeof sensors.ai_tokens_per_s === 'number' && sensors.ai_tokens_per_s > 0 && typeof sensors.ai_model === 'string'
                     ? { model: sensors.ai_model.slice(0, 120), tokens_per_s: sensors.ai_tokens_per_s } : null,
             } : null,
@@ -859,7 +859,7 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         res.json({ audit: rows.map(auditPresent), next_before: rows.length ? rows[rows.length - 1].id : null });
     }));
 
-    // ── Jobs (Run → Bot: hand a platform.job@1 to a paired Node, server/jobs/index.js) ────────────
+    // ── Jobs (Run → Bot: hand a platform.job@1 to a paired Link, server/jobs/index.js) ────────────
     // Internal and service-to-service only: OpenVibe.Run's Network service token, never a person's.
     r.post('/jobs', jobs, wrap(async (req, res) => {
         requireJobDispatch(req);

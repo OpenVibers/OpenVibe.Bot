@@ -162,7 +162,7 @@ const { boot, check, done } = require('./helpers/app');
         m.c.close();
     });
 
-    await check('named desks (contracts 0.215.0, Node v0.19.0): one per agent task, each its own screen; an older Node runs one', async () => {
+    await check('named desks (contracts 0.215.0, Link v0.19.0): one per agent task, each its own screen; an older Link runs one', async () => {
         const multi = await machine(alex, { ...COMPUTER, desk: { level: 'trusted', window_manager: 'openbox', input: true, screen: true, named: true, max_desks: 4 } });
         const single = await machine(alex, { ...COMPUTER, desk: { level: 'trusted', window_manager: 'openbox', input: true, screen: true } });
         const start = await cmd(multi.deviceId, { kind: 'desk', value: { action: 'start', desk: 'desk-task-a' } }, { user: alex });
@@ -177,11 +177,11 @@ const { boot, check, done } = require('./helpers/app');
         assert.deepStrictEqual(rows.map((r) => [r.kind, r.value]), [
             ['desk', { action: 'start', desk: 'desk-task-a' }], ['browser', { action: 'open', host: 'example.org', desk: 'desk-task-a' }], ['desk', { action: 'list' }],
         ], 'the audit names the desk');
-        // A machine on an older Node runs its private desk only: a named one is refused there, never sent.
+        // A machine on an older Link runs its private desk only: a named one is refused there, never sent.
         const sent = seen.length;
         const old = await cmd(single.deviceId, { kind: 'desk', value: { action: 'start', desk: 'desk-task-a' } }, { user: alex });
         assert.deepStrictEqual([old.status, old.json.code], [409, 'bot.computer_off']);
-        assert.match(old.json.detail || old.json.reason || '', /Node v0\.19\.0/);
+        assert.match(old.json.detail || old.json.reason || '', /Link v0\.19\.0/);
         assert.strictEqual((await cmd(single.deviceId, { kind: 'screen', value: { desk: 'desk-task-a' } }, { user: alex })).json.code, 'bot.computer_off');
         assert.strictEqual(seen.length, sent, 'nothing reached the older machine');
         // Names follow the contract.
@@ -200,7 +200,7 @@ const { boot, check, done } = require('./helpers/app');
         single.c.close();
     });
 
-    await check('browser desks (contracts 0.216.0, Node v0.23.0): a desk starts as a kind the machine runs; the audit names it; an older Node is never sent one', async () => {
+    await check('browser desks (contracts 0.216.0, Link v0.23.0): a desk starts as a kind the machine runs; the audit names it; an older Link is never sent one', async () => {
         const desk = { level: 'trusted', window_manager: 'openbox', input: true, screen: true, named: true, max_desks: 4 };
         const both = await machine(alex, { ...COMPUTER, desk: { ...desk, kinds: ['desktop', 'browser'] } });
         const mac = await machine(alex, { ...COMPUTER, desk: { ...desk, window_manager: null, kinds: ['browser'] } });
@@ -215,16 +215,16 @@ const { boot, check, done } = require('./helpers/app');
         assert.deepStrictEqual([whole.status, whole.json.code], [409, 'bot.computer_off']);
         assert.match(whole.json.detail || whole.json.reason || '', /browser desks only/);
         const older = await cmd(old.deviceId, { kind: 'desk', value: { action: 'start', desk: 'desk-task-a', kind: 'browser' } }, { user: alex });
-        assert.deepStrictEqual([older.status, older.json.code], [409, 'bot.computer_off'], 'an older Node would start a whole desk instead');
-        assert.match(older.json.detail || older.json.reason || '', /Node v0\.23\.0/);
+        assert.deepStrictEqual([older.status, older.json.code], [409, 'bot.computer_off'], 'an older Link would start a whole desk instead');
+        assert.match(older.json.detail || older.json.reason || '', /Link v0\.23\.0/);
         const bad = await cmd(both.deviceId, { kind: 'desk', value: { action: 'start', desk: 'desk-task-c', kind: 'vm' } }, { user: alex });
         assert.strictEqual(bad.status, 422);
         assert.strictEqual(seen.length, before, 'nothing refused reached a machine');
-        // An older Node still starts its whole desks as before (no kind).
+        // An older Link still starts its whole desks as before (no kind).
         assert.strictEqual((await cmd(old.deviceId, { kind: 'desk', value: { action: 'start', desk: 'desk-task-a' } }, { user: alex })).json.result, 'ack');
         const audit = await t.db.many('SELECT value FROM command_audit WHERE robot_id = $1 AND kind = $2 AND result = $3 ORDER BY id', [both.deviceId, 'desk', 'ack']);
         assert.deepStrictEqual(audit.map((r) => r.value.kind), ['browser', 'desktop'], 'the audit names the kind');
-        // A kept profile (contracts 0.217.0, Node v0.24.0) reaches the machine and the audit names it.
+        // A kept profile (contracts 0.217.0, Link v0.24.0) reaches the machine and the audit names it.
         const kept = await cmd(both.deviceId, { kind: 'desk', value: { action: 'start', desk: 'desk-task-k', kind: 'browser', profile: 'agent' } }, { user: alex });
         assert.strictEqual(kept.json.result, 'ack', kept.text);
         assert.strictEqual(seen.at(-1).value.profile, 'agent');
@@ -236,7 +236,7 @@ const { boot, check, done } = require('./helpers/app');
         old.c.close();
     });
 
-    await check('programs on a desk (contracts 0.218.0, Node v0.26.0): sent to a Node that runs them, audited with the desk; an older Node never gets one', async () => {
+    await check('programs on a desk (contracts 0.218.0, Link v0.26.0): sent to a Link that runs them, audited with the desk; an older Link never gets one', async () => {
         const desk = { level: 'trusted', window_manager: 'openbox', input: true, screen: true, named: true, max_desks: 4, kinds: ['desktop', 'browser'] };
         const now = await machine(alex, { ...COMPUTER, terminal: { ...COMPUTER.terminal, desks: true }, desk });
         const old = await machine(alex, { ...COMPUTER, desk });
@@ -248,14 +248,14 @@ const { boot, check, done } = require('./helpers/app');
         const before = seen.length;
         const refused = await cmd(old.deviceId, { kind: 'exec', value: { argv: ['xterm'], desk: 'desk-task-a' } }, { user: alex });
         assert.deepStrictEqual([refused.status, refused.json.code], [409, 'bot.computer_off']);
-        assert.match(refused.json.detail || refused.json.reason || '', /Node v0\.26\.0/);
+        assert.match(refused.json.detail || refused.json.reason || '', /Link v0\.26\.0/);
         assert.strictEqual(seen.length, before, 'never sent');
         assert.strictEqual((await cmd(old.deviceId, { kind: 'exec', value: { argv: ['echo', 'hi'] } }, { user: alex })).json.result, 'ack', 'its own session as before');
         now.c.close();
         old.c.close();
     });
 
-    await check('a desk host (Node v0.20.0 --desk-host): no screen of its own, yet its desks are seen and driven', async () => {
+    await check('a desk host (Link v0.20.0 --desk-host): no screen of its own, yet its desks are seen and driven', async () => {
         // Nobody is signed in to a desk host: it offers no screen or input of its own, only its desks' (desk.screen, desk.input).
         const { screen: _s, input: _i, ...headless } = COMPUTER;
         const host = await machine(alex, { ...headless, desk: { level: 'trusted', window_manager: 'openbox', input: true, screen: true, named: true, max_desks: 4 } });
@@ -362,7 +362,7 @@ const { boot, check, done } = require('./helpers/app');
         const hostCmd = /<code[^>]*>(curl -fsSL [^<]+ --desk-host)<\/code>/.exec(page);
         assert.ok(hostCmd, 'the desk host install command');
         assert.ok(!hostCmd[1].includes('--worker'), 'a desk host never runs the job worker too');
-        assert.ok(page.includes('Use the models you run on it'), 'AI on your own machines (Node v0.28.0 --ai)');
+        assert.ok(page.includes('Use the models you run on it'), 'AI on your own machines (Link v0.28.0 --ai)');
         const aiCmd = /<code[^>]*>(curl -fsSL [^<]+ --ai)<\/code>/.exec(page);
         assert.ok(aiCmd && !aiCmd[1].includes('--worker'), 'the models install command');
         host.c.close();
@@ -446,7 +446,7 @@ const { boot, check, done } = require('./helpers/app');
         assert.ok(!/secret (query|result)|web_search/.test(JSON.stringify(toolRow)), 'no tool names, arguments or results in the audit');
         const orphan = await cmd(gpu.deviceId, { kind: 'ai', value: { model: 'llama3.1:8b', messages: [{ role: 'tool', content: 'x' }] } }, asAi(alex.subject));
         assert.strictEqual(orphan.status, 422, 'a tool message needs the call it answers');
-        // A real Node reports the ai plugin under its own name, and a machine may run it with no computer plugin.
+        // A real Link reports the ai plugin under its own name, and a machine may run it with no computer plugin.
         const own = await machine(alex, null);
         own.c.send(frame('status', { capabilities: { ai: { ai: { models: ['qwen2.5-1.5b-instruct'], ready: true, max_tokens: 256 } } }, drivers: [], faults: [] }));
         await t.wait(300);
@@ -456,7 +456,7 @@ const { boot, check, done } = require('./helpers/app');
         assert.strictEqual((await cmd(own.deviceId, { kind: 'ai', value: { model: 'qwen2.5-1.5b-instruct', messages: [{ role: 'user', content: 'hi' }] } }, { user: alex })).json.result, 'ack');
         const noExec = await cmd(own.deviceId, { kind: 'exec', value: { argv: ['id'] } }, { user: alex });
         assert.strictEqual(noExec.json.code, 'bot.computer_off', 'no terminal without the computer plugin');
-        // Node v0.29.0's ai plugin says how fast its last model answered there (after the 2 Hz telemetry window).
+        // Link v0.29.0's ai plugin says how fast its last model answered there (after the 2 Hz telemetry window).
         await t.wait(600);
         own.c.send(frame('telemetry', { sensors: { ai_busy: 0, ai_model: 'qwen2.5-1.5b-instruct', ai_tokens_per_s: 14.6 } }));
         await t.wait(600);

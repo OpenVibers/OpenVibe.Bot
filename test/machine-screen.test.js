@@ -18,7 +18,7 @@ const { boot, check, done } = require('./helpers/app');
     const SCREEN = { screen: { level: 'observe', tool: 'grim', stream: true }, files: { level: 'observe', roots: ['/home/alex'] } };
     const seen = [];
 
-    /** A machine of `owner` whose fake Node answers screen_stream like Node v0.12.0. */
+    /** A machine of `owner` whose fake Node answers screen_stream like Link v0.12.0. */
     async function machine(owner, computer = SCREEN) {
         const principal = t.network.addNode({ owner: owner.subject, ref: `worker:${owner.subject}`, name: 'desk-pc' });
         const c = await t.ws('/device', { headers: { Authorization: `Bearer ${t.network.signNode(principal)}` } });
@@ -159,7 +159,7 @@ const { boot, check, done } = require('./helpers/app');
         assert.deepStrictEqual(seen.at(-1).value, { action: 'stop' });
     });
 
-    await check('a desk on the live screen: private, or a named desk on a Node that runs several (contracts 0.215.0); never a bad name', async () => {
+    await check('a desk on the live screen: private, or a named desk on a Link that runs several (contracts 0.215.0); never a bad name', async () => {
         const desk = { level: 'trusted', window_manager: 'openbox', input: true, screen: true };
         const multi = await machine(alex, { ...SCREEN, desk: { ...desk, named: true, max_desks: 4 } });
         const r = await screen('POST', multi.deviceId, { user: alex, body: { seconds: 60, desk: 'desk-task-a' } });
@@ -174,7 +174,7 @@ const { boot, check, done } = require('./helpers/app');
         single.c.close();
     });
 
-    await check('a desk host (Node v0.20.0 --desk-host) shows its desks live though it has no screen of its own', async () => {
+    await check('a desk host (Link v0.20.0 --desk-host) shows its desks live though it has no screen of its own', async () => {
         const host = await machine(alex, { files: SCREEN.files, desk: { level: 'trusted', window_manager: 'openbox', input: true, screen: true, named: true, max_desks: 4 } });
         // Its page offers its desks, never a screen it does not have.
         const idle = await (await fetch(`${t.base}/machines/${host.deviceId}/screen?desk=desk-task-a`, { headers: cookie(alex) })).text();

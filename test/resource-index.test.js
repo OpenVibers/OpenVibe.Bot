@@ -142,7 +142,7 @@ const { boot, check, done } = require('./helpers/app');
             await new Promise((r) => setTimeout(r, 100));
             state = (await get('?kind=bot.machine')).json.resources[0].state;
         }
-        assert.strictEqual(state, 'offline', 'offline once its Node goes');
+        assert.strictEqual(state, 'offline', 'offline once its Link goes');
         await t.db.query('UPDATE devices SET revoked_at = now() WHERE id = $1', [deviceId]);
         assert.deepStrictEqual((await get('?kind=bot.machine')).json.resources, [], 'a removed machine leaves the index');
     });

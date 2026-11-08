@@ -4,7 +4,7 @@
   "name": "ROS 2 robot",
   "vendor": "ROS 2",
   "kind": "onboard",
-  "description": "Any ROS 2 robot that drives on cmd_vel (geometry_msgs/Twist): TurtleBot 3 or 4, a Jackal, a home-built base. The OpenVibe Node's ros2 driver reaches it through rosbridge (or as a ROS 2 node with rclpy): drive, a camera from a JPEG CompressedImage topic, the distance ahead from a laser scan or range sensor, and the battery. Mecanum and omni bases are ros2.holonomic.",
+  "description": "Any ROS 2 robot that drives on cmd_vel (geometry_msgs/Twist): TurtleBot 3 or 4, a Jackal, a home-built base. The OpenVibe Link's ros2 driver reaches it through rosbridge (or as a ROS 2 node with rclpy): drive, a camera from a JPEG CompressedImage topic, the distance ahead from a laser scan or range sensor, and the battery. Mecanum and omni bases are ros2.holonomic.",
   "capabilities": ["drive.differential", "camera", "sensor.ultrasonic", "battery"],
   "mapping": { "driver": "plugin", "plugin": "ros2" },
   "commands": {

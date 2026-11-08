@@ -2,7 +2,7 @@
 // The machines hub (plan L34, step M2): Bot stays the registry of the machines. A person sees their own
 // machines and nobody else's; the network's hub (a service holding bot.machine.manage) acts for a person it
 // names in X-OV-Subject; a role outside the catalogue is refused; a pairing code is one code for the person;
-// the roles reach the Node in its config frame; and a machine's online state is reported to Network once per
+// the roles reach the Link in its config frame; and a machine's online state is reported to Network once per
 // change.
 const assert = require('assert');
 const { boot, check, done } = require('./helpers/app');
@@ -120,7 +120,7 @@ const { boot, check, done } = require('./helpers/app');
         assert.strictEqual(own.status, 201, own.text);
     });
 
-    await check('the roles reach the Node in its config frame', async () => {
+    await check('the roles reach the Link in its config frame', async () => {
         const c = await t.ws('/device', { headers: { Authorization: `Bearer ${t.network.signNode(alexMachine.principal)}` } });
         const config = await c.waitFor((m) => m.type === 'config');
         assert.ok(config, 'the machine gets its config');

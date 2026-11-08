@@ -254,7 +254,7 @@
                 return;
             } else if (!playing) {
                 misses += 1;
-                say(s && s.online === false ? 'The machine is offline.' : misses > 20 ? 'Still waiting for the machine. Is the Node running in your desktop session?' : 'Waiting for the machine…');
+                say(s && s.online === false ? 'The machine is offline.' : misses > 20 ? 'Still waiting for the machine. Is the Link running in your desktop session?' : 'Waiting for the machine…');
             }
             setTimeout(poll, playing ? 5000 : 1500);
         };
@@ -890,7 +890,7 @@
         el.textContent = text ? `Device fault: ${text}` : '';
         el.hidden = !text;
     }
-    // A readout's sensor keys by the widget's capability, as the Node's drivers report them (Adeept: distance_cm and
+    // A readout's sensor keys by the widget's capability, as the Link's drivers report them (Adeept: distance_cm and
     // line {left, middle, right}; Cozmo: cliff and picked_up), else the capability's own name. One key found shows its
     // value; several show each by name.
     const SENSOR_KEYS = { ultrasonic: ['distance_cm', 'ultrasonic'], line: ['line'], cliff: ['cliff', 'picked_up'], pickup: ['picked_up', 'pickup'] };

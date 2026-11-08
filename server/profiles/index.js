@@ -48,10 +48,10 @@ const CAPABILITIES = new Set([
 /** Panel widget types (open in the profile, closed in code: a new widget is a new entry here). */
 const WIDGETS = new Set(['drive', 'pan-tilt', 'servo', 'lights', 'horn', 'speaker', 'display', 'telemetry', 'battery', 'latency', 'ptz', 'camera', 'head', 'lift', 'buttons', 'video_click']);
 
-/** Device drivers a mapping may name. `relay` is a Node plugin with no hardware map of its own. */
-// `looi`: the community's Generic LOOI driver, a Bluetooth bridge plugin (OpenVibe.Node docs/hardware-looi.md).
+/** Device drivers a mapping may name. `relay` is a Link plugin with no hardware map of its own. */
+// `looi`: the community's Generic LOOI driver, a Bluetooth bridge plugin (OpenVibe Link docs/hardware-looi.md).
 // `phone`: a phone that is the device itself, from its browser (public/phone-device.js), no Node and nothing installed.
-// `plugin`: a community OpenVibe Node plugin, named in mapping.plugin, that the robot's owner installs (Contracts 0.160.0;
+// `plugin`: a community OpenVibe Link plugin, named in mapping.plugin, that the robot's owner installs (Contracts 0.160.0;
 // community profiles are reviewed and signed before robots can use them, server/submissions.js).
 const DRIVERS = new Set(['pca9685', 'ads7830', 'cozmo', 'looi', 'onvif', 'sim', 'relay', 'phone', 'plugin']);
 const PLUGIN_NAME = /^[a-z][a-z0-9_-]{1,40}$/;
@@ -194,7 +194,7 @@ function validateProfile(p) {
         return w.command != null ? { ...w, command: validateWidgetCommand(p.id, w, commands) } : { ...w };
     });
     if (!p.mapping || typeof p.mapping !== 'object' || !DRIVERS.has(p.mapping.driver)) bad(`${p.id}: mapping.driver must be one of ${[...DRIVERS].join(', ')}`);
-    if (p.mapping.driver === 'plugin' && !PLUGIN_NAME.test(String(p.mapping.plugin || ''))) bad(`${p.id}: a plugin driver names its Node plugin in mapping.plugin (lower case letters, digits, - and _)`);
+    if (p.mapping.driver === 'plugin' && !PLUGIN_NAME.test(String(p.mapping.plugin || ''))) bad(`${p.id}: a plugin driver names its Link plugin in mapping.plugin (lower case letters, digits, - and _)`);
     const l = p.limits && typeof p.limits === 'object' ? p.limits : {};
     const limits = {
         max_speed: number(l.max_speed) != null ? number(l.max_speed) : 1,

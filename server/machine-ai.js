@@ -1,7 +1,7 @@
 'use strict';
 /**
- * A machine's own models (AI on your own machines, contracts 0.219.0 kind ai), from the capabilities its OpenVibe Node
- * declares. The Node reports each plugin's describe under the plugin's name, so the ai plugin (Node v0.27.0) arrives as
+ * A machine's own models (AI on your own machines, contracts 0.219.0 kind ai), from the capabilities its OpenVibe Link
+ * declares. The Link reports each plugin's describe under the plugin's name, so the ai plugin (Link v0.27.0) arrives as
  * capabilities.ai = { ai: { models, ready, max_tokens } }; a computer plugin that offered ai itself would put it in
  * capabilities.computer.ai. → { models, ready, max_tokens } or null
  */

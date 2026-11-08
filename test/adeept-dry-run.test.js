@@ -1,5 +1,5 @@
 'use strict';
-// The T15 lane H proving test: one end-to-end Adeept dry-run through Bot, using the frames OpenVibe.Node
+// The T15 lane H proving test: one end-to-end Adeept dry-run through Bot, using the frames OpenVibe Link
 // actually sends (internal/protocol, internal/link, testdata/bot). An owner pairs a fake ADR036, drives
 // and actuates it over the /control socket, reads battery and latency back, latches and clears the e-stop,
 // and never sees the device's secrets in a read. BOT_WHIP_BASE is set, so pairing must answer a whip_url.
@@ -30,7 +30,7 @@ const WHIP_BASE = 'https://whip.test/ingest';
     await check('step 1: an owner robot pairs over HTTP with --robot/--name and gets a whip_url', async () => {
         const created = await t.robot(alex, { profile_id: 'adeept.adr036' });
         robot = created.robot;
-        // OpenVibe.Node's cmdPair sends Robot, Code, AgentVersion, DeviceKind, Drivers, Capabilities and Name.
+        // OpenVibe Link's cmdPair sends Robot, Code, AgentVersion, DeviceKind, Drivers, Capabilities and Name.
         paired = await t.call('POST', '/api/v1/pair', { token: null, body: {
             robot: robot.id, code: created.pairing.code, agent_version: '0.1.0', device_kind: 'onboard',
             drivers: ['pca9685', 'ads7830'], capabilities: { pca9685: { pan: true, tilt: true } }, name: 'adeept-dry-run',
@@ -60,7 +60,7 @@ const WHIP_BASE = 'https://whip.test/ingest';
         assert.strictEqual(config.estop_latched, false);
         assert.deepStrictEqual(config.allowed_commands, ['drive', 'actuator', 'halt'], 'the adeept profile takes drive/actuator/halt');
         assert.ok(Number.isInteger(config.heartbeat_ms) && config.heartbeat_ms > 0, `a heartbeat interval: ${config.heartbeat_ms}`);
-        // Only now does the Node report: its link holds every frame until hello.
+        // Only now does the Link report: its link holds every frame until hello.
         dev.send({ type: 'status', firmware: 'openvibe-node-0.1.0', capabilities: {}, agent_version: '0.1.0',
             device_kind: 'onboard', os: 'linux', arch: 'arm64', drivers: [], faults: [], estop_latched: false, local_stop: false });
         dev.send({ type: 'estop_state', latched: false, robot_id: robot.id, local_stop: false });
@@ -102,7 +102,7 @@ const WHIP_BASE = 'https://whip.test/ingest';
     });
 
     // ── 4. a Node-shaped battery object becomes a numeric fraction on the robot state ────────────────
-    await check("step 4: a Node {volts, percent} battery shows a non-null numeric battery", async () => {
+    await check("step 4: a Link {volts, percent} battery shows a non-null numeric battery", async () => {
         dev.send({ type: 'telemetry', battery: { volts: 7.42, percent: 59 }, voltage: 7.42, sensors: { ultrasonic: 118, line: [0, 1, 1, 0] } });
         const frame = await op.waitFor((m) => m.type === 'robot_state' && m.state && m.state.telemetry && m.state.telemetry.battery
             && m.state.telemetry.battery.percent === 59);
@@ -118,7 +118,7 @@ const WHIP_BASE = 'https://whip.test/ingest';
         dev.send({ type: 'heartbeat', t: sentAt });
         const ack = await dev.waitFor((m) => m.type === 'heartbeat_ack' && m.t === sentAt);
         assert.strictEqual(ack.echo, sentAt, 'echo carries the device t');
-        assert.strictEqual(ack.t, sentAt, 't is the field OpenVibe.Node reads for its RTT');
+        assert.strictEqual(ack.t, sentAt, 't is the field OpenVibe Link reads for its RTT');
         assert.ok(!Number.isNaN(Date.parse(ack.server_time)), `a server_time: ${ack.server_time}`);
         // A later beat carrying the measured round trip: Bot keeps it as the connection's latency.
         dev.send({ type: 'heartbeat', t: sentAt + 1000, rtt_ms: 42 });

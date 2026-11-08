@@ -13,7 +13,7 @@ const KEY = Buffer.from(privateKey.export({ type: 'pkcs8', format: 'pem' })).toS
 
 const PROFILE = {
     id: 'community.ballbot', version: 1, name: 'Ballbot', vendor: 'Mia', kind: 'onboard',
-    description: 'A self-balancing ball robot on an ESP32, driven by a community Node plugin.',
+    description: 'A self-balancing ball robot on an ESP32, driven by a community Link plugin.',
     capabilities: ['drive.differential', 'battery'],
     mapping: { driver: 'plugin', plugin: 'ballbot' },
     commands: { drive: { axes: { throttle: [-1, 1], steer: [-1, 1] } } },

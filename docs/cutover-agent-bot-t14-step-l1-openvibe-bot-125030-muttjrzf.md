@@ -6,7 +6,7 @@ is its runbook: what runs in which order, what is backed up, how the result is v
 
 ## Scope — what this PR actually changes
 
-Bot becomes the dispatcher of plan T14: it hands `platform.job@1` jobs to a paired OpenVibe.Node over the
+Bot becomes the dispatcher of plan T14: it hands `platform.job@1` jobs to a paired OpenVibe Link over the
 `/device` socket (`platform.job-frame@1`) and meters them per wall-clock second for OpenVibe.Billing.
 
 - `migrations/0004_run_jobs.sql` (`-- phase: expand`) — two **new** tables and their indexes:
@@ -94,7 +94,7 @@ node test/run-jobs.test.js
 
 1. The harness starts a scratch database, applies the base branch's migrations and the repository's fixtures,
    then this PR's migrations: exactly `0004_run_jobs.sql` applies, and a second run applies nothing.
-2. It runs `node test/run-jobs.test.js`: a job reaches a connected Node and only for an advertised class; it is
+2. It runs `node test/run-jobs.test.js`: a job reaches a connected Link and only for an advertised class; it is
    resent until acked; exited 0 writes one reading per second plus the partial last second; a lost `job_usage`
    is backfilled; a second `job_exit` writes nothing; a cancel before `job_started` bills nothing;
    `usage_read` never regresses; and with Billing unset or down readings stay queued until a later sweep

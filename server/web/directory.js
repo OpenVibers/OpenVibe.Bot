@@ -22,8 +22,8 @@ const { framePage } = require('./home');
 const NODE_BLOB = 'https://github.com/OpenVibers/OpenVibe.Node/blob/main';
 const CONNECT = {
     browser: { label: 'Simulated', text: 'Runs inside Bot and in your browser: nothing to buy or install.' },
-    onboard: { label: 'On-board', text: 'The OpenVibe Node runs on the robot\'s own computer and drives its hardware.' },
-    bridge: { label: 'Bridge', text: 'The OpenVibe Node runs on a computer or phone next to the robot and joins the robot\'s own link. Nothing on the robot changes.' },
+    onboard: { label: 'On-board', text: 'The OpenVibe Link runs on the robot\'s own computer and drives its hardware.' },
+    bridge: { label: 'Bridge', text: 'The OpenVibe Link runs on a computer or phone next to the robot and joins the robot\'s own link. Nothing on the robot changes.' },
     server: { label: 'Server-side', text: 'Nothing to install: Bot connects to the device itself.' },
     phone: { label: 'Phone', text: 'The phone\'s browser is the device: scan a code, allow the camera, keep the page open. Nothing to install.' },
 };
@@ -36,7 +36,7 @@ const MODELS = {
     'adeept.adr036': {
         connect: 'onboard', order: 1,
         setup: ['Build the kit and flash Raspberry Pi OS (64-bit, Lite is enough) on its card.', 'Add the robot here and paste the one pairing command on the Pi.',
-            'The OpenVibe Node drives the Robot HAT itself, publishes the Pi camera, and stops the motors the moment commands stop. The kit\'s stock control server is never run.'],
+            'The OpenVibe Link drives the Robot HAT itself, publishes the Pi camera, and stops the motors the moment commands stop. The kit\'s stock control server is never run.'],
         guide: { href: `${NODE_BLOB}/docs/hardware-adeept.md`, label: 'Adeept setup guide' },
     },
     'adeept.adr036.mecanum': {
@@ -52,7 +52,7 @@ const MODELS = {
     },
     looi: {
         connect: 'bridge', order: 4,
-        setup: ['The community\'s Generic LOOI driver bridges to the desk robot over Bluetooth from a Windows PC.', 'Install the Node with --driver looi; the phone in LOOI keeps doing what it does.'],
+        setup: ['The community\'s Generic LOOI driver bridges to the desk robot over Bluetooth from a Windows PC.', 'Install the Link with --driver looi; the phone in LOOI keeps doing what it does.'],
         guide: { href: `${NODE_BLOB}/docs/hardware-looi.md`, label: 'LOOI driver contract' },
     },
     'phone.camera': {
@@ -79,7 +79,7 @@ const MODELS = {
     },
     'relay.generic': {
         connect: 'onboard', order: 6,
-        setup: ['Any Raspberry Pi or Linux machine running the OpenVibe Node.', 'Each button on the panel is passed to a script of yours by the relay driver: lights, a door, a motor board.'],
+        setup: ['Any Raspberry Pi or Linux machine running the OpenVibe Link.', 'Each button on the panel is passed to a script of yours by the relay driver: lights, a door, a motor board.'],
         guide: { href: '/docs/drivers', label: 'Write a driver' },
     },
 };
@@ -179,7 +179,7 @@ ${groups.map(([k, ms]) => `<section class="dir-sec" aria-labelledby="g-${esc(k)}
 <ul class="dir-grid">${ms.map(modelCard).join('')}</ul></section>`).join('\n')}
 ${community.length ? `<section class="dir-sec" aria-labelledby="g-community"><h2 id="g-community">From the community</h2><p class="muted">Profiles people submitted and an OpenVibe admin reviewed. Each one is signed by OpenVibe.Bot; its driver is the submitter's.</p>
 <ul class="dir-grid">${community.map(modelCard).join('')}</ul></section>` : ''}
-<section class="dir-sec"><h2>Not here?</h2><p class="muted">Write a profile for it and check it with the validator, then submit it: once it is reviewed, anyone can add a robot with it. A driver for its hardware runs under the OpenVibe Node.</p>
+<section class="dir-sec"><h2>Not here?</h2><p class="muted">Write a profile for it and check it with the validator, then submit it: once it is reviewed, anyone can add a robot with it. A driver for its hardware runs under the OpenVibe Link.</p>
 <p class="dir-actions">${link('/robots/submit', 'Submit a robot', 'dir-btn dir-primary')} ${link('/docs/profiles', 'Robot profiles', 'dir-btn')} ${link('/docs/drivers', 'Write a driver', 'dir-btn')}</p></section>`;
     return shell({ config, path: '/models', title: 'Models', description: 'The robots OpenVibe.Bot drives: kits, bridged robots like Cozmo and LOOI, ONVIF cameras and a simulated rover.', body });
 }
@@ -204,7 +204,7 @@ ${parts}
 ${model.community ? `<section class="dir-sec card"><h2>From the community</h2><p>Submitted by ${esc(ownerName(model.community.by))} and reviewed by an OpenVibe admin.${model.community.license ? ` Licence: ${esc(model.community.license)}.` : ''}</p>
 <ul>${model.community.driver_url ? `<li>Driver: ${link(model.community.driver_url, model.community.driver_url)}</li>` : ''}${model.community.guide_url ? `<li>Setup guide: ${link(model.community.guide_url, model.community.guide_url)}</li>` : ''}
 <li>Signed by OpenVibe.Bot (Ed25519, key <code>${esc(model.community.key_id || '')}</code>): ${link(`/api/v1/profiles/${model.id}`, 'the profile and its signature')} · ${link('/api/v1/profiles/signing-key', 'the public key')}</li>
-<li>Check it on your machine before you install the driver (OpenVibe Node v0.6.0 or later): <code>openvibe-node profile verify ${esc(model.id)}${model.community.key_id ? ` --key-id ${esc(model.community.key_id)}` : ''}</code></li></ul>
+<li>Check it on your machine before you install the driver (OpenVibe Link v0.6.0 or later): <code>openvibe-node profile verify ${esc(model.id)}${model.community.key_id ? ` --key-id ${esc(model.community.key_id)}` : ''}</code></li></ul>
 <p class="muted">Install the driver from its source on the robot's computer; OpenVibe.Bot never runs it.</p></section>` : ''}
 <section class="dir-sec card"><h2>Safety</h2><p class="muted">Every command passes Bot's gate: roles, the owner's limits and cooldowns, and a latched e-stop only the owner clears. The device stops the motors by itself when commands stop arriving, without asking the network.</p></section>`;
     return shell({ config, path: `/models/${model.id}`, title: model.name, description: `${model.name} on OpenVibe.Bot: how it connects, the panel it gets and how to set it up.`, body });
@@ -264,7 +264,7 @@ function renderSubmit({ config, licenses = [], values = {}, error = null }) {
 <form class="dir-form" method="post" action="/robots/submit">
 ${error ? `<p class="dir-error" role="alert">${esc(error)}</p>` : ''}
 <label class="dir-field dir-wide"><span class="dir-field-label">Profile (bot.robot-profile@1)</span><textarea name="profile" rows="18" spellcheck="false" required>${esc(profile)}</textarea>
-<span class="muted dir-note">Its id is <code>community.&lt;name&gt;</code>. A robot run by your own Node plugin uses <code>"driver": "plugin"</code> and names it in <code>"plugin"</code>.</span></label>
+<span class="muted dir-note">Its id is <code>community.&lt;name&gt;</code>. A robot run by your own Link plugin uses <code>"driver": "plugin"</code> and names it in <code>"plugin"</code>.</span></label>
 <label class="dir-field"><span class="dir-field-label">Driver source (https)</span><input type="url" name="driver_url" maxlength="300" placeholder="https://github.com/you/your-driver" value="${esc(values.driver_url || '')}"></label>
 <label class="dir-field"><span class="dir-field-label">Setup guide (https)</span><input type="url" name="guide_url" maxlength="300" placeholder="https://openvibe.wiki/…" value="${esc(values.guide_url || '')}"></label>
 <label class="dir-field"><span class="dir-field-label">Driver licence</span><select name="license"><option value="">Choose…</option>${licenses.map((l) => `<option value="${esc(l)}"${l === values.license ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>

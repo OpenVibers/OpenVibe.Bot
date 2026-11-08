@@ -2,7 +2,7 @@
 /**
  * Vibe by voice on a person's own machine (consumer plan §8; openvibe-contracts 0.214.0 bot.device-message@1
  * voice_ask / voice_answer, chat.vibe.ask). The owner turns voice on for a machine and chooses its call word
- * (migrations/0024_machine_voice.sql); the machine (OpenVibe Node's voice plugin) listens for the word, transcribes what
+ * (migrations/0024_machine_voice.sql); the machine (OpenVibe Link's voice plugin) listens for the word, transcribes what
  * follows on the machine itself, and sends voice_ask. realtime.js answers `working` at once and hands the question here:
  * Bot asks Vibe as the owner through OpenVibe.Chat (POST /internal/chat/vibe/ask with its own service token, audience
  * openvibe.chat, chat.vibe.ask), which keeps it in the owner's "Voice on <machine>" chat, and the answer goes back to the

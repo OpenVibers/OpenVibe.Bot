@@ -824,11 +824,11 @@ function renderMachinesPage({ machines = [], pairing = null, phoneReady = false 
         const w = (m.capabilities && typeof m.capabilities === 'object' ? m.capabilities : {}).worker || {};
         return Array.isArray(w.runtime_classes) ? w.runtime_classes : [];
     };
-    // The computer plugin (Node docs/computer.md): the level its owner set on the machine, and whether their agent may use it.
+    // The computer plugin (Link docs/computer.md): the level its owner set on the machine, and whether their agent may use it.
     const LEVELS = { observe: 'Observe', ask: 'Ask first', trusted: 'Trusted', full: 'Full control' };
     const computerOf = (m) => {
         const caps = m.capabilities && typeof m.capabilities === 'object' ? m.capabilities : {};
-        // Its own models (OpenVibe Node's ai plugin, server/machine-ai.js): what it offers, and whether a model server answers.
+        // Its own models (OpenVibe Link's ai plugin, server/machine-ai.js): what it offers, and whether a model server answers.
         const models = aiOf(caps);
         const ai = models ? { models: Array.isArray(models.models) ? models.models.slice(0, 20).map(String) : [], ready: models.ready === true,
             offer: models.offer && typeof models.offer === 'object' ? models.offer : null,
@@ -841,11 +841,11 @@ function renderMachinesPage({ machines = [], pairing = null, phoneReady = false 
             screenStream: !!(c.screen && c.screen.stream === true),
             // Desks for its agents (Desks plan): how many at once, which kinds, and whether sign-ins carry over.
             desks: d ? { max: Number.isInteger(d.max_desks) ? d.max_desks : 1, kinds: Array.isArray(d.kinds) ? d.kinds : ['desktop'], keeps: d.profiles === true,
-                // Each desk in its own sandbox (Node v0.32.0, --desk-host --shared): it may serve other people's sessions.
+                // Each desk in its own sandbox (Link v0.32.0, --desk-host --shared): it may serve other people's sessions.
                 sandboxed: d.isolation === 'sandbox' } : null,
             ai };
     };
-    // Vibe by voice: shown for a machine whose Node runs the voice plugin (capabilities.voice).
+    // Vibe by voice: shown for a machine whose Link runs the voice plugin (capabilities.voice).
     const voiceRow = (m) => {
         const v = (m.capabilities && typeof m.capabilities === 'object' ? m.capabilities : {}).voice;
         if (!v || typeof v !== 'object') return '';
@@ -900,7 +900,7 @@ function renderMachinesPage({ machines = [], pairing = null, phoneReady = false 
         if (!c.on) return `<div class="machine-computer">${aiRow}</div>`;
         const can = [c.terminal && 'terminal', c.files && 'files', c.screen && 'screen', c.input && 'mouse and keyboard'].filter(Boolean).join(', ');
         const desks = c.desks ? `<span class="muted">${esc(deskWords(c.desks))}</span>` : '';
-        // The desks running now (the Node's telemetry), and the page that lists them, to watch or stop one.
+        // The desks running now (the Link's telemetry), and the page that lists them, to watch or stop one.
         const running = Number.isInteger(m.computer_desks) && m.computer_desks > 0
             ? ` <span class="pill">${m.computer_desks === 1 ? '1 desk running' : `${m.computer_desks} desks running`}</span>` : '';
         const deskLink = c.desks && m.online ? `<a class="button quiet" href="/machines/${esc(m.id)}/desks">See its desks</a>` : '';
@@ -916,7 +916,7 @@ function renderMachinesPage({ machines = [], pairing = null, phoneReady = false 
                 + `<button type="submit" class="button quiet" aria-pressed="${m.watch_probe ? 'true' : 'false'}">${m.watch_probe ? 'Stop my watches checking from here' : 'Let my watches check things from this computer'}</button></form>` : '')
             + '</div>';
     };
-    // The guided first run's one job (Node v0.39.0): what this machine is, from the first_job step Bot stored.
+    // The guided first run's one job (Link v0.39.0): what this machine is, from the first_job step Bot stored.
     const bytesText = (n) => {
         if (!Number.isFinite(n) || n < 0) return '';
         const units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -950,12 +950,12 @@ function renderMachinesPage({ machines = [], pairing = null, phoneReady = false 
 <p class="muted">${text}</p></li>`;
     const add = pairing
         ? `<h2 id="add-h">What should this computer do?</h2>
-<p class="muted">Pick one and run its command on the computer: it installs OpenVibe Node and pairs the computer with your account. Add <code>--ai</code> to any of them to use its models too.</p>
+<p class="muted">Pick one and run its command on the computer: it installs OpenVibe Link and pairs the computer with your account. Add <code>--ai</code> to any of them to use its models too.</p>
 <ul class="choices" aria-labelledby="add-h">
 ${choice('Run your coding jobs', ' --worker', 'Linux with systemd. It turns the Node\'s job worker on: jobs run as a separate user, in a sandbox, with the limits you set. For coding jobs the computer also needs Node.js 22 or newer and git, and a coding agent: Claude Code, Codex, OpenCode, or a DeepSeek key.')}
-${choice('Let your agents use it', ' --computer ask', 'The computer\'s terminal, files and screen become usable by your agents, at the level you set on the computer: <code>ask</code> waits for <code>openvibe-node approve</code> there before anything runs or changes. The Node runs as your own account, never root. <a href="https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/computer.md">How it works</a>.')}
+${choice('Let your agents use it', ' --computer ask', 'The computer\'s terminal, files and screen become usable by your agents, at the level you set on the computer: <code>ask</code> waits for <code>openvibe-node approve</code> there before anything runs or changes. The Link runs as your own account, never root. <a href="https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/computer.md">How it works</a>.')}
 ${choice('Make a spare computer a desk host', ' --desk-host', 'An old laptop, a mini PC or a spare workstation becomes a place where your agents work: each task gets a desk of its own, with its own browser, and you can watch any desk and take it over. No screen, keyboard or sign-in needed on it. It runs as its own account and only for your agents; the installer adds what desks need and sizes them to its memory. Linux. <a href="https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/computer.md#desk-hosts---desk-host-node-v0200">How it works</a>.')}
-${choice('Use the models you run on it', ' --ai', 'If this computer runs Ollama, LM Studio or llama.cpp\'s server, your Vibe and your AI members can think with its models: free, and no port is opened. The installer says which server it finds. Once it is paired, turn on "Let my AI use this computer\'s models" for it here. Node v0.28.0 or newer. <a href="https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/ai.md">How it works</a>.')}
+${choice('Use the models you run on it', ' --ai', 'If this computer runs Ollama, LM Studio or llama.cpp\'s server, your Vibe and your AI members can think with its models: free, and no port is opened. The installer says which server it finds. Once it is paired, turn on "Let my AI use this computer\'s models" for it here. Link v0.28.0 or newer. <a href="https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/ai.md">How it works</a>.')}
 <li class="card"><h2>Or enter the pairing code</h2><p><strong class="code">${esc(pairing.code)}</strong></p>
 <p class="muted">Valid until <time datetime="${esc(pairing.expires_at)}" data-local-time>${esc(String(pairing.expires_at).slice(11, 16))} UTC</time>. It works once.</p></li></ul>
 <p class="muted">Reload this page once the installer says it is paired: the machine shows up above.</p>`
@@ -1145,7 +1145,7 @@ function renderPhonePage() {
 }
 
 /**
- * /admin/first-run: the measured first run, reviewers only. One row per step the Node reported (node.first_run), so
+ * /admin/first-run: the measured first run, reviewers only. One row per step the Link reported (node.first_run), so
  * the number that reach each step and the median time between them answer whether installs get to a working machine.
  */
 function renderFirstRunPage({ rows = [] }) {
@@ -1198,14 +1198,14 @@ function renderFirstRunPage({ rows = [] }) {
         }).join('')}</ul>`
         : '<p class="muted">No machine has reported a first run yet.</p>';
     const body = `<p class="dir-crumb"><a href="/robots/submissions">Review</a> / First runs</p>
-<header class="dir-hero"><h1>First run</h1><p class="muted">How many machines reach each step of OpenVibe Node's guided first run, and the median time from the step before. A machine reports one event per step over its own device link (<code>node.first_run</code>); nothing here names a person, folder or address.</p></header>
+<header class="dir-hero"><h1>First run</h1><p class="muted">How many machines reach each step of OpenVibe Link's guided first run, and the median time from the step before. A machine reports one event per step over its own device link (<code>node.first_run</code>); nothing here names a person, folder or address.</p></header>
 <section class="dir-sec"><h2>The funnel</h2>
 <table class="dir-table"><caption class="sr-only">First-run steps, machines and median time</caption>
 <thead><tr><th scope="col">Step</th><th scope="col">Machines</th><th scope="col">Median from the step before</th></tr></thead>
 <tbody>${rowsHtml}</tbody></table>
 <p class="muted">${count('self_check') - failed} self-check${count('self_check') - failed === 1 ? '' : 's'} passed${failed ? `, ${failed} failed` : ''}. A failed check is still a machine that got that far; its reason is in the machine's own record.</p></section>
 <section class="dir-sec"><h2>Most recent</h2>${recent}</section>`;
-    return page('First run', body, { description: 'The guided first run of OpenVibe Node, measured step by step.', canonical: '/admin/first-run' });
+    return page('First run', body, { description: 'The guided first run of OpenVibe Link, measured step by step.', canonical: '/admin/first-run' });
 }
 
 module.exports = { page, renderPanel, renderPhonePage, renderMachinesPage, renderMachineDesksPage, renderMachineScreenPage, renderSharePage, renderShareGone, panelScripts, isSim, TRY_DESCRIPTION, renderEmbedRefused, renderDrivePage, renderWidget, renderRobotsPage, renderPairingPage, renderPhoneLinkPage, renderLinkPage, renderSignInPage, renderClaimPage, renderClaimApproved, renderFirstRunPage, camerasOf, esc };

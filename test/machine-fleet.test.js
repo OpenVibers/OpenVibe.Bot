@@ -1,10 +1,10 @@
 'use strict';
-// The fleet (Codes C9c): a machine's OpenVibe.Node reports what its coding agents have left with each heartbeat
+// The fleet (Codes C9c): a machine's OpenVibe Link reports what its coding agents have left with each heartbeat
 // (bot.device-message@1's `fleet`), and Bot keeps the latest reading per machine for Codes' Agents page, its router and
 // its MCP. GET /api/v1/machines answers it with the machine's Network id (`node_id`, nod_…), which is the same machine
 // Run pins a job to by its device id (dev_…): one row, both names.
 //
-// What this checks: a reading is stored and answered; it is bounded exactly as the Node bounds it (16 agents, 10 windows,
+// What this checks: a reading is stored and answered; it is bounded exactly as the Link bounds it (16 agents, 10 windows,
 // an id shaped like an id, short labels, numbers only), and a frame that is not a reading changes nothing; the owner
 // sees their own reading and nobody else does; a machine that has reported nothing answers null; the reading is stored
 // again when it changes or a minute has passed, never on every beat.

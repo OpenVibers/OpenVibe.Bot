@@ -56,7 +56,7 @@ const { boot, check, done } = require('./helpers/app');
         const { dev } = await pairOverWs(robot.id, pairing.code);
         dev.send({ type: 'heartbeat', t: 1738065600500 });
         const ack = await dev.waitFor((m) => m.type === 'heartbeat_ack');
-        assert.strictEqual(ack.t, 1738065600500, 'OpenVibe.Node reads ack.t for its RTT');
+        assert.strictEqual(ack.t, 1738065600500, 'OpenVibe Link reads ack.t for its RTT');
         assert.strictEqual(ack.echo, 1738065600500, 'the existing echo field is unchanged');
         assert.ok(ack.server_time);
         dev.close();

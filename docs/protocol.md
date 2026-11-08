@@ -42,7 +42,7 @@ keep connecting with it either way.
 **The installer command** is `curl -fsSL <BOT_INSTALLER_URL> | sh -s -- --robot rob_… --code XXXX-XXXX` (or the
 Network form above), plus `--driver adeept`, `adeept-mecanum` or `cozmo` for the `adeept.adr036`,
 `adeept.adr036.mecanum` and `cozmo` profiles; any other profile gets no `--driver` (the installer's dry-run
-`none`). `GET /install` answers a 302 to `BOT_INSTALLER_SOURCE_URL` (OpenVibe.Node's `install/install.sh`).
+`none`). `GET /install` answers a 302 to `BOT_INSTALLER_SOURCE_URL` (OpenVibe Link's `install/install.sh`).
 
 **A Network-paired machine** (a node principal `nod_…`, paired on OpenVibe.Network for one of its
 owner's robots) carries `Authorization: Bearer <node token>` instead: a Network JWT with `actor_type`
@@ -71,7 +71,7 @@ At most 64 frames wait; any more are answered `error` `bot.not_ready`.
 | `config` | `heartbeat_ms, limits, allowed_commands, estop_latched` | right after `hello`, and again whenever the owner changes the robot's limits (or `allow` lists) and whenever Bot's latch is set or cleared (after the `estop` frame) |
 | `command` | `id, kind, value, deadline_ms, operator{subject,role}, robot_id` | an operator's command passed the gate |
 | `estop` | `latched, by, at` | the e-stop latched or the owner cleared it |
-| `heartbeat_ack` | `echo, t, server_time` | the answer to `heartbeat`; `echo` is the heartbeat's `t` (or `null`), so the device computes RTT, and `t` repeats a finite `t` (device ms) unchanged — the field OpenVibe.Node reads. The envelope `seq` is Bot's own counter and never echoes the device's |
+| `heartbeat_ack` | `echo, t, server_time` | the answer to `heartbeat`; `echo` is the heartbeat's `t` (or `null`), so the device computes RTT, and `t` repeats a finite `t` (device ms) unchanged — the field OpenVibe Link reads. The envelope `seq` is Bot's own counter and never echoes the device's |
 | `rotate` | — | the owner forced a rotation of a Network-paired machine (`POST /devices/:id/rotate`); the machine rotates its credential with Network itself |
 | `error` | `code, detail` | a frame the server refused |
 
@@ -81,7 +81,7 @@ At most 64 frames wait; any more are answered `error` `bot.not_ready`.
 |---|---|---|
 | `pair` | `robot, code, agent_version, device_kind, drivers[], capabilities{}, name` | the one-time pairing code; `robot` (from the installer command / QR) attributes a wrong try to that robot's code. With `BOT_PAIRING_AUTHORITY=network` → `error` `bot.pairing_moved` |
 | `heartbeat` | `t, rtt_ms` | every `heartbeat_ms` (1 s); `t` is the device's send time in unix ms (a finite number), returned as both `heartbeat_ack.echo` and `heartbeat_ack.t`; `rtt_ms` is the device's own measured latency |
-| `telemetry` | `battery, voltage, sensors{}, events[]?, …` | at most 2 Hz; extra frames are dropped — except a frame with a non-empty `events` array (a fault, a bump, low battery), which is always delivered and does not count against the samples' window. `battery` is either a 0..1 fraction or an object `{volts, percent}` with `percent` 0..100 (as OpenVibe.Node sends it); `robot_state.battery` is always the fraction 0..1 (or `null`), while `robot_state.telemetry` keeps the raw frame |
+| `telemetry` | `battery, voltage, sensors{}, events[]?, …` | at most 2 Hz; extra frames are dropped — except a frame with a non-empty `events` array (a fault, a bump, low battery), which is always delivered and does not count against the samples' window. `battery` is either a 0..1 fraction or an object `{volts, percent}` with `percent` 0..100 (as OpenVibe Link sends it); `robot_state.battery` is always the fraction 0..1 (or `null`), while `robot_state.telemetry` keeps the raw frame |
 | `status` | `firmware, capabilities, faults[], estop_latched, device_kind?, drivers[]?, agent_version?` | on connect and on change. See below |
 | `reauth` | `token` | a Network-paired machine only: a fresh node token for the same principal, before the last one expires (300 s); a refused one is answered `error` `bot.reauth_refused` and moves nothing |
 | `ack` | `id` | a command ran (or, keyed by a job id, a job was accepted: §1.2) |
@@ -102,13 +102,13 @@ deadline or firmware that keeps going on its own never carries into the next tur
 sends none. The same halt goes out when the owner or an operator takes over a turn (below).
 
 **What the order guarantees, and what it does not.** Frames on one device connection arrive in the order
-Bot sent them (one WebSocket), and OpenVibe.Node handles them in that order. Two things follow:
+Bot sent them (one WebSocket), and OpenVibe Link handles them in that order. Two things follow:
 - **Nothing decided under a turn follows that turn's halt.** Bot ends a turn and sends its halt in one
   synchronous step that also moves the robot's control epoch. A queue driver's command whose gate decision
   began before that step is refused (`bot.not_your_turn`) at the moment it would be sent, with no await between
   the check and the send. So on the wire, everything authorised under turn N precedes N's halt.
 - **Lateness is bounded by the deadline.** Every motion command carries `deadline_ms` on Bot's clock, at
-  most the robot's `max_command_ms` away. Node compares it with its estimate of Bot's clock on arrival, nacks
+  most the robot's `max_command_ms` away. Link compares it with its estimate of Bot's clock on arrival, nacks
   a late one (`expired`) before any driver sees it, and gives a driver only the time left.
 
 Across a reconnect nothing is replayed. Bot never queues commands for an offline device ("commands are never
@@ -121,7 +121,7 @@ across a Bot restart:
 - It moves when a turn ends, is left or is taken over. The halt for that change carries the new value, and every
   command carries the epoch current when it is sent. An owner's command right after a takeover carries the epoch its
   halt moved to.
-- OpenVibe.Node (Node#55) keeps the newest epoch a halt carried per robot, nacks `expired` any command older than it,
+- OpenVibe Link (Node#55) keeps the newest epoch a halt carried per robot, nacks `expired` any command older than it,
   and passes the epoch to drivers (`cmd.turn_epoch`), so a driver can check it too.
 - It is absent until a robot's first turn change since Bot started. A command without it runs as before.
 
@@ -194,9 +194,9 @@ against these):
 
 | profile | device | commands |
 |---|---|---|
-| `adeept.adr036` | Node plugin `adeept_adr036`, ordinary wheels | `drive {throttle, steer}`; `actuator` `pan`/`tilt` −1..1, `buzzer` tone 220–880 Hz, `lights` rgb (8 LEDs) |
-| `adeept.adr036.mecanum` | Node plugin `adeept_adr036`, mecanum wheels | `drive {x, y, rotation}`; the same actuators |
-| `cozmo` | Node plugin `cozmo` | `drive {throttle, steer}`; `actuator` `head` −1..1, `lift` 0..1, `backpack_lights`/`cube_lights` rgb; `say`; `display` text, face (`neutral happy sad surprised sleepy angry`) or image |
+| `adeept.adr036` | Link plugin `adeept_adr036`, ordinary wheels | `drive {throttle, steer}`; `actuator` `pan`/`tilt` −1..1, `buzzer` tone 220–880 Hz, `lights` rgb (8 LEDs) |
+| `adeept.adr036.mecanum` | Link plugin `adeept_adr036`, mecanum wheels | `drive {x, y, rotation}`; the same actuators |
+| `cozmo` | Link plugin `cozmo` | `drive {throttle, steer}`; `actuator` `head` −1..1, `lift` 0..1, `backpack_lights`/`cube_lights` rgb; `say`; `display` text, face (`neutral happy sad surprised sleepy angry`) or image |
 | `camera.onvif` | server driver `onvif` | `ptz {pan, tilt, zoom}` −1..1 |
 | `sim.rover` | server driver `sim` | `drive {throttle, steer}` |
 
@@ -215,7 +215,7 @@ and audited (`kind: estop_state`, `result: refused`); nothing changes on that ro
 
 **A local stop** (`latched: true, local_stop: true`, with an optional `reason`) is one held on the machine
 itself: `openvibe-node stop`, or a driver's own stop button through it. Only a release on that machine
-(`openvibe-node resume`) lifts it; the owner's clear does not. The Node keeps refusing motion (`nack`
+(`openvibe-node resume`) lifts it; the owner's clear does not. The Link keeps refusing motion (`nack`
 `local_stop`) and reports the latch again after the owner's clear, which latches the robot again. Bot keeps
 `local` and `reason` (plain text, at most 120 characters) in `device_estop`, and the panel says the robot is
 stopped on the robot and holds back its Clear button until the device reports the release. After the release
@@ -303,7 +303,7 @@ heartbeat or any frame brings it back. Commands are never replayed after a recon
 
 ### 1.2 Jobs (platform.job-frame@1)
 
-Bot is the dispatcher of plan T14: it hands a `platform.job@1` job to a paired OpenVibe.Node over this socket
+Bot is the dispatcher of plan T14: it hands a `platform.job@1` job to a paired OpenVibe Link over this socket
 and meters it. The Run service (which owns `run.job.*`) calls it over the internal HTTP API under the
 `bot.job.dispatch` capability: `POST /api/v1/jobs`, `POST /api/v1/jobs/:id/cancel` and `GET /api/v1/jobs/:id`
 (`server/api/v1.js`) call the jobs service `server/jobs/index.js` `createJobs({ db, hub, usage, log, now })`, which
@@ -317,8 +317,8 @@ against `platform.job-frame@1` from the pinned openvibe-contracts; an invalid on
 |---|---|---|---|
 | server → device | `job` | `job` (platform.job@1) | sent by `dispatch` when the device is connected, and resent on every reconnect while unacked. Never sent for a `class` missing from the device's stored `capabilities.worker.runtime_classes` (dispatch answers `409 bot.class_unadvertised`; a queued job whose class is no longer advertised fails with `fault_code` `bot.class_unadvertised`) |
 | server → device | `job_cancel` | `id` | sent by `cancel` if the job was sent and has not ended; resent on a reconnect and when a `job_started` or `ack` crosses it. A job not yet started is `cancelled` at once; a cancelled job is never sent again |
-| server → device | `job_exit_ack` | `id` | after every reading of the job is committed to `run_usage_outbox`; the Node then forgets the job and stops resending its `job_exit` |
-| device → server | `ack` / `nack` | `id`, `fault_code` | the Node accepted (`placed`) or refused (`failed`, `fault_code` kept) the job |
+| server → device | `job_exit_ack` | `id` | after every reading of the job is committed to `run_usage_outbox`; the Link then forgets the job and stops resending its `job_exit` |
+| device → server | `ack` / `nack` | `id`, `fault_code` | the Link accepted (`placed`) or refused (`failed`, `fault_code` kept) the job |
 | device → server | `job_started` | `id, started_ms` | `running`; the first `started_ms` anchors every second and never changes |
 | device → server | `job_stdout` | `id, chunk_seq, chunk` | the last 1 MiB of each job, in memory; a `chunk_seq` already held is dropped. Never metered |
 | device → server | `job_usage` | `id, started_ms, second, cpu_ms?` | one reading for `second` (quantity 1); ignored once `job_exit` was taken |

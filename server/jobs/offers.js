@@ -1,7 +1,7 @@
 'use strict';
 /**
  * The worker offers Bot reports to Network (plan T14/T16, contracts 0.161.0, ADR-046). Every live device that runs a
- * job worker (OpenVibe.Node status.capabilities.worker.runtime_classes) is a person's own machine: one
+ * job worker (OpenVibe Link status.capabilities.worker.runtime_classes) is a person's own machine: one
  * platform.resource-offer@1 per device, kind `node`, trust `user-owned`, naming its owner, advertising
  * `worker:<class>` for each class, `up` while the device is connected and `down` otherwise. The set is reported whole
  * as source `bot` (Network marks an offer missing from a later report down), once a minute and a moment after a device
@@ -9,7 +9,7 @@
  *
  *   createOfferPublisher({ db, hub, reporter, log, now, intervalMs, settleMs }) → { build, publish, start, stop, poke }
  *
- * The same set carries a community AI offer (the design's "Offer to the network"): a machine whose OpenVibe.Node ai
+ * The same set carries a community AI offer (the design's "Offer to the network"): a machine whose OpenVibe Link ai
  * plugin advertises `capabilities.ai.offer.enabled` with models, hours, concurrency, a credit price and an audience is
  * one user-owned provider offer, `ai:<device>`, whose detail.kind is `ai` and whose health follows its connection and
  * its own open/ready flags. Network validates the detail; OpenVibe.AI reads the internal list and places only requests
@@ -26,7 +26,7 @@ const CLASSES = new Set(['function', 'code', 'browser', 'linux', 'desktop', 'gpu
 
 /** The ai plugin's offer, or null when it is off or incomplete (an incomplete one is left out, never half reported). */
 function aiOfferOf(capabilities) {
-    // The Node reports each plugin's describe under its name, so the ai plugin's {ai: {models, offer}} arrives as
+    // The Link reports each plugin's describe under its name, so the ai plugin's {ai: {models, offer}} arrives as
     // capabilities.ai.ai; a direct capabilities.ai.offer is accepted too (an older/other reporter).
     let ai = json(capabilities, {}).ai;
     if (ai && ai.ai) ai = ai.ai;
@@ -104,7 +104,7 @@ function createOfferPublisher({ db, hub, reporter = null, aiReporter = null, log
         return offers;
     }
 
-    /** The community AI offers: one per machine whose Node ai plugin advertises an enabled offer. */
+    /** The community AI offers: one per machine whose Link ai plugin advertises an enabled offer. */
     async function buildAi() {
         const rows = await db.many(
             `SELECT d.id, d.capabilities, d.owner_subject, r.owner_subject AS robot_owner

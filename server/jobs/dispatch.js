@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * The dispatcher (plan T14 step L1): Bot hands platform.job@1 jobs to a paired Node over the device link and
+ * The dispatcher (plan T14 step L1): Bot hands platform.job@1 jobs to a paired Link over the device link and
  * meters them (platform.job-frame@1, docs/protocol.md "Jobs"). The Run service, which owns run.job.*, calls it
  * over the internal HTTP API (bot.job.dispatch): POST /api/v1/jobs, POST /api/v1/jobs/:id/cancel and
  * GET /api/v1/jobs/:id (server/api/v1.js), through the jobs service server/jobs/index.js, which also holds the one
@@ -15,7 +15,7 @@
  *                                                                      on reconnect
  *
  * `link` is the realtime hub (sendToDevice). A job is sent only to a device whose stored
- * capabilities.worker.runtime_classes lists its class. An unacked job is resent on every reconnect (the Node acks
+ * capabilities.worker.runtime_classes lists its class. An unacked job is resent on every reconnect (the Link acks
  * a job it already holds again, or answers with its job_exit, and never runs one twice). job_exit_ack goes out
  * once every reading of the job is committed to run_usage_outbox, from which the relay delivers it to Billing.
  */
@@ -31,7 +31,7 @@ const STDOUT_RING_BYTES = 1024 * 1024;   // the last 1 MiB of each job's stdout
 const STDOUT_JOBS = 1024;                // rings kept, oldest dropped first
 
 const brief = (errors) => (errors || []).slice(0, 3).map((e) => `${e.path} ${e.message}`).join('; ');
-/** The classes a device's stored capabilities advertise (OpenVibe.Node status.capabilities.worker). */
+/** The classes a device's stored capabilities advertise (OpenVibe Link status.capabilities.worker). */
 function advertisedClasses(capabilities) {
     const worker = json(capabilities, {}).worker;
     return worker && Array.isArray(worker.runtime_classes) ? worker.runtime_classes.filter((c) => typeof c === 'string') : [];
@@ -173,7 +173,7 @@ function createJobFrames({ db: getDb, usage = null, log = console, now = () => D
             if (!row) return false;
             if (row.exit_reason != null) return true;
             const job = json(row.job, {});
-            // Never past the wall-clock cap the payer set: the Node kills the job there.
+            // Never past the wall-clock cap the payer set: the Link kills the job there.
             if ((msg.second + 1) * 1000 > job.limits.wall_ms) { log.warn(`[Bot] job ${row.id}: job_usage second ${msg.second} beyond limits.wall_ms, not metered`); return true; }
             const startedMs = row.started_ms != null ? Number(row.started_ms) : msg.started_ms;
             if (row.started_ms == null) await store.markStarted(t, row.id, startedMs, now());

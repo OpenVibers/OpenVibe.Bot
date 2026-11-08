@@ -1,6 +1,6 @@
 -- phase: expand
--- The guided first run (OpenVibe.Node's `openvibe-node`, docs/install.md#first-run-guided-and-measured): one row per
--- device and step, from the `node.first_run` telemetry events the Node sends over its existing device link. It powers
+-- The guided first run (OpenVibe Link's `openvibe-node`, docs/install.md#first-run-guided-and-measured): one row per
+-- device and step, from the `node.first_run` telemetry events the Link sends over its existing device link. It powers
 -- the machines page's figures for a machine's first job and the admin funnel (how many installs reach each step, and
 -- how long each took). The fields are an allowlist: no path, username or address is stored.
 CREATE TABLE IF NOT EXISTS device_first_run (

@@ -16,7 +16,7 @@ const bool = (v, d = false) => (v == null || v === '' ? d : ['1', 'true', 'yes',
 const trim = (u) => String(u || '').replace(/\/+$/, '');
 const list = (v) => String(v || '').split(',').map((s) => s.trim()).filter(Boolean);
 const PAIRING_AUTHORITIES = ['bot', 'network'];
-// Where GET /install may send the client: OpenVibe.Node's canonical script lives on GitHub (raw, a release
+// Where GET /install may send the client: OpenVibe Link's canonical script lives on GitHub (raw, a release
 // asset) or on openvibe.bot itself. Anything else refuses to boot.
 const INSTALLER_SOURCE_HOSTS = ['raw.githubusercontent.com', 'github.com', 'objects.githubusercontent.com', 'openvibe.bot'];
 
@@ -269,7 +269,7 @@ function loadConfig(env = process.env) {
         },
         // The one-line installer the owner copies next to the pairing code. scriptUrl is what the command
         // prints; sourceUrl is where GET /install sends the client (302). Bot keeps no copy of the script:
-        // it redirects to OpenVibe.Node's canonical one, and only this config (never a query parameter)
+        // it redirects to OpenVibe Link's canonical one, and only this config (never a query parameter)
         // chooses the target.
         // Embeddable panel (plan T15 R9): the origins whose pages may frame a robot's read-only panel.
         embed: { origins: embedOrigins },

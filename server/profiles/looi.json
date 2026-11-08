@@ -4,7 +4,7 @@
   "name": "LOOI desktop robot",
   "vendor": "LOOI",
   "kind": "bridge",
-  "description": "LOOI, the tracked desk robot that uses a phone as its face: differential drive and head tilt over Bluetooth from a bridge computer (Windows, macOS or Linux) running the OpenVibe Node with the Generic LOOI driver. The phone streams its own video, for example from its browser to the owner's OpenVibe.Live channel, where the robot's panel shows under the stream.",
+  "description": "LOOI, the tracked desk robot that uses a phone as its face: differential drive and head tilt over Bluetooth from a bridge computer (Windows, macOS or Linux) running the OpenVibe Link with the Generic LOOI driver. The phone streams its own video, for example from its browser to the owner's OpenVibe.Live channel, where the robot's panel shows under the stream.",
   "capabilities": ["drive.differential", "head", "battery"],
   "mapping": { "driver": "looi", "plugin": "looi" },
   "commands": {

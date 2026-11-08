@@ -1,7 +1,7 @@
 'use strict';
 // Desk leases for OpenVibe.Run's sessions (contracts 0.223.0, bot.desk.session; the Desks plan's D6). Only Run, with the
 // capability, acting for a person: GET /api/v1/desk-hosts lists that person's own machines (agents allowed) and desk
-// hosts whose owner offers them to other people and whose Node sandboxes every desk; a lease starts a browser desk,
+// hosts whose owner offers them to other people and whose Link sandboxes every desk; a lease starts a browser desk,
 // takes commands for that desk alone and ends with DELETE; the machine's own routes never reach a leased desk; a full
 // machine is busy; anyone else gets 404.
 const assert = require('assert');

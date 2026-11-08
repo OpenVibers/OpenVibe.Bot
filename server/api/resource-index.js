@@ -41,7 +41,7 @@ function robotSummary(row, baseUrl = null) {
     return { ...summary, ...consoleOf(baseUrl, `/r/${encodeURIComponent(row.id)}`) };
 }
 
-/** A person's own machine (devices.owner_subject): online while its Node is connected. */
+/** A person's own machine (devices.owner_subject): online while its Link is connected. */
 function machineSummary(row, online, baseUrl = null) {
     const summary = {
         id: row.id, kind: MACHINE_KIND, service: SERVICE,
