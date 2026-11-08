@@ -1,7 +1,7 @@
 -- phase: expand
 -- Run sessions (contracts 0.223.0, the Desks plan's D6). A machine's owner may offer its desks to other people
--- (shared_desks, off until they turn it on on openvibe.bot/machines; only where its OpenVibe Link runs every desk in its
--- own sandbox, desk_isolation sandbox, Link v0.32.0). OpenVibe.Run leases one named desk per session there, or on the
+-- (shared_desks, off until they turn it on on openvibe.bot/machines; only where its OpenVibe Node runs every desk in its
+-- own sandbox, desk_isolation sandbox, Node v0.32.0). OpenVibe.Run leases one named desk per session there, or on the
 -- person's own machine (bot.desk-lease@1): only that session's commands reach the desk, and the lease ends with it.
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS shared_desks boolean NOT NULL DEFAULT false;
 
