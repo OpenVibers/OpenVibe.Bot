@@ -187,7 +187,7 @@ function moreSection({ config, kit: k, models }) {
     const model = k ? models.find((m) => m.id === k.profile_id) : null;
     const kitBody = k && k.parts && k.parts.length
         ? `<p class="hm-fold-lede">What to get for the robot OpenVibe.Bot was built around. The OpenVibe Link drives its Robot HAT directly, publishes the Pi camera and stops the motors the moment commands stop.</p><ul class="hm-parts">${k.parts.map((p) => `<li><b>${esc(p.qty || 1)}×</b><span>${esc(p.name)}${p.note ? `<small>${esc(p.note)}</small>` : ''}</span></li>`).join('')}</ul>
-<p class="hm-kit-actions">${link(k.build_guide_url, 'Adeept\'s build guide', 'sc-btn')}${model ? ` ${link(`/models/${model.id}`, 'Its model page', 'sc-btn')}` : ''} ${link('https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/hardware-adeept.md', 'Setup guide for the Node', 'sc-btn')}</p>`
+<p class="hm-kit-actions">${link(k.build_guide_url, 'Adeept\'s build guide', 'sc-btn')}${model ? ` ${link(`/models/${model.id}`, 'Its model page', 'sc-btn')}` : ''} ${link('https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/hardware-adeept.md', 'Setup guide for Link', 'sc-btn')}</p>`
         : '';
     const build = rows([
         ['/docs/drivers', 'Write a driver', 'A separate program in any language that speaks JSON lines with the OpenVibe Link: every message and the safety rules.'],
