@@ -69,7 +69,7 @@ const MODELS = {
     'ros2.diffdrive': {
         connect: 'onboard', order: 5,
         setup: ['Any ROS 2 robot that drives on cmd_vel: TurtleBot 3 or 4, a Jackal, your own base.', 'On the robot run a rosbridge server, then paste the pairing command on the robot or a computer beside it; the installer sets up the ros2 driver.',
-            'Set your topics and safe speeds (cmd_vel, the camera\'s CompressedImage, max_linear) in the Node\'s config.json.'],
+            'Set your topics and safe speeds (cmd_vel, the camera\'s CompressedImage, max_linear) in Link\'s config.json.'],
         guide: { href: `${NODE_BLOB}/plugins/ros2/README.md`, label: 'ROS 2 driver guide' },
     },
     'ros2.holonomic': {
