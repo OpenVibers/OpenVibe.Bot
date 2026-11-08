@@ -4,7 +4,7 @@
   "name": "ROS 2 robot (mecanum or omni)",
   "vendor": "ROS 2",
   "kind": "onboard",
-  "description": "A ROS 2 robot with mecanum or omni wheels that moves in any direction on cmd_vel (linear x and y, angular z). The OpenVibe Node's ros2 driver reaches it through rosbridge (or as a ROS 2 node with rclpy): drive, a camera from a JPEG CompressedImage topic, the distance ahead from a laser scan or range sensor, and the battery.",
+  "description": "A ROS 2 robot with mecanum or omni wheels that moves in any direction on cmd_vel (linear x and y, angular z). The OpenVibe Link's ros2 driver reaches it through rosbridge (or as a ROS 2 node with rclpy): drive, a camera from a JPEG CompressedImage topic, the distance ahead from a laser scan or range sensor, and the battery.",
   "capabilities": ["drive.mecanum", "camera", "sensor.ultrasonic", "battery"],
   "mapping": { "driver": "plugin", "plugin": "ros2" },
   "commands": {

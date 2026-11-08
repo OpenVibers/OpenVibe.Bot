@@ -14,6 +14,6 @@ Use an isolated copy of Bot's PostgreSQL data and the same deployment configurat
 
 ## Production order and way back
 
-1. Confirm the Node installer source is reachable and that the Node release consumed by its script is published. Record the current Bot revision and take a fresh, restorable PostgreSQL backup before the guarded Bot deployment.
+1. Confirm the Link installer source is reachable and that the Link release consumed by its script is published. Record the current Bot revision and take a fresh, restorable PostgreSQL backup before the guarded Bot deployment.
 2. Deploy the reviewed revision through the normal merge pipeline. Confirm `/api/ready` and `/api/health`, then repeat the 302, query-parameter and pairing-command checks above using a controlled test owner. Keep the installer command and pairing code out of logs and tickets.
 3. If the new route or pairing command is wrong, roll Bot back to the recorded prior revision through the deployment pipeline and repeat the health and pairing checks. There is no schema reversal or data restore in the ordinary rollback because this PR changes neither schema nor stored data. If an unrelated data incident requires restoring the backup, coordinate it separately with the database owner because a restore can discard writes made after the snapshot.

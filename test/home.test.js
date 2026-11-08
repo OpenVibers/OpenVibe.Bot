@@ -70,7 +70,7 @@ const { boot, check, done } = require('./helpers/app');
     await check('GET /: no promise the service cannot keep (video waits for OpenRestream; no store, no unsupported boards)', async () => {
         const html = await (await get('/')).text();
         assert.match(html, /sends its camera over WebRTC to OpenRestream and the panel plays it live/);
-        // ROS 2 left this list with Bot#95 (ros2.diffdrive, ros2.holonomic, the Node's plugins/ros2 driver).
+        // ROS 2 left this list with Bot#95 (ros2.diffdrive, ros2.holonomic, the Link's plugins/ros2 driver).
         // Webhooks left this list when they shipped (routines and webhooks, migration 0011, /docs/automation).
         for (const claim of [/ESP32/, /Android/, /arrive paired/i, /\bbuy\b/i]) assert.ok(!claim.test(html), `no ${claim}`);
     });

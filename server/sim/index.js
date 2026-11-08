@@ -5,7 +5,7 @@
  * `sim` (sim.rover), so the panel has something to drive before any hardware exists. It is attached to the
  * hub without a socket or a credential (hub.attachSim) and passes the same gate as real hardware: it answers
  * `hello`/`config`, sends heartbeats and telemetry, acks each command, mirrors the e-stop and stops by itself
- * at a motion command's `deadline_ms` unless a newer command arrived first (the Node's deadman).
+ * at a motion command's `deadline_ms` unless a newer command arrived first (the Link's deadman).
  *
  *   attach(robotId)   start the robot's simulator if its profile is a `sim` one (idempotent; pass the profile if loaded) → true/false
  *   startAll()        every existing sim robot (boot)
@@ -64,7 +64,7 @@ function createSimulator({ config, domain, hub, now = () => Date.now(), log = co
         if (f.kind === 'drive') {
             sim.drive = { ...f.value };
             if (sim.stopTimer) clearTimeout(sim.stopTimer);
-            // The deadman: no newer command by the deadline → stop, as the Node does.
+            // The deadman: no newer command by the deadline → stop, as the Link does.
             sim.stopTimer = Number.isFinite(f.deadline_ms) ? setTimeout(() => halt(sim), Math.max(0, f.deadline_ms - now())) : null;
             if (sim.stopTimer && sim.stopTimer.unref) sim.stopTimer.unref();
         } else if (f.kind === 'actuator' && f.value && f.value.name === 'headlights') {

@@ -1,14 +1,14 @@
 'use strict';
 
 /**
- * A machine's coding agents, as its OpenVibe.Node reports them (Codes C9c).
+ * A machine's coding agents, as its OpenVibe Link reports them (Codes C9c).
  *
- * The Node reads them with OpenVibe.Codes' own logins probe (`openvibe-codes logins --json`, as the machine's user)
+ * The Link reads them with OpenVibe.Codes' own logins probe (`openvibe-codes logins --json`, as the machine's user)
  * and sends the reading with every heartbeat (`bot.device-message@1`'s `fleet`): each agent's id, whether it is
  * installed and signed in, and each limit window's label, what it has used of its limit, and when it frees. Bot keeps
  * the latest reading per machine (`devices.fleet`, `devices.fleet_at`) for Codes' Agents page, its router and its MCP.
  *
- * What arrives is bounded here exactly as the Node bounds it before sending, because a frame is whatever the socket
+ * What arrives is bounded here exactly as the Link bounds it before sending, because a frame is whatever the socket
  * says: an agent id shaped like an id, at most 16 agents, at most 10 windows each, a short label and reset time, two
  * finite numbers. A reading never carries a key, a token or an account name, and Bot adds none: it stores what it is
  * sent, and nothing else. `null` means the frame was not a reading at all (not an array) and the last one stands; an

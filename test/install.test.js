@@ -1,5 +1,5 @@
 'use strict';
-// GET /install (plan T15 step 1): a 302 to OpenVibe.Node's installer script, chosen by config only and checked at
+// GET /install (plan T15 step 1): a 302 to OpenVibe Link's installer script, chosen by config only and checked at
 // boot (https, allow-listed host). The pairing's installer command carries `--driver <kind>` from the profile,
 // and nothing for a profile whose driver is `none`.
 const assert = require('assert');

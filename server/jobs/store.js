@@ -3,11 +3,11 @@
 /**
  * run_jobs (migrations/0004_run_jobs.sql): the dispatcher's record of every job it handed to a device.
  *
- *   queued     stored; sent (again on every reconnect) until the Node acks it
- *   placed     the Node acked it
+ *   queued     stored; sent (again on every reconnect) until the Link acks it
+ *   placed     the Link acked it
  *   running    job_started
  *   succeeded / failed / cancelled / expired   from job_exit (exited 0 / exited ≠ 0, limit, stopped, failed /
- *              cancelled / ttl); failed also when the Node nacked it
+ *              cancelled / ttl); failed also when the Link nacked it
  *
  * A cancel before job_started marks the row cancelled at once; job_exit, which is authoritative, still sets the
  * final state and is still metered. exit_reason is written once, by the first job_exit: after it no usage frame
@@ -27,7 +27,7 @@ async function put(db, { job, nodeId, project = null, subject = null, provider =
 }
 
 const get = (db, id) => db.maybe('SELECT * FROM run_jobs WHERE id = $1', [id]);
-/** The job, only if it belongs to this device: a Node never reads or meters another device's job. */
+/** The job, only if it belongs to this device: a Link never reads or meters another device's job. */
 const ofNode = (db, id, nodeId, { lock = false } = {}) => db.maybe(`SELECT * FROM run_jobs WHERE id = $1 AND node_id = $2${lock ? ' FOR UPDATE' : ''}`, [id, nodeId]);
 
 /** Unacked, uncancelled jobs of a device, oldest first: what a reconnect resends. */
@@ -37,7 +37,7 @@ const cancelPending = (db, nodeId) => db.many(`SELECT id FROM run_jobs WHERE nod
 
 const markSent = (db, id, at) => db.exec('UPDATE run_jobs SET sent_at = COALESCE(sent_at, $2), updated_at = $2 WHERE id = $1', [id, at]);
 const markPlaced = (db, id, at) => db.exec(`UPDATE run_jobs SET state = 'placed', updated_at = $2 WHERE id = $1 AND state = 'queued'`, [id, at]);
-/** The Node refused it (nack), or Bot stopped sending it: failed, ended, nothing to meter. */
+/** The Link refused it (nack), or Bot stopped sending it: failed, ended, nothing to meter. */
 const markRefused = (db, id, faultCode, at) => db.exec(
     `UPDATE run_jobs SET state = CASE WHEN cancel_requested THEN 'cancelled' ELSE 'failed' END, fault_code = $2, finished_at = $3, updated_at = $3
      WHERE id = $1 AND state IN ('queued', 'placed', 'cancelled') AND exit_reason IS NULL AND finished_at IS NULL`, [id, faultCode, at]);

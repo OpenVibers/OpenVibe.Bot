@@ -1,6 +1,6 @@
 'use strict';
 // Jobs on the device link (plan T14 L1, platform.job-frame@1): server/jobs/dispatch.js hands a platform.job@1 job
-// to a paired Node, only for a class it advertises, resends it until acked, and meters it into run_usage_outbox
+// to a paired Link, only for a class it advertises, resends it until acked, and meters it into run_usage_outbox
 // one reading per wall-clock second (run:<job id>:<n>), backfilled and deduplicated from job_exit; the relay
 // delivers each reading to Billing once, and keeps it queued while Billing is unset or down.
 const assert = require('assert');
@@ -28,7 +28,7 @@ const PROJECT = `prj_${ids.ulid()}`;
     const send = (deviceId, job, opts = {}) => dispatch(t.db, deviceId, job, { link: t.hub, project: PROJECT, subject: SUBJECT, ...opts });
     const sawJob = (c, id) => c.messages.some((m) => m.type === 'job' && m.job.id === id);
 
-    /** A Network-paired Node advertising `classes`, connected; its capabilities are persisted before it returns. */
+    /** A Network-paired Link advertising `classes`, connected; its capabilities are persisted before it returns. */
     async function node(classes = ['function']) {
         const { robot } = await t.robot(alex);
         const principal = t.network.addNode({ owner: alex.subject, ref: robot.id });
@@ -62,7 +62,7 @@ const PROJECT = `prj_${ids.ulid()}`;
         return n;
     }
 
-    await check('a job reaches its connected Node as a valid job frame and the ack places it', async () => {
+    await check('a job reaches its connected Link as a valid job frame and the ack places it', async () => {
         const n = await node();
         const job = newJob();
         const r = await send(n.deviceId, job);
@@ -80,12 +80,12 @@ const PROJECT = `prj_${ids.ulid()}`;
         await assert.rejects(send(n.deviceId, newJob(), { project: 'not-a-project' }), (e) => e.code === 'bot.invalid_job');
     });
 
-    await check('a class the Node does not advertise is never sent, at dispatch or on a reconnect', async () => {
+    await check('a class the Link does not advertise is never sent, at dispatch or on a reconnect', async () => {
         const n = await node(['function']);
         const code = newJob({ class: 'code' });
         await assert.rejects(send(n.deviceId, code), (e) => e.code === 'bot.class_unadvertised');
         assert.strictEqual(await row(code.id), null);
-        // Stored while the Node is away; it comes back advertising another class only.
+        // Stored while the Link is away; it comes back advertising another class only.
         n.c.close(); await n.c.waitForClose();
         const fn = newJob();
         assert.strictEqual((await send(n.deviceId, fn)).sent, false);
@@ -93,7 +93,7 @@ const PROJECT = `prj_${ids.ulid()}`;
         await n.connect();
         await poll(async () => (await row(fn.id)).state === 'failed');
         assert.strictEqual((await row(fn.id)).fault_code, 'bot.class_unadvertised');
-        assert.ok(!sawJob(n.c, code.id) && !sawJob(n.c, fn.id), 'no job frame for a class the Node lacks');
+        assert.ok(!sawJob(n.c, code.id) && !sawJob(n.c, fn.id), 'no job frame for a class the Link lacks');
     });
 
     await check('an unacked job is resent on every reconnect until acked, then never again', async () => {
@@ -189,7 +189,7 @@ const PROJECT = `prj_${ids.ulid()}`;
         assert.strictEqual(j.state, 'cancelled');
         assert.strictEqual(j.started_ms, null);
         assert.deepStrictEqual(await readings(job.id), []);
-        // Cancelled while the Node is away and never sent: it is not sent on the reconnect either.
+        // Cancelled while the Link is away and never sent: it is not sent on the reconnect either.
         n.c.close(); await n.c.waitForClose();
         const away = newJob();
         await send(n.deviceId, away);
@@ -213,7 +213,7 @@ const PROJECT = `prj_${ids.ulid()}`;
         assert.deepStrictEqual((await readings(job.id)).map((r) => r.idempotency_key), [0, 1, 2, 3, 4].map((k) => `run:${job.id}:${k}`));
     });
 
-    await check('a Node never meters another device\'s job, nor seconds past limits.wall_ms', async () => {
+    await check('a Link never meters another device\'s job, nor seconds past limits.wall_ms', async () => {
         const a = await node();
         const b = await node();
         const S = 1790935600000;
@@ -279,7 +279,7 @@ const PROJECT = `prj_${ids.ulid()}`;
         refused(await call('POST', '/api/v1/jobs', { token: null, body }), 401, 'bot.sign_in');
         // project_id is required: Run is the payer.
         refused(await call('POST', '/api/v1/jobs', { body: { ...body, project_id: undefined } }), 422, 'bot.invalid_input');
-        // The dispatch reaches the Node once; the same job again is idempotent.
+        // The dispatch reaches the Link once; the same job again is idempotent.
         const r = await call('POST', '/api/v1/jobs', { body });
         assert.strictEqual(r.status, 201, r.text);
         assert.strictEqual(r.json.sent, true);
@@ -307,7 +307,7 @@ const PROJECT = `prj_${ids.ulid()}`;
         assert.deepStrictEqual(t.app.locals.jobs.stdout(job.id), got.json.stdout);
         refused(await call('GET', '/api/v1/jobs/job_00000000000000000000000000'), 404, 'bot.job_not_found');
         refused(await call('POST', '/api/v1/jobs/job_00000000000000000000000000/cancel'), 404, 'bot.job_not_found');
-        // Cancel asks the Node to stop it.
+        // Cancel asks the Link to stop it.
         const c = await call('POST', `/api/v1/jobs/${job.id}/cancel`);
         assert.strictEqual(c.status, 200, c.text);
         assert.strictEqual(c.json.job.state, 'cancelled');

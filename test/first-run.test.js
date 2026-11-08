@@ -1,5 +1,5 @@
 'use strict';
-// The guided first run, measured (OpenVibe.Node's `openvibe-node`): the Node sends one `node.first_run` telemetry
+// The guided first run, measured (OpenVibe Link's `openvibe-node`): the Link sends one `node.first_run` telemetry
 // event per step (installed, paired, self_check with ok or the reason, first_job with the machine's counts). Bot stores
 // one row per device and step, the machine's page shows what its first job found, and a reviewer sees the funnel.
 const assert = require('assert');

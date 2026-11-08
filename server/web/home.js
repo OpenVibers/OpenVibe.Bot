@@ -52,8 +52,8 @@ const HOME_CSP = [
 const KINDS = [
     ['browser', 'Simulated', 'No hardware at all: it runs inside Bot and in your browser.'],
     ['phone', 'A phone', 'The phone\'s browser is the robot: scan a code, allow the camera, keep the page open.'],
-    ['onboard', 'On-board', 'The OpenVibe Node runs on the robot\'s own computer, such as a Raspberry Pi, and drives its hardware.'],
-    ['bridge', 'Bridge', 'The Node runs on a computer next to the robot and joins the robot\'s own link. Nothing on the robot changes.'],
+    ['onboard', 'On-board', 'The OpenVibe Link runs on the robot\'s own computer, such as a Raspberry Pi, and drives its hardware.'],
+    ['bridge', 'Bridge', 'The Link runs on a computer next to the robot and joins the robot\'s own link. Nothing on the robot changes.'],
     ['server', 'Server-side', 'Nothing to install: Bot connects to the device itself, like an ONVIF camera.'],
 ];
 // directory.js requires this module for framePage, so its words are read when a page renders, not at load.
@@ -147,7 +147,7 @@ function startSection() {
         title: 'Online in a minute',
         lede: 'The robot connects out to OpenVibe, so there are no ports to open on your router and no stock control server left exposed.',
         items: [
-            { title: 'Run one command on the robot', text: 'Paste the installer line on its Raspberry Pi or Linux computer. It installs the OpenVibe Node, finds the kit and shows a short code.' },
+            { title: 'Run one command on the robot', text: 'Paste the installer line on its Raspberry Pi or Linux computer. It installs the OpenVibe Link, finds the kit and shows a short code.' },
             { title: 'Approve it', text: 'Sign in at openvibe.bot/link and enter the code. The robot\'s credential is stored hashed, and you can revoke it any time.' },
             { title: 'Drive it', text: 'Open the robot\'s panel in any browser, phone included. Share it, list it, or bind it to your OpenVibe.Live channel.' },
         ],
@@ -186,14 +186,14 @@ function moreSection({ config, kit: k, models }) {
     });
     const model = k ? models.find((m) => m.id === k.profile_id) : null;
     const kitBody = k && k.parts && k.parts.length
-        ? `<p class="hm-fold-lede">What to get for the robot OpenVibe.Bot was built around. The OpenVibe Node drives its Robot HAT directly, publishes the Pi camera and stops the motors the moment commands stop.</p><ul class="hm-parts">${k.parts.map((p) => `<li><b>${esc(p.qty || 1)}×</b><span>${esc(p.name)}${p.note ? `<small>${esc(p.note)}</small>` : ''}</span></li>`).join('')}</ul>
+        ? `<p class="hm-fold-lede">What to get for the robot OpenVibe.Bot was built around. The OpenVibe Link drives its Robot HAT directly, publishes the Pi camera and stops the motors the moment commands stop.</p><ul class="hm-parts">${k.parts.map((p) => `<li><b>${esc(p.qty || 1)}×</b><span>${esc(p.name)}${p.note ? `<small>${esc(p.note)}</small>` : ''}</span></li>`).join('')}</ul>
 <p class="hm-kit-actions">${link(k.build_guide_url, 'Adeept\'s build guide', 'sc-btn')}${model ? ` ${link(`/models/${model.id}`, 'Its model page', 'sc-btn')}` : ''} ${link('https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/hardware-adeept.md', 'Setup guide for the Node', 'sc-btn')}</p>`
         : '';
     const build = rows([
-        ['/docs/drivers', 'Write a driver', 'A separate program in any language that speaks JSON lines with the OpenVibe Node: every message and the safety rules.'],
+        ['/docs/drivers', 'Write a driver', 'A separate program in any language that speaks JSON lines with the OpenVibe Link: every message and the safety rules.'],
         ['/docs/profiles', 'Robot profiles', 'The JSON that says what a robot can do and which controls its panel shows, with a validator.'],
         ['/robots/submit', 'Submit a robot', 'Describe your robot with a profile and point at its driver. Once reviewed, anyone can add one.'],
-        ['https://github.com/OpenVibers/OpenVibe.Bot', 'The source', 'OpenVibe.Bot and the OpenVibe Node are open source under the AGPL-3.0.'],
+        ['https://github.com/OpenVibers/OpenVibe.Bot', 'The source', 'OpenVibe.Bot and the OpenVibe Link are open source under the AGPL-3.0.'],
     ]);
     return foldBlock({
         id: 'more',
@@ -201,7 +201,7 @@ function moreSection({ config, kit: k, models }) {
         html: `<section class="sc-sec hm-sec hm-more-sec" id="more" aria-labelledby="more-h"><h2 class="hm-h">More on OpenVibe.Bot</h2>
 ${kit.fold({ id: 'panel', title: 'What the panel does', meta: 'controls, safety, sharing', body: panel })}
 ${kit.fold({ id: 'automate', title: 'Let it run without you', meta: 'routines, webhooks, your agent', body: `<p class="hm-fold-lede">They all go through the gate a person does: the same limits, the same e-stop, the same audit.</p>${automate}` })}
-${kit.fold({ id: 'computers', title: 'Your computers, for your agents and your AI', meta: 'the same Node', body: `<p class="hm-fold-lede">The same OpenVibe Node runs on your own computers. It connects out, nobody else's work reaches them, and the limits you set on each computer always win.</p>${computers}` })}
+${kit.fold({ id: 'computers', title: 'Your computers, for your agents and your AI', meta: 'the same Node', body: `<p class="hm-fold-lede">The same OpenVibe Link runs on your own computers. It connects out, nobody else's work reaches them, and the limits you set on each computer always win.</p>${computers}` })}
 ${kit.fold({ id: 'code', title: 'The same robot from your own code', meta: 'REST and the SDK', body: api })}
 ${kitBody ? kit.fold({ id: 'kit', title: `The first kit: ${k.name}`, meta: plural(k.parts.length, 'part', 'parts'), body: kitBody }) : ''}
 ${kit.fold({ id: 'build', title: 'Build for OpenVibe.Bot', meta: 'drivers, profiles, the source', body: `${build}<p class="hm-fold-lede">${link('/docs', 'All build pages', 'hm-more')}</p>` })}</section>`,
@@ -229,9 +229,9 @@ function faqItems({ models }) {
         { q: 'Can other people drive my robot?', a: 'Only if you say so. Add people by @username as operators or viewers, or open a queue where signed-in visitors take timed turns. Listing a robot in the directory lets anyone watch it.' },
         { q: 'Can I show it on my stream?', a: 'Yes. Bind the robot to your OpenVibe.Live channel and its panel shows under your stream, where anyone you allow can take the controls.' },
         { q: 'Can my AI agent drive it?', a: 'Only when you turn on Your agent for that robot. Then your OpenVibe.Actor agent can read its state and run steps as you, through the same gate, and for nobody else.' },
-        { q: 'Can my agents use my computer?', a: 'Only if you install the OpenVibe Node there and say so. Each agent task gets a desk of its own, a browser or a whole screen, that you can watch and take over, at the level you set on the computer, with a kill switch there. A spare computer can host the desks instead.' },
-        { q: 'Can my AI use the models on my computer?', a: 'Yes. Install the Node with --ai where Ollama, LM Studio or llama.cpp runs and turn on "Let my AI use this computer\'s models": your Vibe, your AI members and your stream\'s AI viewers can then think with them, free, and only for you.' },
-        { q: 'Is it open source?', a: 'Yes. OpenVibe.Bot and the OpenVibe Node that runs on the robot are on GitHub under the AGPL-3.0, and anyone can write a driver or submit a robot profile.' },
+        { q: 'Can my agents use my computer?', a: 'Only if you install the OpenVibe Link there and say so. Each agent task gets a desk of its own, a browser or a whole screen, that you can watch and take over, at the level you set on the computer, with a kill switch there. A spare computer can host the desks instead.' },
+        { q: 'Can my AI use the models on my computer?', a: 'Yes. Install the Link with --ai where Ollama, LM Studio or llama.cpp runs and turn on "Let my AI use this computer\'s models": your Vibe, your AI members and your stream\'s AI viewers can then think with them, free, and only for you.' },
+        { q: 'Is it open source?', a: 'Yes. OpenVibe.Bot and the OpenVibe Link that runs on the robot are on GitHub under the AGPL-3.0, and anyone can write a driver or submit a robot profile.' },
     ].filter(Boolean);
 }
 

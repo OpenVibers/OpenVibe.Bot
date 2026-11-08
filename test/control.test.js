@@ -141,7 +141,7 @@ const plugins = require('./helpers/plugins');
     });
 
     // Over the socket, every Adeept (ordinary and mecanum) and Cozmo control reaches the device in the exact
-    // shape its Node plugin takes (test/helpers/plugins.js transcribes the plugins).
+    // shape its Link plugin takes (test/helpers/plugins.js transcribes the plugins).
     const PLUGIN_COMMANDS = {
         'adeept.adr036': [
             ['drive', { throttle: 0.5, steer: -2 }, { throttle: 0.5, steer: -1 }],

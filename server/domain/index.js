@@ -51,7 +51,7 @@ function newCode() {
 const formatCode = (s) => `${s.slice(0, 4)}-${s.slice(4)}`;
 const isCodeShape = (s) => /^[0-9A-HJKMNP-TV-Z]{8}$/.test(s);
 
-// The installer driver a robot's profile needs (OpenVibe.Node install/install.sh --driver). Simulated,
+// The installer driver a robot's profile needs (OpenVibe Link install/install.sh --driver). Simulated,
 // camera and unknown profiles get `none`, the dry-run plugin, which is also the installer's default.
 const DRIVER_BY_PROFILE = Object.freeze({
     'adeept.adr036': 'adeept', 'adeept.adr036.mecanum': 'adeept-mecanum', cozmo: 'cozmo', looi: 'looi',
@@ -720,7 +720,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     /**
      * A one-time code for `ownerSubject` to add a machine that runs their own jobs (Network pairing, ref
      * `worker:<owner>`; Network keeps one live code per ref, so a new code replaces an unused one). The installer
-     * command turns the Node's job worker on (`--worker`). → { code, expires_at, pairing_id, installer }
+     * command turns the Link's job worker on (`--worker`). → { code, expires_at, pairing_id, installer }
      */
     async function mintMachine(ownerSubject, installerUrl) {
         if (!nodes) fail(503, 'bot.network_unavailable', 'Network pairing is not configured here');
@@ -859,7 +859,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     async function setWatchProbe(deviceId, value) {
         return db.maybe('UPDATE devices SET watch_probe = $2, updated_at = $3 WHERE id = $1 AND revoked_at IS NULL RETURNING *', [deviceId, !!value, iso(now())]);
     }
-    /** Let the owner's AI run models on this machine (OpenVibe Node's ai plugin), or stop it (the owner check is the caller's). */
+    /** Let the owner's AI run models on this machine (OpenVibe Link's ai plugin), or stop it (the owner check is the caller's). */
     async function setAiModels(deviceId, value) {
         return db.maybe('UPDATE devices SET ai_models = $2, updated_at = $3 WHERE id = $1 AND revoked_at IS NULL RETURNING *', [deviceId, !!value, iso(now())]);
     }
@@ -873,7 +873,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     }
     /**
      * The roles a machine has for the network (plan L34, step M4): the owner's choice, checked against the
-     * catalogue (server/machine-roles.js) and stored whole. The Node reads them on its next check-in.
+     * catalogue (server/machine-roles.js) and stored whole. The Link reads them on its next check-in.
      * The owner's check is the caller's.
      */
     async function setMachineRoles(deviceId, roles) {
@@ -993,8 +993,8 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
              WHERE id = $1 AND revoked_at IS NULL RETURNING *`,
             [id, JSON.stringify(fleet), iso(now())]);
     }
-    // ── The guided first run (OpenVibe.Node's `openvibe-node`, docs/install.md#first-run) ──────────────
-    // One row per device and step, from the `node.first_run` telemetry events the Node already sends. The fields are
+    // ── The guided first run (OpenVibe Link's `openvibe-node`, docs/install.md#first-run) ──────────────
+    // One row per device and step, from the `node.first_run` telemetry events the Link already sends. The fields are
     // an allowlist: a path, a username or an address is never stored even if a buggy client sends one.
     const FIRST_RUN_STEPS = new Set(['installed', 'paired', 'self_check', 'first_job']);
     const firstRunNumber = (v) => (Number.isFinite(v) && v >= 0 && v <= Number.MAX_SAFE_INTEGER ? Math.floor(v) : undefined);

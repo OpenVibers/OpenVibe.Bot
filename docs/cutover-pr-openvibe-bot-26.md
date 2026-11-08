@@ -84,10 +84,10 @@ adds it from this file at the verified head; it resolves to:
      node token → `403 bot.forbidden`; with a service token lacking the capability → `403 capability.denied`;
      without `project_id` → `422 bot.invalid_input`.
    - A valid dispatch of a job whose class the target Node advertises → `201`, `sent: true`, a `run_jobs` row in
-     state `queued`, and the Node receives one `job` frame; the same body again → the same row, `sent: false`,
+     state `queued`, and the Link receives one `job` frame; the same body again → the same row, `sent: false`,
      no second frame; a class the device does not advertise → `409 bot.class_unadvertised` with **no** row.
    - `GET /api/v1/jobs/:id` → `200` with the row and any captured stdout; an unknown id → `404 bot.job_not_found`.
-   - `POST /api/v1/jobs/:id/cancel` → `200`, the row `cancelled`, the Node receives one `job_cancel` frame.
+   - `POST /api/v1/jobs/:id/cancel` → `200`, the row `cancelled`, the Link receives one `job_cancel` frame.
 4. Behaviour elsewhere is unchanged: the person and node routes still answer exactly as before, and the
    `/device` and `/control` sockets still gate the same way.
 5. `docs/protocol.md` §1.2 no longer says "no HTTP route", §3 lists the three routes and `bot.job.dispatch`,

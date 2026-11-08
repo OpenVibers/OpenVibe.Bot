@@ -8,14 +8,14 @@
  *                                                         then screen_stream start to the machine with the WHIP URL
  *                                                         and key → { streaming, seconds, fps, until, desk }; desk
  *                                                         `private` shows the machine's private desk (contracts
- *                                                         0.214.0, Node v0.15.0) instead of the owner's own screen
+ *                                                         0.214.0, Link v0.15.0) instead of the owner's own screen
  *   state(device, subject)                                → { live, signaling_url, state, stream } (the session's viewer
  *                                                         URL once the machine is publishing; `state` the machine's own
  *                                                         telemetry: live or off)
  *   stop(device, subject, principal)                      screen_stream stop to the machine (when online) and the
  *                                                         stream's key retired with its session → { stopped }
  *
- * OpenVibe.Node's computer plugin captures the frames and its core publishes them (Node v0.12.0, docs/computer.md).
+ * OpenVibe Link's computer plugin captures the frames and its core publishes them (Link v0.12.0, docs/computer.md).
  */
 const { BotError } = require('./util');
 
@@ -65,18 +65,18 @@ function createMachineScreen({ domain, hub, now = () => Date.now() }) {
             const desk = opts.desk == null || opts.desk === '' ? 'main' : String(opts.desk);
             if (!DESK.test(desk)) throw new BotError(422, 'bot.invalid_input', 'desk is main, private or desk-<name>');
             if (!hub.isOnline(device.id)) throw new BotError(409, 'bot.device_offline', 'the machine is offline');
-            // Before any key is made: the machine says whether it can (Node v0.12.0's computer plugin, a capture tool).
+            // Before any key is made: the machine says whether it can (Link v0.12.0's computer plugin, a capture tool).
             const offered = hub.computerOf(device.id);
             // The person's own screen needs a live capture of it; a desk's is the desk's own (desk.screen, below): a desk
             // host has no screen of its own to show, only its desks.
             if (desk === 'main' && !(offered && offered.screen && offered.screen.stream === true)) {
-                throw new BotError(409, 'bot.computer_off', 'this machine does not show its screen live: it needs OpenVibe Node v0.12.0 or newer, with the computer plugin running in your graphical session');
+                throw new BotError(409, 'bot.computer_off', 'this machine does not show its screen live: it needs OpenVibe Link v0.12.0 or newer, with the computer plugin running in your graphical session');
             }
             if (desk !== 'main' && !(offered && offered.desk && offered.desk.screen)) {
-                throw new BotError(409, 'bot.computer_off', 'this machine has no private desk to show: it needs OpenVibe Node v0.15.0 or newer on Linux, with Xvfb and allow_desk on');
+                throw new BotError(409, 'bot.computer_off', 'this machine has no private desk to show: it needs OpenVibe Link v0.15.0 or newer on Linux, with Xvfb and allow_desk on');
             }
             if (desk !== 'main' && desk !== 'private' && offered.desk.named !== true) {
-                throw new BotError(409, 'bot.computer_off', 'this machine runs one desk only (private): several named desks need OpenVibe Node v0.19.0 or newer');
+                throw new BotError(409, 'bot.computer_off', 'this machine runs one desk only (private): several named desks need OpenVibe Link v0.19.0 or newer');
             }
             // On the owner's OpenVibe Live channel (the Desks plan's D8): a desk only, never their own screen, on a public
             // stream of its own that OpenRestream links to their channel; refused with Live's reason when it cannot be.

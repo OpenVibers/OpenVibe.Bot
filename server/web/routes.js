@@ -2,7 +2,7 @@
 
 /**
  * The non-API surface: the front page at `/` (web/home.js), `/robots.txt`, `/sitemap.xml`, `/llms.txt`,
- * `/llms-full.txt`, `/manifest.webmanifest`, `/install`, a 302 to OpenVibe.Node's installer script (the one-paste command,
+ * `/llms-full.txt`, `/manifest.webmanifest`, `/install`, a 302 to OpenVibe Link's installer script (the one-paste command,
  * ADR-043), and the signed-in pages (the five-minute path and the profile-rendered panel, plan T15 step 3):
  *
  *   GET  /robots           the signed-in person's robots and the "add a robot" form
@@ -103,17 +103,17 @@ const LLMS_PAGES = [
     {
         path: '/models', title: 'Models',
         note: 'Every robot model Bot drives, by how it connects.',
-        text: 'The robots OpenVibe.Bot drives, grouped by how they connect: simulated (the rover that runs in Bot and in the browser), on-board (the OpenVibe Node on the robot\'s own computer: the Adeept ADR036 4WD car and its mecanum build, the relay robot for any Linux board), bridge (the Node on a computer or phone next to the robot: Cozmo through PyCozmo, the LOOI desk robot over Bluetooth) and server-side (ONVIF pan-tilt-zoom cameras, nothing to install). Each model has a page with how it connects, its setup steps, its guide and the controls its panel gets.',
+        text: 'The robots OpenVibe.Bot drives, grouped by how they connect: simulated (the rover that runs in Bot and in the browser), on-board (the OpenVibe Link on the robot\'s own computer: the Adeept ADR036 4WD car and its mecanum build, the relay robot for any Linux board), bridge (the Link on a computer or phone next to the robot: Cozmo through PyCozmo, the LOOI desk robot over Bluetooth) and server-side (ONVIF pan-tilt-zoom cameras, nothing to install). Each model has a page with how it connects, its setup steps, its guide and the controls its panel gets.',
     },
     {
         path: '/docs', title: 'Build for OpenVibe.Bot',
         note: 'The build index: drivers and robot profiles.',
-        text: 'The build index for OpenVibe.Bot. Two things are open to build against: a driver, a separate program the OpenVibe Node runs and talks to in JSON lines over stdin/stdout, and a robot profile (bot.robot-profile@1), the JSON that says what a robot can do and which widgets its panel shows. The page links the driver guide and the profile guide, and points to the OpenVibe Node plugins tree, the protocol document and the plugin contract.',
+        text: 'The build index for OpenVibe.Bot. Two things are open to build against: a driver, a separate program the OpenVibe Link runs and talks to in JSON lines over stdin/stdout, and a robot profile (bot.robot-profile@1), the JSON that says what a robot can do and which widgets its panel shows. The page links the driver guide and the profile guide, and points to the OpenVibe Link plugins tree, the protocol document and the plugin contract.',
     },
     {
         path: '/docs/drivers', title: 'Write a driver',
         note: 'The driver protocol: lifecycle, every message and the safety rules.',
-        text: 'The driver protocol spec for OpenVibe.Bot. A driver is a separate executable the OpenVibe Node core starts, in any language, and the two speak JSON lines over stdin/stdout. The page covers what a driver is, the three connection kinds (on-board, bridge and server-side), the start-up lifecycle and restart rules, every message in both directions (hello, command, heartbeat, stop, estop, resume; describe, ready, fault, ack, nack, telemetry, event and video), the safety rules, a minimal Python driver, and how to test and contribute one.',
+        text: 'The driver protocol spec for OpenVibe.Bot. A driver is a separate executable the OpenVibe Link core starts, in any language, and the two speak JSON lines over stdin/stdout. The page covers what a driver is, the three connection kinds (on-board, bridge and server-side), the start-up lifecycle and restart rules, every message in both directions (hello, command, heartbeat, stop, estop, resume; describe, ready, fault, ack, nack, telemetry, event and video), the safety rules, a minimal Python driver, and how to test and contribute one.',
     },
     {
         path: '/docs/profiles', title: 'Robot profiles',
@@ -128,7 +128,7 @@ const LLMS_PAGES = [
     {
         path: '/docs/computers', title: 'Your computer for your agents',
         note: 'The Node\'s computer plugin: levels set on the computer, approvals there, the agent switch and the API.',
-        text: 'How to let your agents use your own computer through the OpenVibe Node\'s computer plugin. Installed with --computer, it runs as your own account, never root, and its only folder is your home. The level is set on the computer only: observe (screenshots, listing and reading files), ask (programs and writes each approved on the computer with openvibe-node approve), trusted (inside its folders without asking) or full. Programs are argv, never a shell line, time-limited and output-capped. The local stop drops it to observe. The switch Let my agent use this computer on openvibe.bot/machines lets your OpenVibe.Actor agent use it as you. Bot\'s machine commands take exec, fs and screen, and the computer\'s answer comes back in data.',
+        text: 'How to let your agents use your own computer through the OpenVibe Link\'s computer plugin. Installed with --computer, it runs as your own account, never root, and its only folder is your home. The level is set on the computer only: observe (screenshots, listing and reading files), ask (programs and writes each approved on the computer with openvibe-node approve), trusted (inside its folders without asking) or full. Programs are argv, never a shell line, time-limited and output-capped. The local stop drops it to observe. The switch Let my agent use this computer on openvibe.bot/machines lets your OpenVibe.Actor agent use it as you. Bot\'s machine commands take exec, fs and screen, and the computer\'s answer comes back in data.',
     },
     {
         path: '/updates', title: 'What shipped on OpenVibe.Bot',
@@ -474,7 +474,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         return res.redirect(303, '/robots/submissions');
     }));
 
-    // The guided first run's funnel, reviewers only (OpenVibe.Node docs/install.md): the Node reports one
+    // The guided first run's funnel, reviewers only (OpenVibe Link docs/install.md): the Link reports one
     // node.first_run telemetry event per step, and Bot stores one row per device and step.
     r.get('/admin/first-run', page(async (req, res) => {
         const me = requireUser(req);
@@ -626,9 +626,9 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
             computer_desks: Number.isInteger(sensors.computer_desks) ? sensors.computer_desks : null,
             desk_leases: d.shared_desks ? await domain.deskLeases.count(d.id) : 0,
             ai_models: !!d.ai_models,
-            // The Node ai plugin's community offer, when it has one (models, hours, price, audience, paused, privacy).
+            // The Link ai plugin's community offer, when it has one (models, hours, price, audience, paused, privacy).
             ai_offer: (() => { const ai = aiOf(d.capabilities); return ai && ai.offer && typeof ai.offer === 'object' ? ai.offer : null; })(),
-            // How fast its last model answered there (Node v0.29.0's ai plugin), and whether one is answering now.
+            // How fast its last model answered there (Link v0.29.0's ai plugin), and whether one is answering now.
             ai_speed: typeof sensors.ai_tokens_per_s === 'number' && sensors.ai_tokens_per_s > 0 && typeof sensors.ai_model === 'string'
                 ? { model: sensors.ai_model.slice(0, 120), tokens_per_s: sensors.ai_tokens_per_s } : null,
             ai_busy: sensors.ai_busy === 1,
@@ -642,8 +642,8 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         return mine;
     };
     const asUser = (me) => ({ kind: 'user', sub: me.subject });
-    // The machine has a private desk to show (Node v0.15.0 on Linux): its owner may show it, or share it, instead.
-    // The private desk is a whole desk: a machine that runs browser desks only (a Mac, Node v0.23.0) has none to show.
+    // The machine has a private desk to show (Link v0.15.0 on Linux): its owner may show it, or share it, instead.
+    // The private desk is a whole desk: a machine that runs browser desks only (a Mac, Link v0.23.0) has none to show.
     const hasDesk = (mine) => {
         const d = hub && (hub.computerOf(mine.id) || {}).desk;
         return !!d && (!Array.isArray(d.kinds) || d.kinds.includes('desktop'));
@@ -713,7 +713,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         let maxDesks = null;
         let error = null;
         if (!hub || !hub.isOnline(mine.id)) error = 'The machine is offline: its desks stopped with it, or show here when it is back.';
-        else if (!(hub.computerOf(mine.id) || {}).desk) error = 'This machine runs no desks: it needs OpenVibe Node with the computer plugin (Linux with Xvfb, or Chromium for browser desks).';
+        else if (!(hub.computerOf(mine.id) || {}).desk) error = 'This machine runs no desks: it needs OpenVibe Link with the computer plugin (Linux with Xvfb, or Chromium for browser desks).';
         else {
             const r = await hub.machineCommand(mine.id, asUser(me), me.subject, { kind: 'desk', value: { action: 'list' }, ms: 8000 });
             if (r && r.result === 'ack') {
@@ -856,7 +856,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         res.redirect(303, '/machines');
     }));
     // The owner offers this desk host's desks to other people's sessions (OpenVibe.Run, contracts 0.223.0), or stops: only
-    // where its Node sandboxes every desk (Node v0.32.0, install.sh --desk-host --shared).
+    // where its Link sandboxes every desk (Link v0.32.0, install.sh --desk-host --shared).
     r.post('/machines/:id/shared-desks', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
         const me = requireUser(req);
         if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
@@ -865,12 +865,12 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         const on = req.body && req.body.on === '1';
         const desk = ((hub && hub.computerOf(mine.id)) || {}).desk;
         if (on && !(desk && desk.isolation === 'sandbox')) {
-            throw new BotError(409, 'bot.computer_off', 'this machine does not sandbox its desks: install it with --desk-host --shared (OpenVibe Node v0.32.0 or newer), then try again');
+            throw new BotError(409, 'bot.computer_off', 'this machine does not sandbox its desks: install it with --desk-host --shared (OpenVibe Link v0.32.0 or newer), then try again');
         }
         await domain.machines.setSharedDesks(mine.id, on);
         res.redirect(303, '/machines');
     }));
-    // The owner lets Vibe answer their voice on this machine (OpenVibe Node's voice plugin), with a call word, or stops it.
+    // The owner lets Vibe answer their voice on this machine (OpenVibe Link's voice plugin), with a call word, or stops it.
     r.post('/machines/:id/voice', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
         const me = requireUser(req);
         if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');

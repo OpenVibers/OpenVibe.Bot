@@ -14,8 +14,8 @@
  *   DELETE /api/v1/machines/:id/desk-leases/:desk          the desk is stopped and the lease ends
  *
  * A machine takes a lease when it is the person's own and its owner turned on "Let my agent use this computer", or when
- * its owner offers its desks to other people (shared_desks) and its Node runs every desk in its own sandbox (describe
- * desk.isolation "sandbox", Node v0.32.0). Anything else is 404, never confirmed to exist. A leased desk is the
+ * its owner offers its desks to other people (shared_desks) and its Link runs every desk in its own sandbox (describe
+ * desk.isolation "sandbox", Link v0.32.0). Anything else is 404, never confirmed to exist. A leased desk is the
  * session's alone: the machine's own routes refuse it (api/v1.js), and on a shared host nothing but browser desks runs.
  */
 const express = require('express');
@@ -61,7 +61,7 @@ function router({ domain, apiAuth, hub, config = {}, limit = (req, res, next) =>
 
     /**
      * How a person may use a machine for a session, or null: { device, shared, trust }. Their own machine where agents
-     * may use it; another's only when its owner shares its desks and its Node sandboxes every one.
+     * may use it; another's only when its owner shares its desks and its Link sandboxes every one.
      */
     async function usable(device, subject) {
         if (!device || device.revoked_at) return null;

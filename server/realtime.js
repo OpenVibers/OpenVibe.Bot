@@ -9,7 +9,7 @@
  *                     use) and renews it with `reauth` before the 330 s deadline, else close 4002. Heartbeats every 1 s; offline after 2 missed + 3 s grace. Commands are
  *                     never queued for an offline device and never replayed after a reconnect. Jobs
  *                     (platform.job-frame@1, server/jobs/dispatch.js) are the exception: an unacked `job`
- *                     is resent on every reconnect, and the Node never runs one id twice.
+ *                     is resent on every reconnect, and the Link never runs one id twice.
  *   wss://…/control   a signed-in person (Network session cookie or Bearer) or a service token holding
  *                     `bot.robot.control` acting for `X-OV-Subject`. Joins a robot, sends commands; the
  *                     gate lives in the domain and every decision is audited.
@@ -36,32 +36,32 @@ const MAX_BACKLOG = 64;   // frames a device may send before its authentication 
 const ACCESS_COOKIE = 'ov_token';
 const DEVICE_KINDS = new Set(['onboard', 'bridge', 'server']);
 const MAX_AGENT_VERSION = 40;
-// How often a machine's unchanged fleet reading is stored again (Codes C9c): its Node re-reads its agents' logins
+// How often a machine's unchanged fleet reading is stored again (Codes C9c): its Link re-reads its agents' logins
 // every minute, so a minute is as fresh as the reading can be, and a beat every second would be a write a second.
 const FLEET_REFRESH_MS = 60_000;
 const WATCH_MAX_PAYLOAD = 4 * 1024;   // a watcher only ever sends join/leave
 // A machine's answer to a computer command (exec output, a file, a screen) is at most 512 KB of JSON in its ack
-// (OpenVibe.Node protocol.MaxAckData), so a device frame may be that large; ws closes a socket on a larger frame.
+// (OpenVibe Link protocol.MaxAckData), so a device frame may be that large; ws closes a socket on a larger frame.
 const DEVICE_MAX_PAYLOAD = 640 * 1024;
-// The Node's computer plugin (plan T14/T17): the kinds a person's machine takes, the capability each needs in its
+// The Link's computer plugin (plan T14/T17): the kinds a person's machine takes, the capability each needs in its
 // status, and the reply window (the owner's approval on the machine plus the program's own run). `desk` (contracts
-// 0.214.0, Node v0.15.0) starts, stops or reports the machine's private desk; screen, input and browser (and the live
+// 0.214.0, Link v0.15.0) starts, stops or reports the machine's private desk; screen, input and browser (and the live
 // screen) act there with `desk: private`, never on the owner's own screen.
 const COMPUTER_CAP = { exec: 'terminal', fs: 'files', screen: 'screen', probe: 'probe', input: 'input', browser: 'browser', desk: 'desk', ai: 'ai' };
-const NO_DESK = 'this machine has no private desk: it needs OpenVibe Node v0.15.0 or newer on Linux, with Xvfb and allow_desk on';
-const NO_NAMED_DESKS = 'this machine runs one desk only (private): several named desks need OpenVibe Node v0.19.0 or newer';
-const NO_DESK_PROGRAMS = 'running a program on a desk needs OpenVibe Node v0.26.0 or newer (an older one would run it on the person\'s own screen)';
-const NO_BROWSER_DESKS = 'this machine runs no browser desks: they need OpenVibe Node v0.23.0 or newer, with Chromium, Chrome, Edge or Brave';
+const NO_DESK = 'this machine has no private desk: it needs OpenVibe Link v0.15.0 or newer on Linux, with Xvfb and allow_desk on';
+const NO_NAMED_DESKS = 'this machine runs one desk only (private): several named desks need OpenVibe Link v0.19.0 or newer';
+const NO_DESK_PROGRAMS = 'running a program on a desk needs OpenVibe Link v0.26.0 or newer (an older one would run it on the person\'s own screen)';
+const NO_BROWSER_DESKS = 'this machine runs no browser desks: they need OpenVibe Link v0.23.0 or newer, with Chromium, Chrome, Edge or Brave';
 const NO_WHOLE_DESKS = 'this machine runs browser desks only (a whole desk needs Linux with Xvfb): start it with kind browser';
-/** The kinds of desk a machine runs (Node v0.23.0: desk.kinds); an older Node's desks are all whole desks. */
+/** The kinds of desk a machine runs (Link v0.23.0: desk.kinds); an older Link's desks are all whole desks. */
 const deskKinds = (offered) => (offered && offered.desk ? (Array.isArray(offered.desk.kinds) ? offered.desk.kinds : ['desktop']) : []);
 /** The desk a command names: main (the person's own screen, the default), private or desk-<name> (contracts 0.215.0). */
 const deskOf = (value) => (typeof value.desk === 'string' && value.desk ? value.desk : 'main');
 // The screen and the mouse and keyboard of a desk are the desk's own (Node's desk.screen, desk.input): a desk host with
-// no screen of its own (no one signed in, Node v0.20.0 --desk-host) offers them on its desks only.
+// no screen of its own (no one signed in, Link v0.20.0 --desk-host) offers them on its desks only.
 const onDeskOnly = (kind, value) => (kind === 'screen' || kind === 'input') && deskOf(value) !== 'main';
 // A browser command on a desk drives that desk's own browser: any machine with desks takes it, whether or not it offers a
-// browser of its own (a desk host for other people offers none, Node v0.32.0; its core routes it to the desks, v0.32.1).
+// browser of its own (a desk host for other people offers none, Link v0.32.0; its core routes it to the desks, v0.32.1).
 const onDeskBrowser = (kind, value, offered) => kind === 'browser' && deskOf(value) !== 'main' && !!(offered && offered.desk);
 /** A command that acts on a screen (the mouse and keyboard, or the browser doing more than reading it). */
 const actsOnScreen = (kind, value) => kind === 'input' || (kind === 'browser' && !['read', 'close'].includes(value.action));
@@ -113,7 +113,7 @@ function deviceCredentialFromProtocols(header) {
     const value = named ? named.slice(DEVICE_PROTOCOL.length + 1) : '';
     return CREDENTIAL_RE.test(value) ? value : null;
 }
-// The keys the Node's drivers report a sensor capability under (the Adeept and Cozmo plugins: distance_cm, line).
+// The keys the Link's drivers report a sensor capability under (the Adeept and Cozmo plugins: distance_cm, line).
 const SENSOR_KEYS = { ultrasonic: ['distance_cm'], line: ['line'], cliff: ['cliff', 'picked_up'], pickup: ['picked_up', 'pickup'] };
 const finite = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 const rgbOrNull = (c) => (c && typeof c === 'object' ? { r: finite(c.r), g: finite(c.g), b: finite(c.b) } : null);
@@ -288,7 +288,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
      */
     async function persistDeclared(conn, frame) {
         const d = conn.device;
-        // OpenVibe.Node's status lists its drivers as objects ({ name, driver, state, … }, internal/protocol Status)
+        // OpenVibe Link's status lists its drivers as objects ({ name, driver, state, … }, internal/protocol Status)
         // where its pairing request lists their names: the row keeps the names either way.
         const driverName = (x) => (typeof x === 'string' ? x : (x && typeof x === 'object' && typeof (x.driver || x.name) === 'string' ? x.driver || x.name : null));
         const msg = Array.isArray(frame.drivers) ? { ...frame, drivers: frame.drivers.map(driverName) } : frame;
@@ -414,7 +414,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
                 if (msg.fleet !== undefined) noteFleet(conn, msg.fleet);
                 // `echo` carries the device's `t` back for its RTT; the envelope `seq` stays Bot's own counter.
                 const ack = { echo: msg.t !== undefined ? msg.t : null, server_time: iso(now()) };
-                // OpenVibe.Node reads `heartbeat_ack.t` (its RTT is now - t), so echo it as `t` as well.
+                // OpenVibe Link reads `heartbeat_ack.t` (its RTT is now - t), so echo it as `t` as well.
                 if (Number.isFinite(msg.t)) ack.t = msg.t;
                 return sendFrame(conn, 'heartbeat_ack', ack);
             }
@@ -493,7 +493,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         }
         conn.telemetry = msg;
         if (urgent && !conn.sim) {
-            // The guided first run's steps ride these events (OpenVibe.Node's docs/install.md#first-run): store the
+            // The guided first run's steps ride these events (OpenVibe Link's docs/install.md#first-run): store the
             // step times for the machines page and the admin funnel. Not awaited: the sensor broadcast below must
             // keep its frame order (two telemetry frames are handled concurrently), and a storage failure must never
             // break a robot's telemetry. The domain ignores an event that is not a known step.
@@ -814,20 +814,20 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             if (screen) {
                 // A desk's live view is the desk's own screen (desk.screen, checked below), not the person's.
                 if (value.action === 'start' && deskOf(value) === 'main' && !(offered && offered.screen && offered.screen.stream === true)) {
-                    return refuse('bot.computer_off', 'this machine does not show its screen live: it needs OpenVibe Node v0.12.0 or newer, with the computer plugin running in your graphical session', summary);
+                    return refuse('bot.computer_off', 'this machine does not show its screen live: it needs OpenVibe Link v0.12.0 or newer, with the computer plugin running in your graphical session', summary);
                 }
             } else if (!offered || !(onDeskBrowser(kind, value, offered) || (onDeskOnly(kind, value) ? (offered.desk && offered.desk[kind] === true) : offered[COMPUTER_CAP[kind]]))) {
-                return refuse('bot.computer_off', kind === 'desk' ? NO_DESK : kind === 'ai' ? 'this machine offers no models: it needs OpenVibe Node v0.27.0 or newer with the ai plugin (install.sh --ai) and a model server (Ollama, LM Studio or llama.cpp)' : `this machine does not offer ${COMPUTER_CAP[kind]}: its computer plugin is off (openvibe-node, --computer)`, summary);
+                return refuse('bot.computer_off', kind === 'desk' ? NO_DESK : kind === 'ai' ? 'this machine offers no models: it needs OpenVibe Link v0.27.0 or newer with the ai plugin (install.sh --ai) and a model server (Ollama, LM Studio or llama.cpp)' : `this machine does not offer ${COMPUTER_CAP[kind]}: its computer plugin is off (openvibe-node, --computer)`, summary);
             }
             // A desk other than the person's own screen needs a machine that has desks; one other than private (a named desk,
-            // one per agent task) needs a machine that runs several (Node v0.19.0: desk.named). Kind desk names its desk in
+            // one per agent task) needs a machine that runs several (Link v0.19.0: desk.named). Kind desk names its desk in
             // value.desk too, private by default.
             const desk = kind === 'desk' ? (typeof value.desk === 'string' ? value.desk : 'private') : deskOf(value);
             if (desk !== 'main' && !(offered && offered.desk)) return refuse('bot.computer_off', NO_DESK, summary);
             if (desk !== 'main' && desk !== 'private' && !(offered.desk && offered.desk.named === true)) return refuse('bot.computer_off', NO_NAMED_DESKS, summary);
-            // A program on a desk (Node v0.26.0: terminal.desks): an older Node would run it in the person's own session.
+            // A program on a desk (Link v0.26.0: terminal.desks): an older Link would run it in the person's own session.
             if (kind === 'exec' && desk !== 'main' && !(offered.terminal && offered.terminal.desks === true)) return refuse('bot.computer_off', NO_DESK_PROGRAMS, summary);
-            // A desk starts as a kind the machine runs (Desks plan D2): an older Node would quietly start a whole desk
+            // A desk starts as a kind the machine runs (Desks plan D2): an older Link would quietly start a whole desk
             // for a browser desk, and a Mac runs browser desks only.
             if (kind === 'desk' && value.action === 'start') {
                 const wanted = typeof value.kind === 'string' ? value.kind : 'desktop';
@@ -988,7 +988,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     function closeDevice(deviceId, reason = 'revoked') { const c = deviceConns.get(deviceId); if (c) { try { c.ws.close(4003, reason); } catch { /* gone */ } dropDevice(c); } }
     function deviceState(deviceId) { const c = deviceConns.get(deviceId); return c ? { online: c.online, rtt_ms: c.rttMs, telemetry: c.telemetry, status: c.status } : { online: false, rtt_ms: null, telemetry: null, status: null }; }
 
-    // A device may report battery the legacy way (a 0..1 fraction) or as OpenVibe.Node does ({volts, percent}).
+    // A device may report battery the legacy way (a 0..1 fraction) or as OpenVibe Link does ({volts, percent}).
     function batteryFraction(telemetry) {
         const b = telemetry ? telemetry.battery : null;
         if (Number.isFinite(b)) return b;
@@ -1021,7 +1021,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     }
     /**
      * The telemetry keys a profile's readout widgets show (`telemetry` widgets, `sensor.<key>` capabilities): the
-     * capability's name, and the keys the Node's drivers report it under (public/panel.js SENSOR_KEYS).
+     * capability's name, and the keys the Link's drivers report it under (public/panel.js SENSOR_KEYS).
      */
     function readoutKeys(profile) {
         const keys = new Set();

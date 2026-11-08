@@ -101,7 +101,7 @@ const { loadProfiles } = require('../server/profiles');
         const s = await w.waitFor((m) => m.type === 'robot_state' && m.state.telemetry && m.state.telemetry.sim);
         const tel = s.state.telemetry;
         assert.deepStrictEqual(Object.keys(tel.sim).sort(), ['bumped', 'drive', 'headlights', 'horn', 'pose']);
-        assert.deepStrictEqual(Object.keys(tel.sensors).sort(), ['distance_cm', 'line'], 'the range finder and line readouts under the keys the Node reports');
+        assert.deepStrictEqual(Object.keys(tel.sensors).sort(), ['distance_cm', 'line'], 'the range finder and line readouts under the keys the Link reports');
         assert.ok(!('drive' in tel) && !('pose' in tel), 'nothing else of the telemetry');
         w.close();
         t.app.locals.sim.stop(robot.id);

@@ -5,7 +5,7 @@
  * and signed before they run on anyone's Node). Anyone signed in submits a profile whose id is under `community.`,
  * with the driver's source, a setup guide and a licence; an OpenVibe admin approves or rejects it. Approving signs the
  * profile (Ed25519 over its canonical JSON, BOT_PROFILE_SIGNING_KEY) and puts it in the catalogue (robot_profiles), so
- * robots can be added with it; the signature and Bot's public key are published so a Node or anyone can check it.
+ * robots can be added with it; the signature and Bot's public key are published so a Link or anyone can check it.
  *
  *   createSubmissions({ db, config, now })
  *     submit(person, { profile, driver_url, guide_url, license, notes })  → the submission row (pending)

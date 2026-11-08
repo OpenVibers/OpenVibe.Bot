@@ -1,6 +1,6 @@
 'use strict';
 /**
- * What each device plugin accepts, transcribed from OpenVibe.Node (2479ef1) so Bot's profiles are tested
+ * What each device plugin accepts, transcribed from OpenVibe Link (2479ef1) so Bot's profiles are tested
  * against the device side. A value passes only when the plugin takes it as sent and inside its ranges —
  * never by leaning on the plugin's own clamp. accepts(kind, value) returns null, or why it would be refused.
  *
@@ -8,12 +8,12 @@
  *   COZMO  = plugins/cozmo/openvibe_cozmo/__init__.py
  *   SDK    = plugins/sdk/openvibe_plugin/__init__.py
  *
- * LOOI   = OpenVibe.Node docs/hardware-looi.md (a community driver; the contract it implements).
+ * LOOI   = OpenVibe Link docs/hardware-looi.md (a community driver; the contract it implements).
  * RELAY  = the relay plugin (plan T15 R9 step 4), a bridge with no hardware of its own.
  * ROS2   = plugins/ros2/openvibe_ros2/__init__.py (Ros2.handle): drive only (say needs say_topic, which no shipped
  *          profile assumes); throttle/steer, or x/y/rotation when the profile's base is holonomic.
  *
- * camera.onvif and sim.rover are `kind: "server"` profiles with no Node plugin; their contract is the
+ * camera.onvif and sim.rover are `kind: "server"` profiles with no Link plugin; their contract is the
  * value table in docs/protocol.md.
  */
 const num = (v, lo, hi) => typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi;
@@ -133,12 +133,12 @@ function cozmo({ maxSay = 200 } = {}) {
 }
 
 /**
- * RELAY (relay.generic): the Node plugin that forwards a robot's button and video-click commands to the
+ * RELAY (relay.generic): the Link plugin that forwards a robot's button and video-click commands to the
  * owner's local script (plan T15 R9 step 4). It takes every declared button name and the point layer as the
  * gate builds them (server/domain buildValue); it holds no hardware of its own.
  */
 const relay = {
-    name: 'relay (Node plugin)',
+    name: 'relay (Link plugin)',
     accepts(kind, v) {
         if (kind === 'halt') return halt(v);
         if (!isObj(v)) return `${kind} value must be an object`;
@@ -198,7 +198,7 @@ const server = {
 };
 
 /**
- * LOOI = OpenVibe.Node docs/hardware-looi.md, the contract the community's Generic LOOI driver implements: drive is
+ * LOOI = OpenVibe Link docs/hardware-looi.md, the contract the community's Generic LOOI driver implements: drive is
  * throttle/steer -1..1, the one actuator is head -1..1, and halt.
  */
 const looi = {
@@ -218,7 +218,7 @@ const looi = {
     },
 };
 
-/** The contract a profile's commands must meet: its Node plugin, or the server driver. */
+/** The contract a profile's commands must meet: its Link plugin, or the server driver. */
 /**
  * The phone driver = public/phone-device.js onCommand: say {text}; display {face} (its FACES) or {text}; actuator
  * torch (true/false) and chime ({hz} or null); halt. Anything else is nacked unsupported.
