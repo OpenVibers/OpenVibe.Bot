@@ -21,6 +21,7 @@ const { boot, check, done } = require('./helpers/app');
         assert.match(csp, /connect-src 'self' https:\/\/openvibe\.network https:\/\/openvibe\.events/);
         assert.match(csp, /frame-ancestors 'none'/);
         const html = await r.text();
+        assert.ok(html.includes('"silentLogin":"/auth/login?silent=1&next={url}"'), 'first visits use the existing SDK OAuth route');
         assert.match(html, /<h1>Drive your robot<span class="sc-accent"> from any browser\.<\/span><\/h1>/);
         assert.match(html, /<meta name="robots" content="index, follow">/);
         assert.match(html, /<link rel="canonical" href="http:\/\/bot\.test\/">/);

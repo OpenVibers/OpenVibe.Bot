@@ -277,6 +277,7 @@ function framePage({ config, title, description, canonicalPath = '/', body, head
         history: { type: 'page', title },
         sessionUrl: '/auth/me',
         loginUrl: '/auth/login?next={path}',
+        silentLogin: '/auth/login?silent=1&next={url}',
         logoutUrl: '/auth/logout?next={path}',
         notificationsRealtime: true,
     };
@@ -338,6 +339,7 @@ function renderHome({ config, signedIn = false, models = [], robots = [], kit = 
         history: { type: 'page', title: SITE_NAME },
         sessionUrl: '/auth/me',
         loginUrl: '/auth/login?next={path}',
+        silentLogin: '/auth/login?silent=1&next={url}',
         logoutUrl: '/auth/logout?next={path}',
         notificationsRealtime: true,
     };
