@@ -103,6 +103,10 @@ function samples(profile, kind, names) {
         assert.deepStrictEqual(Object.keys(p.commands).sort(), ['actuator', 'drive', 'halt'], 'halt is in every profile');
         assert.deepStrictEqual(p.commands.drive.axes, { throttle: [-1, 1], steer: [-1, 1] });
         assert.deepStrictEqual(p.commands.actuator.names, { head: { type: 'number', range: [-1, 1] } });
+        // The head slider repeats while held, every 90 ms (the panel's setting, 2026-11-09).
+        const { renderWidget } = require('../server/web/render');
+        const head = renderWidget(p.widgets.find((w) => w.type === 'head'), { profile: p, allowed_commands: ['actuator'] });
+        assert.match(head, /data-actuator="head" data-hold-repeat="90"/, 'the slider carries its repeat');
         assert.ok(!p.camera, 'no camera of its own');
         assert.ok(p.limits.max_speed <= 0.5 && p.limits.max_command_ms <= 300, 'a desk robot starts slow, with short commands');
     });

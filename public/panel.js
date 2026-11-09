@@ -429,6 +429,8 @@
         el.addEventListener('contextmenu', (e) => e.preventDefault());
     }
     function releaseAll() {
+        // Held slider repeats stop too (the e-stop, blur, a hidden page): the slider code listens for this.
+        try { window.dispatchEvent(new Event('ov-bot-release-all')); } catch { /* */ }
         for (const [kind, h] of [...holds]) for (const source of [...h.src.keys()]) {
             if (source instanceof Element) releaseButton(source); else holdRelease(kind, source);
         }
@@ -785,10 +787,33 @@
             if (!timer) timer = setTimeout(() => { timer = null; last = Date.now(); if (pending) fn(...pending); pending = null; }, wait);
         };
     }
+    // A slider whose profile asks for it (data-hold-repeat, 75-250 ms) sends its current value again as a new command
+    // while the pointer holds it, and stops at once on release, cancel, a lost capture, blur, a hidden page or pagehide:
+    // nothing is replayed from anywhere, and no command goes after release (2026-11-09, the LOOI head's short leases).
+    const repeats = new Set();
     $$('[data-actuator]').forEach((el) => {
-        const push = throttled(() => send('actuator', { name: el.dataset.actuator, value: Number(el.value) }));
+        let lastSent = 0;
+        const sendNow = () => { lastSent = Date.now(); send('actuator', { name: el.dataset.actuator, value: Number(el.value) }); };
+        const push = throttled(sendNow);
         el.addEventListener('input', push);
+        const every = Number(el.dataset.holdRepeat) || 0;
+        if (!every) return;
+        let timer = null;
+        const stop = () => { if (timer) { clearInterval(timer); timer = null; } repeats.delete(stop); };
+        el.addEventListener('pointerdown', (e) => {
+            if (el.disabled) return;
+            try { el.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+            stop();
+            timer = setInterval(() => { if (!el.isConnected || el.disabled) return stop(); if (Date.now() - lastSent >= every - 5) sendNow(); }, every);
+            repeats.add(stop);
+        });
+        for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) el.addEventListener(ev, stop);
     });
+    const stopRepeats = () => { [...repeats].forEach((s) => s()); };
+    window.addEventListener('blur', stopRepeats);
+    document.addEventListener('visibilitychange', () => { if (document.hidden) stopRepeats(); });
+    window.addEventListener('pagehide', stopRepeats);
+    window.addEventListener('ov-bot-release-all', stopRepeats);
     const rgb = (hex) => ({ r: parseInt(hex.slice(1, 3), 16), g: parseInt(hex.slice(3, 5), 16), b: parseInt(hex.slice(5, 7), 16) });
     $$('[data-rgb]').forEach((el) => {
         const push = throttled(() => send('actuator', { name: el.dataset.rgb, value: rgb(el.value) }));
