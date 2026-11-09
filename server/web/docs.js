@@ -1,4 +1,5 @@
 'use strict';
+const kit = require('openvibe-shared/kit');
 
 /**
  * The public "Build for OpenVibe.Bot" pages (plan T15): a guide to writing a driver for the OpenVibe Link, the
@@ -53,8 +54,7 @@ const message = (name, text, sample) => `<div class="card"><p><code>${esc(name)}
 
 function renderDocsIndex({ config }) {
     const content = `
-<h1>Build for OpenVibe.Bot</h1>
-<p class="muted">OpenVibe.Bot drives a robot from its profile. Two things are open to build against: the <b>driver</b> — a separate program the OpenVibe Link runs — and the <b>profile</b>, the JSON that turns a driver's capabilities into a panel.</p>
+${kit.pageHead({ title: `Build for OpenVibe.Bot`, icon: 'code', back: { href: '/', label: 'Home' } , lede: `OpenVibe.Bot drives a robot from its profile. Two things are open to build against: the driver — a separate program the OpenVibe Link runs — and the profile, the JSON that turns a driver's capabilities into a panel.` })}
 <section class="card"><h2>Write a driver</h2>
 <p>A driver is a separate program the OpenVibe Link starts and talks to in JSON lines over stdin/stdout. It can be written in any language. It may run on the robot (on-board), on a computer beside it (a bridge), or be attached by Bot itself on the server — the same protocol either way.</p>
 <p>${inLink('/docs/drivers', 'Write a driver')} covers the lifecycle, every message, the safety rules, a minimal Python driver, and how to test and contribute it.</p></section>
@@ -83,7 +83,7 @@ function renderDocsIndex({ config }) {
 
 function renderDriversPage({ config }) {
     const content = `
-<h1>Write a driver</h1>
+${kit.pageHead({ title: `Write a driver`, icon: 'code', back: { href: '/', label: 'Home' } })}
 <p class="muted">A driver is how OpenVibe.Bot moves a specific piece of hardware. This page is the spec: build against it instead of reverse-engineering Bot. The full contract is ${out(`${BLOB}/docs/plugins.md`, 'plugins.md')} in OpenVibe Link.</p>
 
 <section class="card"><h2>What a driver is</h2>
@@ -250,8 +250,7 @@ function validationResult(result) {
 function renderProfilesPage({ config, source = '', result = null } = {}) {
     const example = JSON.stringify(simRover, null, 2);
     const content = `
-<h1>Robot profiles</h1>
-<p class="muted">A robot profile (<code>bot.robot-profile@1</code>) is the contract between a robot and its panel. The panel is a function of the profile: a new robot needs a profile, not code. Profiles ship as <code>server/profiles/*.json</code>, are validated by the loader, and are served at ${inLink('/api/v1/profiles', 'GET /api/v1/profiles')}.</p>
+${kit.pageHead({ title: `Robot profiles`, icon: 'code', back: { href: '/', label: 'Home' } , lede: `A robot profile (bot.robot-profile@1) is the contract between a robot and its panel. The panel is a function of the profile: a new robot needs a profile, not code. Profiles ship as server/profiles/*.json, are validated by the loader, and are served at GET /api/v1/profiles.` })}<p>${inLink('/api/v1/profiles', 'Browse profiles')}</p>
 
 <section class="card"><h2>Fields</h2>
 <ul>
@@ -318,8 +317,7 @@ const STEPS_CALL = `curl -X POST https://openvibe.bot/api/v1/robots/rob_…/step
 
 function renderAutomationPage({ config }) {
     const content = `
-<h1>Routines, webhooks and your agent</h1>
-<p class="muted">A robot can move without anyone holding the controls, tell your own server what happened to it, and take orders from your OpenVibe.Actor agent. Every one of these goes through the same gate as a person at the panel: the robot's limits, cooldowns and e-stop apply, and the audit records each command.</p>
+${kit.pageHead({ title: `Routines, webhooks and your agent`, icon: 'code', back: { href: '/', label: 'Home' } , lede: `A robot can move without anyone holding the controls, tell your own server what happened to it, and take orders from your OpenVibe.Actor agent. Every one of these goes through the same gate as a person at the panel: the robot's limits, cooldowns and e-stop apply, and the audit records each command.` })}
 
 <section class="card" aria-labelledby="steps-h"><h2 id="steps-h">Steps</h2>
 <p>Routines and the agent both speak in steps, one per line, checked against the robot's own profile. A robot takes only what it has:</p>
@@ -383,8 +381,7 @@ const COMPUTER_CALL = `curl -X POST https://openvibe.bot/api/v1/machines/dev_…
 
 function renderComputersPage({ config }) {
     const content = `
-<h1>Your computer for your agents</h1>
-<p class="muted">The OpenVibe Link's <b>computer</b> plugin lets your agents use your own computer: its terminal, its files, its screen and (when you allow it) its mouse and keyboard. It is off unless you install it, it never runs as root, and you decide what it may do on the computer itself. Nothing on OpenVibe can raise that level.</p>
+${kit.pageHead({ title: `Your computer for your agents`, icon: 'code', back: { href: '/', label: 'Home' } , lede: `The OpenVibe Link's computer plugin lets your agents use your own computer: its terminal, its files, its screen and (when you allow it) its mouse and keyboard. It is off unless you install it, it never runs as root, and you decide what it may do on the computer itself. Nothing on OpenVibe can raise that level.` })}
 
 <section class="card" aria-labelledby="install-h"><h2 id="install-h">Install it</h2>
 <p>On ${inLink('/machines', 'Your machines')}, choose <b>Add a machine</b> and run the command under <b>Let your agents use it</b> on the computer, from your own account (the installer uses sudo itself):</p>

@@ -11,7 +11,9 @@ const { boot, check, done } = require('./helpers/app');
 (async () => {
     const reports = [];
     const reporter = { report: async (offers) => { reports.push(offers); return { source: 'bot', offers: offers.length, marked_down: 0 }; } };
-    const t = await boot({ env: { BOT_ROUTINE_TICK_MS: '0', BOT_WEBHOOK_TICK_MS: '0' }, appOpts: { offerReporter: reporter } });
+    // This test covers ownership and machine UI, not missed-heartbeat expiry. Leave enough
+    // grace for page rendering on a busy test host; explicit socket closes still go offline.
+    const t = await boot({ env: { BOT_ROUTINE_TICK_MS: '0', BOT_WEBHOOK_TICK_MS: '0', BOT_OFFLINE_GRACE_MS: '30000' }, appOpts: { offerReporter: reporter } });
     const alex = t.network.newUser('alex');
     const bob = t.network.newUser('bob');
     const { dispatch } = require('../server/jobs/dispatch');
@@ -85,7 +87,9 @@ const { boot, check, done } = require('./helpers/app');
         const anon = await fetch(`${t.base}/machines`, { redirect: 'manual' });
         assert.strictEqual(anon.status, 401, 'signed out: a gate page here, noindex (SEO-7)');
         const page = await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text();
-        assert.ok(page.includes('Your machines') && page.includes('desk-pc') && page.includes('Online') && page.includes('code jobs'), page);
+        for (const text of ['Your machines', 'desk-pc', 'Online', 'code jobs']) {
+            assert.ok(page.includes(text), `machine list is missing ${text}`);
+        }
         assert.ok(!page.includes(bob.subject));
         const added = await form('/machines', alex);
         assert.strictEqual(added.status, 201);

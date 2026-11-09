@@ -1,4 +1,5 @@
 'use strict';
+const uiKit = require('openvibe-shared/kit');
 
 /**
  * The robot directory (plan T15 "a robot directory (/robots)"), inside the OpenVibe Frame like the front page:
@@ -123,7 +124,9 @@ function short(text, max = 120) {
 const ownerName = (o) => (o && o.username ? `@${o.username}` : 'an OpenVibe member');
 
 function shell({ config, path, title, description, body }) {
-    return framePage({ config, title: `${title} · OpenVibe.Bot`, description, canonicalPath: path, head: '<link rel="stylesheet" href="/directory.css">', body: `<main id="main" class="dir">${body}</main>` });
+    const parent = path.startsWith('/models/') ? { name: 'Models', url: config.baseUrl + '/models' } : { name: 'Robots', url: config.baseUrl + '/robots' };
+    const crumbs = [{ name: 'Home', url: config.baseUrl + '/' }, ...(path !== '/robots' && path !== '/models' ? [parent] : []), { name: title, url: config.baseUrl + path }];
+    return framePage({ jsonLd: require('openvibe-shared/seo').jsonLd.breadcrumbs(crumbs), config, title: `${title} · OpenVibe.Bot`, description, canonicalPath: path, head: '<link rel="stylesheet" href="/directory.css">', body: `<main id="main" class="dir">${body}</main>` });
 }
 
 function modelCard(m) {
@@ -154,8 +157,7 @@ ${mine && mine.length ? `<ul class="dir-list">${mine.map((r) => `<li class="dir-
         + `${r.listed ? `<a class="dir-pill" href="/r/${esc(r.id)}">Listed</a>` : '<span class="dir-pill dir-quiet">Not listed</span>'}`
         + `<span class="dir-row-actions">${link(`/panel/${r.id}`, 'Panel')} · ${link(`/pair/${r.id}`, 'Pair a device')}</span></li>`).join('')}</ul>`
         : '<p class="muted">No robots yet. Add one: a simulated rover drives straight away, before any hardware exists.</p>'}</section>`;
-    const body = `<header class="dir-hero"><h1>Robots</h1>
-<p class="muted">Robots people share on OpenVibe.Bot, and every model it drives. Watch any listed robot live; some take visitors at the controls in turns.</p></header>
+    const body = `<div class="dir-hero">${uiKit.pageHead({ title: `Robots`, icon: 'gear', back: { href: '/', label: 'Home' } , lede: `Robots people share on OpenVibe.Bot, and every model it drives. Watch any listed robot live; some take visitors at the controls in turns.` })}</div>
 ${yours}
 <section class="dir-sec" aria-labelledby="listed-h"><h2 id="listed-h">In the directory</h2>
 <ul class="dir-grid">${DEMO_CARD}${listed.map(robotCard).join('')}</ul>
@@ -173,8 +175,7 @@ function renderModels({ config, models = [] }) {
     const official = models.filter((m) => !m.community);
     const community = sortModels(models.filter((m) => m.community));
     const groups = ['browser', 'phone', 'onboard', 'bridge', 'server'].map((k) => [k, sortModels(official).filter((m) => m.connect === k)]).filter(([, ms]) => ms.length);
-    const body = `<header class="dir-hero"><h1>Models</h1>
-<p class="muted">Every robot OpenVibe.Bot has a profile for. A profile lays out the panel, so each of these drives with the controls it really has.</p></header>
+    const body = `<div class="dir-hero">${uiKit.pageHead({ title: `Models`, icon: 'gear', back: { href: '/', label: 'Home' } , lede: `Every robot OpenVibe.Bot has a profile for. A profile lays out the panel, so each of these drives with the controls it really has.` })}</div>
 ${groups.map(([k, ms]) => `<section class="dir-sec" aria-labelledby="g-${esc(k)}"><h2 id="g-${esc(k)}">${esc(CONNECT[k].label)}</h2><p class="muted">${esc(CONNECT[k].text)}</p>
 <ul class="dir-grid">${ms.map(modelCard).join('')}</ul></section>`).join('\n')}
 ${community.length ? `<section class="dir-sec" aria-labelledby="g-community"><h2 id="g-community">From the community</h2><p class="muted">Profiles people submitted and an OpenVibe admin reviewed. Each one is signed by OpenVibe.Bot; its driver is the submitter's.</p>
@@ -192,9 +193,8 @@ ${kit.build_guide_url ? `<p>${link(kit.build_guide_url, 'The kit\'s build guide'
     const add = model.connect === 'browser'
         ? `${link('/try', 'Try it now, no account', 'dir-btn dir-primary')} ${link(`/robots/new?profile=${encodeURIComponent(model.id)}`, 'Add one to your robots', 'dir-btn')}`
         : `${link(`/robots/new?profile=${encodeURIComponent(model.id)}`, 'Add this robot', 'dir-btn dir-primary')}${model.connect === 'onboard' ? ` ${link(`/setup/sd-card?profile=${encodeURIComponent(model.id)}`, 'Start from a blank microSD card', 'dir-btn')}` : ''}${model.guide ? ` ${link(model.guide.href, model.guide.label, 'dir-btn')}` : ''}`;
-    const body = `<p class="dir-crumb">${link('/robots', 'Robots')} / ${link('/models', 'Models')}</p>
-<header class="dir-hero"><h1>${esc(model.name)}</h1><p>${badge(model.connect)}${communityBadge(model)}${model.vendor ? ` <span class="muted">by ${esc(model.vendor)}</span>` : ''}</p>
-<p class="muted">${esc(model.description)}</p><p class="dir-actions">${add}</p></header>
+    const body = `<div class="dir-hero">${uiKit.pageHead({ title: `${model.name}`, icon: 'gear', back: { href: '/models', label: 'Models' } })}<p>${badge(model.connect)}${communityBadge(model)}${model.vendor ? ` <span class="muted">by ${esc(model.vendor)}</span>` : ''}</p>
+<p class="muted">${esc(model.description)}</p><p class="dir-actions">${add}</p></div>
 <div class="dir-cols">
 <section class="dir-sec card"><h2>How it connects</h2><p><b>${esc(CONNECT[model.connect].label)}.</b> ${esc(CONNECT[model.connect].text)}</p>
 ${model.setup.length ? `<ol>${model.setup.map((s) => `<li>${esc(s)}</li>`).join('')}</ol>` : ''}</section>
@@ -215,11 +215,10 @@ function renderRobotPage({ config, robot, model, owner = null, state = null, rol
     const online = !!(state && state.online);
     const turn = robot.access_policy === 'queue' ? link(`/panel/${robot.id}`, 'Take a turn at the controls', 'dir-btn dir-primary') : '';
     const member = role ? link(`/panel/${robot.id}`, role === 'owner' ? 'Open your panel' : 'Open the panel', 'dir-btn dir-primary') : '';
-    const body = `<p class="dir-crumb">${link('/robots', 'Robots')}</p>
-<header class="dir-hero"><h1>${esc(robot.name)}</h1>
+    const body = `<div class="dir-hero">${uiKit.pageHead({ title: `${robot.name}`, icon: 'gear', back: { href: '/robots', label: 'Robots' } })}
 <p><span class="dir-state" data-state="${online ? 'online' : 'offline'}"><span class="dir-dot"></span>${online ? 'Online' : 'Offline'}</span> ${link(`/models/${model.id}`, model.name, 'dir-pill')} <span class="muted">by ${esc(ownerName(owner))}</span></p>
 <p class="muted">${esc(POLICY_WORDS[robot.access_policy] || '')}</p>
-${member || turn ? `<p class="dir-actions">${member || turn}</p>` : ''}</header>
+${member || turn ? `<p class="dir-actions">${member || turn}</p>` : ''}</div>
 <div class="dir-live"><iframe src="/panel/${esc(robot.id)}/embed" title="${esc(robot.name)}: live panel" loading="lazy" allow="autoplay; gamepad"></iframe></div>
 <p class="muted dir-note">Watching is open to everyone; driving follows the owner's rules and passes the same gate and e-stop as on its own panel.</p>`;
     return shell({ config, path: `/r/${robot.id}`, title: robot.name, description: `${robot.name}, a ${model.name} on OpenVibe.Bot. ${POLICY_WORDS[robot.access_policy] || ''}`.trim(), body });
@@ -233,8 +232,7 @@ function renderAddRobot({ config, models = [], values = {}, error = null }) {
         + `<span class="dir-choice-body"><span class="dir-card-head"><b>${esc(m.name)}</b>${badge(m.connect)}</span><span class="dir-card-text">${esc(CONNECT[m.connect].text)}</span></span></label>`;
     const groups = [['browser', 'Try it with no hardware'], ['phone', 'A phone, from its browser'], ['onboard', 'A robot with its own computer'], ['bridge', 'A robot you connect through a computer next to it'], ['server', 'A camera Bot connects to']]
         .map(([k, title]) => [title, sortModels(models).filter((m) => m.connect === k)]).filter(([, ms]) => ms.length);
-    const body = `<p class="dir-crumb">${link('/robots', 'Robots')}</p>
-<header class="dir-hero"><h1>Add a robot</h1><p class="muted">Name it, say what it is, and choose who may drive. A simulated rover drives the moment it is added; anything else gets a one-time pairing code and one command to paste on its computer.</p></header>
+    const body = `<div class="dir-hero">${uiKit.pageHead({ title: `Add a robot`, icon: 'gear', back: { href: '/robots', label: 'Robots' } , lede: `Name it, say what it is, and choose who may drive. A simulated rover drives the moment it is added; anything else gets a one-time pairing code and one command to paste on its computer.` })}</div>
 <section class="dir-form sd-entry" aria-labelledby="add-from-card"><h2 id="add-from-card" class="dir-field-label">Starting from a blank microSD card?</h2>
 <p class="muted">${link(`/setup/sd-card${values.profile_id ? `?profile=${encodeURIComponent(values.profile_id)}` : ''}`, 'Make the card\'s setup files')}: write Raspberry Pi OS with Raspberry Pi Imager, add two files, switch the robot on. It joins your Wi-Fi and adds itself, with no screen, keyboard or command.</p></section>
 <section class="dir-form" aria-labelledby="add-from-device"><h2 id="add-from-device" class="dir-field-label">At the robot already? Start there</h2>
@@ -259,8 +257,7 @@ const STATUS_WORDS = { pending: 'Waiting for review', approved: 'Approved', reje
 
 function renderSubmit({ config, licenses = [], values = {}, error = null }) {
     const profile = values.profile != null ? values.profile : JSON.stringify(TEMPLATE, null, 2);
-    const body = `<p class="dir-crumb">${link('/robots', 'Robots')} / ${link('/models', 'Models')}</p>
-<header class="dir-hero"><h1>Submit a robot</h1><p class="muted">Describe your robot with a profile and point at its driver. An OpenVibe admin reviews it; once it is approved, OpenVibe.Bot signs it, it appears under <b>From the community</b>, and anyone can add a robot with it. ${link('/docs/profiles', 'How profiles work')} · ${link('/docs/drivers', 'Write a driver')}</p></header>
+    const body = `<div class="dir-hero">${uiKit.pageHead({ title: `Submit a robot`, icon: 'gear', back: { href: '/robots', label: 'Robots' } , lede: `Describe your robot with a profile and point at its driver. An OpenVibe admin reviews it; once it is approved, OpenVibe.Bot signs it, it appears under From the community, and anyone can add a robot with it. ${link('/docs/profiles', 'How profiles work')} · ${link('/docs/drivers', 'Write a driver')}` })}</div>
 <form class="dir-form" method="post" action="/robots/submit">
 ${error ? `<p class="dir-error" role="alert">${esc(error)}</p>` : ''}
 <label class="dir-field dir-wide"><span class="dir-field-label">Profile (bot.robot-profile@1)</span><textarea name="profile" rows="18" spellcheck="false" required>${esc(profile)}</textarea>
@@ -291,8 +288,7 @@ ${sub.notes ? `<p class="muted">Notes: ${esc(sub.notes)}</p>` : ''}
 }
 
 function renderSubmissions({ config, mine = [], pending = null, names = new Map(), signing = null }) {
-    const body = `<p class="dir-crumb">${link('/robots', 'Robots')} / ${link('/models', 'Models')}</p>
-<header class="dir-hero"><h1>Community robots</h1><p class="muted">Your submitted profiles and where each one stands. ${link('/robots/submit', 'Submit another')}</p></header>
+    const body = `<div class="dir-hero">${uiKit.pageHead({ title: `Community robots`, icon: 'gear', back: { href: '/robots', label: 'Robots' } , lede: `Your submitted profiles and where each one stands. ${link('/robots/submit', 'Submit another')}` })}</div>
 <section class="dir-sec" aria-labelledby="mine-h"><h2 id="mine-h">Yours</h2>
 ${mine.length ? `<ul class="dir-list">${mine.map((s) => submissionRow(s)).join('')}</ul>` : '<p class="muted">Nothing submitted yet.</p>'}</section>
 ${pending ? `<section class="dir-sec" aria-labelledby="queue-h"><h2 id="queue-h">Waiting for review</h2>
