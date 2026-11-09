@@ -120,7 +120,7 @@ const { boot, check, done } = require('./helpers/app');
         // Its page on openvibe.bot (links.console) when Bot's address is https, for Services to link to.
         const { machineSummary, robotSummary } = require('../server/api/resource-index');
         const row = { id: deviceId, owner_subject: alice.subject, name: 'desk-pc', created_at: new Date(), updated_at: new Date() };
-        assert.deepStrictEqual(machineSummary(row, true, 'https://openvibe.bot/').links, { console: 'https://openvibe.bot/machines' });
+        assert.deepStrictEqual(machineSummary(row, true, 'https://openvibe.bot/').links, { console: 'https://openvibe.link/machines' });
         assert.deepStrictEqual(robotSummary({ ...row, id: first.id, estop_latched: false }, 'https://openvibe.bot').links, { console: `https://openvibe.bot/r/${first.id}` });
         assert.strictEqual(machineSummary(row, true, 'http://localhost:4630').links, undefined, 'https only');
         assert.deepStrictEqual(contracts.validate('common.resource-summary@1', machineSummary(row, true, 'https://openvibe.bot')).errors, []);

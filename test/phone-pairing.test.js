@@ -43,7 +43,7 @@ const { renderPhoneLinkPage } = require('../server/web/render');
         const guest = await t.call('GET', '/link/phone');
         assert.ok([302, 401].includes(guest.status), `a guest got ${guest.status}`);
         const pairing = { code: 'ABCD-1234', expires_at: new Date(Date.now() + 15 * 60000).toISOString(), qr: 'openvibe-link://pair?code=ABCD-1234&pairing=pair_01JD2C3D4E5F6G7H8J9K0MNPQR' };
-        const apkUrl = 'https://github.com/OpenVibers/OpenVibe.Node/releases/download/v0.46.0/openvibe-link.apk';
+        const apkUrl = 'https://github.com/OpenVibers/OpenVibe.Link/releases/download/v0.46.0/openvibe-link.apk';
         const html = renderPhoneLinkPage({ pairing, apkUrl });
         assert.match(html, /ABCD-1234/);
         assert.match(html, /qr-box/);

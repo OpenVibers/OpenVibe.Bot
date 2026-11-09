@@ -42,7 +42,7 @@ const PROJECT = `prj_${ids.ulid()}`;
         await n.connect();
         n.c.send(frame('status', { capabilities: { worker: { capabilities: classes.map((x) => `worker:${x}`), runtime_classes: classes } } }));
         await poll(async () => { const d = await t.db.maybe('SELECT capabilities FROM devices WHERE id = $1', [n.deviceId]); return d && d.capabilities.worker; });
-        /** A frame from the Node, then the Bot frame that answers it (or the settle of a no-answer frame). */
+        /** A frame from the Link, then the Bot frame that answers it (or the settle of a no-answer frame). */
         n.say = (type, fields) => n.c.send(frame(type, fields));
         n.exit = async (id, fields) => {
             const before = n.c.messages.filter((m) => m.type === 'job_exit_ack' && m.id === id).length;
@@ -131,7 +131,7 @@ const PROJECT = `prj_${ids.ulid()}`;
             assert.deepStrictEqual({ ...r, idempotency_key: undefined, id: undefined, quantity: undefined, at: undefined }, {
                 idempotency_key: undefined, id: undefined, quantity: undefined, at: undefined,
                 service: 'run', operation: 'function.invoke', unit: 's', resource: job.id, node: n.deviceId,
-                source: 'openvibe-node.worker', project: PROJECT, subject: SUBJECT,
+                source: 'openvibe-link.worker', project: PROJECT, subject: SUBJECT,
             });
             assert.strictEqual(r.id, r.idempotency_key);
         }

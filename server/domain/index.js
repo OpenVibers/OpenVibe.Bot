@@ -386,7 +386,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     }
     /**
      * BOT_PAIRING_AUTHORITY=network (plan T15 B2): Network mints the code for the robot's owner (POST
-     * /internal/node-pairings, ref = the robot) and Bot stores none. The machine redeems it on Network and
+     * /internal/link-pairings, ref = the robot) and Bot stores none. The machine redeems it on Network and
      * reaches Bot with a node token (bindNode). A Network that does not answer is 503 bot.network_unavailable.
      */
     async function mintOnNetwork(robotId, ownerSubject, installerUrl, driver = 'none') {
@@ -666,7 +666,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     }
 
     /**
-     * Network revoked a node principal (network.node.revoked: its owner, the pairing service or an account deletion):
+     * Network revoked a node principal (network.link.revoked: its owner, the pairing service or an account deletion):
      * every live device bound to it is revoked here too, without asking Network again. → the revoked rows
      */
     async function revokeByNode(principalId) {
@@ -679,9 +679,9 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     // ── Network-paired devices (node principals, T2 §9.2 B1) ──────────────────────────────────────
     /**
      * The live device bound to Network node principal `principalId`, creating it on first use. Idempotent:
-     * a live row is returned as it is. Otherwise Network's record decides (GET /internal/node-principals/:id
+     * a live row is returned as it is. Otherwise Network's record decides (GET /internal/link-principals/:id
      * with Bot's service token): the principal must be active, paired for Bot, for a robot of the principal's
-     * own owner; anything else is 403 bot.node_not_bound. A principal whose device the owner revoked here
+     * own owner; anything else is 403 bot.link_not_bound. A principal whose device the owner revoked here
      * never binds again. The row starts from Network's record and safe values only; what the device declares
      * arrives later in its `status` frames.
      */
@@ -689,7 +689,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         const known = await db.maybe(
             'SELECT * FROM devices WHERE node_principal = $1 ORDER BY (revoked_at IS NULL) DESC, created_at DESC LIMIT 1', [principalId]);
         if (known && !known.revoked_at) return known;
-        const refuse = (why) => fail(403, 'bot.node_not_bound', why);
+        const refuse = (why) => fail(403, 'bot.link_not_bound', why);
         if (known) refuse('this machine was revoked on Bot; pair it again');
         if (!nodes) refuse('Network-paired machines are not configured here');
         const p = await nodes.get(principalId);
@@ -993,8 +993,8 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
              WHERE id = $1 AND revoked_at IS NULL RETURNING *`,
             [id, JSON.stringify(fleet), iso(now())]);
     }
-    // ── The guided first run (OpenVibe Link's `openvibe-node`, docs/install.md#first-run) ──────────────
-    // One row per device and step, from the `node.first_run` telemetry events the Link already sends. The fields are
+    // ── The guided first run (OpenVibe Link's `openvibe-link`, docs/install.md#first-run) ──────────────
+    // One row per device and step, from the `link.first_run` telemetry events the Link already sends. The fields are
     // an allowlist: a path, a username or an address is never stored even if a buggy client sends one.
     const FIRST_RUN_STEPS = new Set(['installed', 'paired', 'self_check', 'first_job']);
     const firstRunNumber = (v) => (Number.isFinite(v) && v >= 0 && v <= Number.MAX_SAFE_INTEGER ? Math.floor(v) : undefined);
@@ -1011,13 +1011,13 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     }
     /**
      * Store the first-run steps in a telemetry frame. A resent step updates its time (the newest run wins); an event
-     * that is not `node.first_run` with a known step is ignored, never an error for the caller.
+     * that is not `link.first_run` with a known step is ignored, never an error for the caller.
      */
     async function recordFirstRun(deviceId, events) {
         if (!Array.isArray(events) || !deviceId) return 0;
         let stored = 0;
         for (const event of events) {
-            if (!event || event.name !== 'node.first_run' || !event.fields || typeof event.fields !== 'object') continue;
+            if (!event || event.name !== 'link.first_run' || !event.fields || typeof event.fields !== 'object') continue;
             const step = firstRunText(event.fields.step, 20);
             if (!FIRST_RUN_STEPS.has(step)) continue;
             const ts = Number.isFinite(event.ts) && event.ts > 0 ? event.ts : now();

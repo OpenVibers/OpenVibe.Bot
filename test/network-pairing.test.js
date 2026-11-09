@@ -1,6 +1,6 @@
 'use strict';
 // BOT_PAIRING_AUTHORITY (plan T15 B2). bot (the default): Bot mints and stores the pairing code, as before.
-// network: POST /robots and POST /robots/:id/pairing-code ask Network (POST /internal/node-pairings) for the
+// network: POST /robots and POST /robots/:id/pairing-code ask Network (POST /internal/link-pairings) for the
 // code and Bot stores none; POST /pair and the `pair` frame answer 410 bot.pairing_moved; Network not
 // answering is 503 bot.network_unavailable and creates no robot. An unknown value refuses to boot.
 const assert = require('assert');
@@ -44,12 +44,12 @@ const { boot, check, done } = require('./helpers/app');
     await check('network: POST /robots asks Network for the code and stores none', async () => {
         const { robot, pairing } = await t.robot(alex);
         const asked = t.network.pairings.at(-1);
-        assert.strictEqual(asked.service, 'bot', "Bot's own svc:bot token with network.node.manage");
+        assert.strictEqual(asked.service, 'bot', "Bot's own svc:bot token with network.link.manage");
         assert.deepStrictEqual(asked.body, { owner: { kind: 'user', subject: alex.subject }, ref: robot.id });
         assert.strictEqual(pairing.code, asked.code);
         assert.strictEqual(pairing.pairing_id, asked.pairing_id);
         assert.strictEqual(pairing.expires_at, asked.expires_at);
-        assert.strictEqual(pairing.installer, `curl -fsSL https://openvibe.bot/install | sh -s -- --network ${t.network.url} --pairing ${asked.pairing_id} --code ${asked.code}`);
+        assert.strictEqual(pairing.installer, `curl -fsSL https://openvibe.link/install | sh -s -- --network ${t.network.url} --pairing ${asked.pairing_id} --code ${asked.code}`);
         assert.strictEqual(await codesFor(t, robot.id), 0);
     });
 

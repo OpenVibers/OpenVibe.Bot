@@ -50,7 +50,7 @@ function machineSummary(row, online, baseUrl = null) {
         updated_at: new Date(row.updated_at).toISOString(),
     };
     if (USER_SUBJECT_RE.test(String(row.owner_subject || ''))) summary.owner = { type: 'user', id: row.owner_subject };
-    return { ...summary, ...consoleOf(baseUrl, '/machines') };
+    return { ...summary, ...(/^https:\/\//.test(String(baseUrl || '')) ? { links: { console: 'https://openvibe.link/machines' } } : {}) };
 }
 
 const encodeCursor = (id, kind = KIND) => Buffer.from(JSON.stringify([kind, id])).toString('base64url');

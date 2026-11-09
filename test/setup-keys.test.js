@@ -118,7 +118,7 @@ const card = require('../public/sd-card');
             setupKey: made.key, server: 'https://openvibe.bot', robotName: 'Mecanum rover' });
         assert.ok(ud.startsWith('#cloud-config\n'), 'cloud-init reads only a file that starts with #cloud-config');
         assert.ok(ud.includes(`  content: "${made.key}"`) && ud.includes('/etc/openvibe/setup-key') && ud.includes('permissions: "0600"'));
-        assert.ok(ud.includes('curl -fsSL https://openvibe.bot/install | sh -s -- --setup "$key"'));
+        assert.ok(ud.includes('curl -fsSL https://openvibe.link/install | sh -s -- --setup "$key"'));
         assert.ok(ud.includes('  - [ systemctl, enable, --now, ssh ]') && ud.includes('systemd-run, --unit=openvibe-setup'));
         assert.ok(/\nruncmd:\n/.test(ud) && ud.split('\nruncmd:').length === 2, 'one runcmd list (a second would replace the first)');
         assert.throws(() => card.userData({ hostname: 'x', username: 'y', passwordHash: 'z', setupKey: 'nope' }), /setup key/);

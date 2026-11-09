@@ -1,5 +1,5 @@
 'use strict';
-// Network-paired machines (T2 §9.2 B1, dual-accept): a node token binds a device from Network's record,
+// Network-paired machines (T2 §9.2 B1, dual-accept): a Link token binds a device from Network's record,
 // POST /devices/bind issues its publish key without a credential, the /device socket speaks first exactly
 // as for a credential, `status` persists what the machine declares, `reauth` keeps the socket, and revoke
 // and rotate reach Network and the machine. Credential devices keep today's behaviour.
@@ -63,18 +63,18 @@ const EVENTS_SECRET = `whsec_${'noderevoked'.repeat(4)}`;
         assert.strictEqual(Number((await t.db.maybe('SELECT count(*) AS n FROM devices WHERE node_principal = $1', [principal])).n), 1);
     });
 
-    await check('bind refuses anything but a node token for openvibe.bot', async () => {
+    await check('bind refuses anything but a Link token for openvibe.bot', async () => {
         const { principal } = await paired();
         const network = await bind(t.network.signNode(principal, { aud: ['openvibe.network'] }));
         assert.strictEqual(network.status, 401, network.text);
         const user = await t.call('POST', '/api/v1/devices/bind', { user: alex });
         assert.strictEqual(user.status, 401, user.text);
-        assert.strictEqual(user.json.code, 'bot.node_token_required');
+        assert.strictEqual(user.json.code, 'bot.link_token_required');
         const service = await t.call('POST', '/api/v1/devices/bind', { cap: ['bot.*'] });
         assert.strictEqual(service.status, 401, service.text);
     });
 
-    await check('an upgrade with a node token and no prior bind gets hello then config first, and no paired frame', async () => {
+    await check('an upgrade with a Link token and no prior bind gets hello then config first, and no paired frame', async () => {
         const { robot, principal } = await paired();
         const c = await connect(t.network.signNode(principal));
         const config = await c.waitFor((m) => m.type === 'config');
@@ -147,12 +147,12 @@ const EVENTS_SECRET = `whsec_${'noderevoked'.repeat(4)}`;
             revoked: (await paired(alex, { status: 'revoked' })).principal,
             'paired for another service (Network answers 404)': (await paired(alex, { service: 'live' })).principal,
             'paired for another service (seen)': (await paired(alex, { service: 'live', unscoped: true })).principal,
-            'unknown on Network': 'nod_01ARZ3NDEKTSV4RRFFQ69G5FAV',
+            'unknown on Network': 'lnk_01ARZ3NDEKTSV4RRFFQ69G5FAV',
         };
         for (const [name, principal] of Object.entries(cases)) {
             const r = await bind(t.network.signNode(principal));
             assert.strictEqual(r.status, 403, `${name}: ${r.text}`);
-            assert.strictEqual(r.json.code, 'bot.node_not_bound', name);
+            assert.strictEqual(r.json.code, 'bot.link_not_bound', name);
             const c = await connect(t.network.signNode(principal));
             assert.strictEqual(await c.waitForClose(), 4002, name);
             assert.ok(!c.messages.some((m) => m.type === 'hello'), name);
@@ -188,7 +188,7 @@ const EVENTS_SECRET = `whsec_${'noderevoked'.repeat(4)}`;
         assert.strictEqual(await c.waitForClose(), 4003);
         const again = await bind(t.network.signNode(principal));
         assert.strictEqual(again.status, 403);
-        assert.strictEqual(again.json.code, 'bot.node_not_bound');
+        assert.strictEqual(again.json.code, 'bot.link_not_bound');
     });
 
     await check('rotate of a Network-paired device asks the machine to rotate and answers no credential', async () => {
@@ -204,15 +204,15 @@ const EVENTS_SECRET = `whsec_${'noderevoked'.repeat(4)}`;
         c.close();
     });
 
-    await check('network.node.revoked revokes the machine\'s devices and closes its live socket at once', async () => {
+    await check('network.link.revoked revokes the machine\'s devices and closes its live socket at once', async () => {
         const { principal } = await paired();
         const c = await connect(t.network.signNode(principal));
         const hello = await c.waitFor((m) => m.type === 'hello');
         assert.ok(t.hub.isOnline(hello.device_id));
         const event = {
-            event_id: 'evt_01JZ0000000000000000000N01', event_type: 'network.node.revoked', version: 1, source: 'network',
+            event_id: 'evt_01JZ0000000000000000000N01', event_type: 'network.link.revoked', version: 1, source: 'network',
             actor: { type: 'user', id: alex.subject }, timestamp: new Date().toISOString(), visibility: 'internal',
-            subject: { type: 'node', id: principal },
+            subject: { type: 'link', id: principal },
             payload: { node_id: `n-${'a'.repeat(26)}`, principal_id: principal, owner: { kind: 'user', subject: alex.subject }, reason: 'owner', at: new Date().toISOString() },
         };
         const body = JSON.stringify({ event });   // Events delivers { cursor?, event }

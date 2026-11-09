@@ -33,7 +33,7 @@ const { boot, check, done } = require('./helpers/app');
             c.send(frame('status', { capabilities: { worker: { capabilities: classes.map((x) => `worker:${x}`), runtime_classes: classes } } }));
             await poll(async () => { const d = await t.db.maybe('SELECT capabilities FROM devices WHERE id = $1', [deviceId]); return d && d.capabilities.worker; });
         }
-        // Beat like a real Node while the socket is open: the later checks take longer than two missed heartbeats.
+        // Beat like a real Link while the socket is open: the later checks take longer than two missed heartbeats.
         const beat = setInterval(() => { try { c.send(frame('heartbeat', { t: Date.now() })); } catch { /* closed */ } }, 100);
         c.ws.on('close', () => clearInterval(beat));
         return { principal, c, deviceId };
@@ -49,7 +49,7 @@ const { boot, check, done } = require('./helpers/app');
         const stray = t.network.addNode({ owner: alex.subject, ref: `worker:${bob.subject}` });
         const bound = await t.call('POST', '/api/v1/devices/bind', { token: t.network.signNode(stray), body: {} });
         assert.strictEqual(bound.status, 403, bound.text);
-        assert.strictEqual(bound.json.code, 'bot.node_not_bound');
+        assert.strictEqual(bound.json.code, 'bot.link_not_bound');
     });
 
     await check('its worker offer is user-owned and names its owner: up while connected, down once it goes', async () => {

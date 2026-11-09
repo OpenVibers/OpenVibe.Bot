@@ -21,7 +21,7 @@ const { boot, check, done } = require('./helpers/app');
     const OFFER = { enabled: true, models: ['llama3.1:8b'], hours: { start: '00:00', end: '23:59', tz: 'UTC' }, concurrency: 2,
         price: { in_per_million: 10, out_per_million: 30 }, audience: 'followers', group: null, open_now: true, ready: true };
 
-    /** A Network-paired machine whose fake Node advertises an ai offer and answers one ai command. */
+    /** A Network-paired machine whose fake Link advertises an ai offer and answers one ai command. */
     async function machine() {
         const principal = t.network.addNode({ owner: alex.subject, ref: `worker:${alex.subject}`, name: 'gpu-box' });
         const c = await t.ws('/device', { headers: { Authorization: `Bearer ${t.network.signNode(principal)}` } });
@@ -56,7 +56,7 @@ const { boot, check, done } = require('./helpers/app');
         assert.strictEqual(offer.health.status, 'up');
         await t.app.locals.offers.publish();
         assert.ok(aiReports.at(-1).some((o) => o.offer_id === `ai:${mine.deviceId}`), 'the AI offers are reported to Network');
-        assert.ok(reports.at(-1).some((o) => o.offer_id === `node:${mine.deviceId}`) === false, 'the worker report is separate');
+        assert.ok(reports.at(-1).some((o) => o.offer_id === `link:${mine.deviceId}`) === false, 'the worker report is separate');
         const page = await (await fetch(`${t.base}/machines`, { headers: { Cookie: `ov_token=${t.network.signUser(alex)}` } })).text();
         assert.ok(page.includes('A community machine sees the prompt'), 'the machine page says the privacy cost plainly');
         assert.ok(page.includes('Offering its models to the network'));

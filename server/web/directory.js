@@ -20,7 +20,7 @@ const uiKit = require('openvibe-shared/kit');
 const { esc } = require('./render');
 const { framePage } = require('./home');
 
-const NODE_BLOB = 'https://github.com/OpenVibers/OpenVibe.Node/blob/main';
+const NODE_BLOB = 'https://github.com/OpenVibers/OpenVibe.Link/blob/main';
 const CONNECT = {
     browser: { label: 'Simulated', text: 'Runs inside Bot and in your browser: nothing to buy or install.' },
     onboard: { label: 'On-board', text: 'The OpenVibe Link runs on the robot\'s own computer and drives its hardware.' },
@@ -204,7 +204,7 @@ ${parts}
 ${model.community ? `<section class="dir-sec card"><h2>From the community</h2><p>Submitted by ${esc(ownerName(model.community.by))} and reviewed by an OpenVibe admin.${model.community.license ? ` Licence: ${esc(model.community.license)}.` : ''}</p>
 <ul>${model.community.driver_url ? `<li>Driver: ${link(model.community.driver_url, model.community.driver_url)}</li>` : ''}${model.community.guide_url ? `<li>Setup guide: ${link(model.community.guide_url, model.community.guide_url)}</li>` : ''}
 <li>Signed by OpenVibe.Bot (Ed25519, key <code>${esc(model.community.key_id || '')}</code>): ${link(`/api/v1/profiles/${model.id}`, 'the profile and its signature')} · ${link('/api/v1/profiles/signing-key', 'the public key')}</li>
-<li>Check it on your machine before you install the driver (OpenVibe Link v0.6.0 or later): <code>openvibe-node profile verify ${esc(model.id)}${model.community.key_id ? ` --key-id ${esc(model.community.key_id)}` : ''}</code></li></ul>
+<li>Check it on your machine before you install the driver (OpenVibe Link v0.6.0 or later): <code>openvibe-link profile verify ${esc(model.id)}${model.community.key_id ? ` --key-id ${esc(model.community.key_id)}` : ''}</code></li></ul>
 <p class="muted">Install the driver from its source on the robot's computer; OpenVibe.Bot never runs it.</p></section>` : ''}
 <section class="dir-sec card"><h2>Safety</h2><p class="muted">Every command passes Bot's gate: roles, the owner's limits and cooldowns, and a latched e-stop only the owner clears. The device stops the motors by itself when commands stop arriving, without asking the network.</p></section>`;
     return shell({ config, path: `/models/${model.id}`, title: model.name, description: `${model.name} on OpenVibe.Bot: how it connects, the panel it gets and how to set it up.`, body });

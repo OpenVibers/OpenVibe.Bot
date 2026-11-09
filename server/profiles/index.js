@@ -40,7 +40,7 @@ const CAPABILITIES = new Set([
     'display.text',
     'sensor.ultrasonic', 'sensor.line', 'sensor.cliff', 'sensor.pickup', 'sensor.tilt',
     'battery', 'ptz', 'camera',
-    // A robot that carries no hardware of its own: the owner's Node forwards the panel's commands to a
+    // A robot that carries no hardware of its own: the owner's Link forwards the panel's commands to a
     // local script with the relay plugin (relay.generic, plan T15 R9).
     'relay',
 ]);
@@ -50,7 +50,7 @@ const WIDGETS = new Set(['drive', 'pan-tilt', 'servo', 'lights', 'horn', 'speake
 
 /** Device drivers a mapping may name. `relay` is a Link plugin with no hardware map of its own. */
 // `looi`: the community's Generic LOOI driver, a Bluetooth bridge plugin (OpenVibe Link docs/hardware-looi.md).
-// `phone`: a phone that is the device itself, from its browser (public/phone-device.js), no Node and nothing installed.
+// `phone`: a phone that is the device itself, from its browser (public/phone-device.js), no Link and nothing installed.
 // `plugin`: a community OpenVibe Link plugin, named in mapping.plugin, that the robot's owner installs (Contracts 0.160.0;
 // community profiles are reviewed and signed before robots can use them, server/submissions.js).
 const DRIVERS = new Set(['pca9685', 'ads7830', 'cozmo', 'looi', 'onvif', 'sim', 'relay', 'phone', 'plugin']);

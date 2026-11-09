@@ -1,5 +1,5 @@
 'use strict';
-// The guided first run, measured (OpenVibe Link's `openvibe-node`): the Link sends one `node.first_run` telemetry
+// The guided first run, measured (OpenVibe Link's `openvibe-link`): the Link sends one `link.first_run` telemetry
 // event per step (installed, paired, self_check with ok or the reason, first_job with the machine's counts). Bot stores
 // one row per device and step, the machine's page shows what its first job found, and a reviewer sees the funnel.
 const assert = require('assert');
@@ -36,10 +36,10 @@ const { boot, check, done } = require('./helpers/app');
     const { robot, pairing } = await t.robot(alex);
     const { dev, paired } = await pairOverWs(robot.id, pairing.code);
     const at = Date.now() - 60_000;
-    const event = (step, extra = {}) => ({ name: 'node.first_run', ts: at + ['installed', 'paired', 'self_check', 'first_job'].indexOf(step) * 1000,
+    const event = (step, extra = {}) => ({ name: 'link.first_run', ts: at + ['installed', 'paired', 'self_check', 'first_job'].indexOf(step) * 1000,
         fields: { step, version: 'v0.39.0', os: 'linux', arch: 'amd64', ...extra } });
 
-    await check('one node.first_run event per step is stored, with the machine counts and no personal fields', async () => {
+    await check('one link.first_run event per step is stored, with the machine counts and no personal fields', async () => {
         dev.send({ type: 'telemetry', events: [
             event('installed'),
             event('paired'),
@@ -70,7 +70,7 @@ const { boot, check, done } = require('./helpers/app');
         assert.ok(failed, 'the failure replaced the pass');
         assert.strictEqual(failed.reason, 'OpenVibe.Bot answered HTTP 503');
         dev.send({ type: 'telemetry', events: [event('self_check', { ok: false, reason: 'bad\u0000line' }), { name: 'other', ts: at, fields: { step: 'installed' } },
-            { name: 'node.first_run', ts: at, fields: { step: 'not_a_step' } }] });
+            { name: 'link.first_run', ts: at, fields: { step: 'not_a_step' } }] });
         const cleaned = await poll(async () => { const r = await rowsFor(paired.device_id); const s = r.find((x) => x.step === 'self_check'); return s && s.reason === 'bad line' ? s : null; });
         assert.ok(cleaned, 'control characters are cleaned from the reason');
         const rows = await rowsFor(paired.device_id);

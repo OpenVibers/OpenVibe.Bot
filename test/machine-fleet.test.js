@@ -1,7 +1,7 @@
 'use strict';
 // The fleet (Codes C9c): a machine's OpenVibe Link reports what its coding agents have left with each heartbeat
 // (bot.device-message@1's `fleet`), and Bot keeps the latest reading per machine for Codes' Agents page, its router and
-// its MCP. GET /api/v1/machines answers it with the machine's Network id (`node_id`, nod_…), which is the same machine
+// its MCP. GET /api/v1/machines answers it with the machine's Network id (`node_id`, lnk_…), which is the same machine
 // Run pins a job to by its device id (dev_…): one row, both names.
 //
 // What this checks: a reading is stored and answered; it is bounded exactly as the Link bounds it (16 agents, 10 windows,
@@ -23,7 +23,7 @@ const { boot, check, done } = require('./helpers/app');
     const list = (v) => (typeof v === 'string' ? JSON.parse(v) : v);
     const machines = async (user) => { const r = await t.call('GET', '/api/v1/machines', { user }); assert.strictEqual(r.status, 200, r.text); return r.json.machines; };
 
-    /** A Network-paired machine of `owner`, beating like a real Node (its own timer, no fleet) until closed. */
+    /** A Network-paired machine of `owner`, beating like a real Link (its own timer, no fleet) until closed. */
     async function machine(owner) {
         const principal = t.network.addNode({ owner: owner.subject, ref: `worker:${owner.subject}`, name: 'desk-pc' });
         const c = await t.ws('/device', { headers: { Authorization: `Bearer ${t.network.signNode(principal)}` } });

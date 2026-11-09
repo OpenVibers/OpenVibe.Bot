@@ -5,7 +5,7 @@
  *
  *   wss://…/device    one outbound connection per device. Auth by `Authorization: Bearer <credential>`
  *                     on the upgrade, never a query string; an unauthenticated socket may only send
- *                     `pair`. A Network-paired machine presents its node token instead (bound on first
+ *                     `pair`. A Network-paired machine presents its Link token instead (bound on first
  *                     use) and renews it with `reauth` before the 330 s deadline, else close 4002. Heartbeats every 1 s; offline after 2 missed + 3 s grace. Commands are
  *                     never queued for an offline device and never replayed after a reconnect. Jobs
  *                     (platform.job-frame@1, server/jobs/dispatch.js) are the exception: an unacked `job`
@@ -25,7 +25,7 @@ const { WebSocketServer } = require('ws');
 const { createControlTickets, ticketFromProtocols, PROTOCOL: TICKET_PROTOCOL } = require('./control-tickets');
 const { capabilities, ids, validate } = require('openvibe-contracts');
 const { json, iso, prefixedId } = require('./util');
-const { userPrincipal, verifyService, verifyNode, isNodeToken, PRINCIPAL_SUB, decodePayload } = require('./api/auth');
+const { userPrincipal, verifyService, verifyLink, isLinkToken, PRINCIPAL_SUB, decodePayload } = require('./api/auth');
 const { getProfile } = require('./profiles');
 const { createVoice } = require('./voice');
 const { computerCaps } = require('./machine-ai');
@@ -57,7 +57,7 @@ const NO_WHOLE_DESKS = 'this machine runs browser desks only (a whole desk needs
 const deskKinds = (offered) => (offered && offered.desk ? (Array.isArray(offered.desk.kinds) ? offered.desk.kinds : ['desktop']) : []);
 /** The desk a command names: main (the person's own screen, the default), private or desk-<name> (contracts 0.215.0). */
 const deskOf = (value) => (typeof value.desk === 'string' && value.desk ? value.desk : 'main');
-// The screen and the mouse and keyboard of a desk are the desk's own (Node's desk.screen, desk.input): a desk host with
+// The screen and the mouse and keyboard of a desk are the desk's own (Link's desk.screen, desk.input): a desk host with
 // no screen of its own (no one signed in, Link v0.20.0 --desk-host) offers them on its desks only.
 const onDeskOnly = (kind, value) => (kind === 'screen' || kind === 'input') && deskOf(value) !== 'main';
 // A browser command on a desk drives that desk's own browser: any machine with desks takes it, whether or not it offers a
@@ -104,7 +104,7 @@ function parseCookies(header) {
 const bearer = (req) => { const h = String(req.headers.authorization || ''); return h.startsWith('Bearer ') ? h.slice(7).trim() : null; };
 const isSubject = (v) => typeof v === 'string' && ids.isSubjectId('user', v);
 const DEVICE_PROTOCOL = 'ov.device';
-const CREDENTIAL_RE = /^[A-Za-z0-9_-]{43}$/;   // a device credential (32 random bytes, base64url); never a node token
+const CREDENTIAL_RE = /^[A-Za-z0-9_-]{43}$/;   // a device credential (32 random bytes, base64url); never a Link token
 /** A browser device's credential, offered as `ov.device.<credential>` beside `ov.device`; anything else → null. */
 function deviceCredentialFromProtocols(header) {
     const offered = String(header || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -227,7 +227,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         if (cred) {
             conn.backlog = [];
             try {
-                if (isNodeToken(cred)) await authenticateNode(conn, cred);
+                if (isLinkToken(cred)) await authenticateNode(conn, cred);
                 else await authenticateDevice(conn, cred);
                 sendHello(conn);
                 await sendConfig(conn);
@@ -265,17 +265,17 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         attachDevice(conn, device);
     }
 
-    /** A node token: verified offline, then bound to its device (created on first use from Network's record). */
+    /** A Link token: verified offline, then bound to its device (created on first use from Network's record). */
     async function authenticateNode(conn, nodeToken) {
-        const r = await verifyNode(nodeToken, tokenOpts());
-        if (!r.ok) throw new Error(`node token refused: ${r.code}`);
+        const r = await verifyLink(nodeToken, tokenOpts());
+        if (!r.ok) throw new Error(`Link token refused: ${r.code}`);
         const device = await domain.devices.bindNode(r.principal);
         conn.node = { principal: r.principal, reauthBy: now() + config.device.nodeReauthMs };
         attachDevice(conn, device);
     }
-    /** `reauth`: a fresh node token for the same principal moves the deadline; anything else leaves it. */
+    /** `reauth`: a fresh Link token for the same principal moves the deadline; anything else leaves it. */
     async function onReauth(conn, msg) {
-        const r = await verifyNode(typeof msg.token === 'string' ? msg.token : '', tokenOpts());
+        const r = await verifyLink(typeof msg.token === 'string' ? msg.token : '', tokenOpts());
         if (!r.ok) return sendError(conn, 'bot.reauth_refused', r.reason);
         if (r.principal !== conn.node.principal) return sendError(conn, 'bot.reauth_refused', 'the token is for another machine');
         conn.node.reauthBy = now() + config.device.nodeReauthMs;
@@ -343,7 +343,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             estop_latched: robot ? !!robot.estop_latched : false,
             // Vibe by voice: the machine listens for its call word only while its owner has voice on.
             ...(conn.device.voice_on ? { voice: true, call_word: voice.callWordOf(conn.device) } : {}),
-            // What the machine does for the network (plan L34): the roles the owner gave it on the hub. The Node
+            // What the machine does for the network (plan L34): the roles the owner gave it on the hub. The Link
             // turns them on at its next check-in (and at once when they change while it is connected).
             roles: json(conn.device.roles, []),
         });
@@ -530,7 +530,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             await domain.audit.record({ robotId: String(msg.robot_id).slice(0, 64), deviceId: conn.device.id, operatorKind: 'device', kind: 'estop_state', value: { latched }, result: 'refused', reason: 'bot.forbidden' });
             return sendError(conn, 'bot.forbidden', 'this device is not attached to that robot');
         }
-        // local_stop: the latch is held on the machine itself (openvibe-node stop, a driver's own stop button), which
+        // local_stop: the latch is held on the machine itself (openvibe-link stop, a driver's own stop button), which
         // only a release on the machine lifts; the owner's clear does not. Shown on the panel, never trusted for more.
         const local = latched && msg.local_stop === true;
         const reason = local && typeof msg.reason === 'string' ? msg.reason.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 120) || null : null;
@@ -824,7 +824,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
                     return refuse('bot.computer_off', 'this machine does not show its screen live: it needs OpenVibe Link v0.12.0 or newer, with the computer plugin running in your graphical session', summary);
                 }
             } else if (!offered || !(onDeskBrowser(kind, value, offered) || (onDeskOnly(kind, value) ? (offered.desk && offered.desk[kind] === true) : offered[COMPUTER_CAP[kind]]))) {
-                return refuse('bot.computer_off', kind === 'desk' ? NO_DESK : kind === 'ai' ? 'this machine offers no models: it needs OpenVibe Link v0.27.0 or newer with the ai plugin (install.sh --ai) and a model server (Ollama, LM Studio or llama.cpp)' : `this machine does not offer ${COMPUTER_CAP[kind]}: its computer plugin is off (openvibe-node, --computer)`, summary);
+                return refuse('bot.computer_off', kind === 'desk' ? NO_DESK : kind === 'ai' ? 'this machine offers no models: it needs OpenVibe Link v0.27.0 or newer with the ai plugin (install.sh --ai) and a model server (Ollama, LM Studio or llama.cpp)' : `this machine does not offer ${COMPUTER_CAP[kind]}: its computer plugin is off (openvibe-link, --computer)`, summary);
             }
             // A desk other than the person's own screen needs a machine that has desks; one other than private (a named desk,
             // one per agent task) needs a machine that runs several (Link v0.19.0: desk.named). Kind desk names its desk in
@@ -1074,7 +1074,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     function checkHeartbeats() {
         for (const conn of [...deviceConns.values()]) {
             if (conn.node && now() > conn.node.reauthBy) {
-                // The node token lapsed with no valid reauth: the machine must authenticate again.
+                // The Link token lapsed with no valid reauth: the machine must authenticate again.
                 try { conn.ws.close(4002, 'reauth required'); } catch { /* gone */ }
                 dropDevice(conn);
                 continue;

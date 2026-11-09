@@ -21,7 +21,7 @@ const { framePage } = require('./home');
 const simRover = require('../profiles/sim.rover.json');
 
 // The driver protocol and the bundled drivers live in OpenVibe Link (the Link core and its plugins/ tree).
-const NODE = 'https://github.com/OpenVibers/OpenVibe.Node';
+const NODE = 'https://github.com/OpenVibers/OpenVibe.Link';
 const TREE = `${NODE}/tree/main`;
 const BLOB = `${NODE}/blob/main`;
 
@@ -41,7 +41,7 @@ function docsPage({ config, path, title, description, content }) {
 <nav class="docs-side" aria-label="Build for OpenVibe.Bot"><p class="docs-side-title">Build</p>${side}<div class="docs-side-rule"></div><a href="/robots">Your robots</a></nav>
 <main id="main" class="docs-main">
 ${content}
-<p class="docs-foot muted">The Link and its bundled drivers are in ${out(`${TREE}/plugins`, 'OpenVibers/OpenVibe.Node')}; the full protocol is ${out(`${BLOB}/docs/protocol.md`, 'protocol.md')} and the plugin contract is ${out(`${BLOB}/docs/plugins.md`, 'plugins.md')}.</p>
+<p class="docs-foot muted">The Link and its bundled drivers are in ${out(`${TREE}/plugins`, 'OpenVibers/OpenVibe.Link')}; the full protocol is ${out(`${BLOB}/docs/protocol.md`, 'protocol.md')} and the plugin contract is ${out(`${BLOB}/docs/plugins.md`, 'plugins.md')}.</p>
 </main>
 </div>`;
     return framePage({ config, title: title.includes('OpenVibe.Bot') ? title : `${title} · OpenVibe.Bot`, description, canonicalPath: path, body, head: '<link rel="stylesheet" href="/docs/docs.css">' });
@@ -70,8 +70,8 @@ ${kit.pageHead({ title: `Build for OpenVibe.Bot`, icon: 'code', back: { href: '/
 <p>${inLink('/robots', 'Your robots')} · ${inLink('/install', 'Install a device')}</p></section>
 <h2>Where things live</h2>
 <ul>
-<li>The <b>OpenVibe Link</b> (${out(NODE, 'OpenVibers/OpenVibe.Node')}) is the agent on the robot's machine: it pairs, holds the control link, and runs the drivers.</li>
-<li>Drivers are Node <b>plugins</b> (${out(`${TREE}/plugins`, 'plugins/')}), written against the Python runtime ${out(`${TREE}/plugins/sdk`, 'openvibe_plugin')} or any language over the raw protocol.</li>
+<li>The <b>OpenVibe Link</b> (${out(NODE, 'OpenVibers/OpenVibe.Link')}) is the agent on the robot's machine: it pairs, holds the control link, and runs the drivers.</li>
+<li>Drivers are Link <b>plugins</b> (${out(`${TREE}/plugins`, 'plugins/')}), written against the Python runtime ${out(`${TREE}/plugins/sdk`, 'openvibe_plugin')} or any language over the raw protocol.</li>
 <li>Bundled drivers: ${out(`${TREE}/plugins/dryrun`, 'dryrun')}, ${out(`${TREE}/plugins/adeept_adr036`, 'adeept_adr036')}, ${out(`${TREE}/plugins/cozmo`, 'cozmo')}, ${out(`${TREE}/plugins/relay`, 'relay')} and ${out(`${TREE}/plugins/ros2`, 'ros2')} (any ROS 2 robot on <code>cmd_vel</code>, through rosbridge or rclpy; profiles <code>ros2.diffdrive</code> and <code>ros2.holonomic</code>, installer <code>--driver ros2</code>). LOOI's driver is written by LOOI owners against the contract in ${out(`${TREE}/docs/hardware-looi.md`, 'docs/hardware-looi.md')} (profile <code>looi</code>, installer <code>--driver looi</code>).</li>
 <li>Profiles ship in this repository (${inLink('/api/v1/profiles', 'GET /api/v1/profiles')}) and are validated by the same loader the pages use.</li>
 </ul>
@@ -96,7 +96,7 @@ ${kit.pageHead({ title: `Write a driver`, icon: 'code', back: { href: '/', label
 <ul>
 <li><b>on-board</b> (<code>kind: "onboard"</code>) — the Link runs on the robot itself, over its own GPIO/I²C bus. Example: ${out(`${TREE}/plugins/adeept_adr036`, 'adeept_adr036')} on a Raspberry Pi.</li>
 <li><b>bridge</b> (<code>kind: "bridge"</code>) — the Link runs on a computer next to the robot and drives it over the robot's own link. Example: ${out(`${TREE}/plugins/cozmo`, 'cozmo')} through PyCozmo, where the computer joins the robot's Wi-Fi on one interface and the internet on another.</li>
-<li><b>server-side</b> (<code>kind: "server"</code>) — there is no Node on the robot at all: Bot attaches the device itself from the server. Examples: the ${inLink('/docs/profiles', 'simulated rover')} and an ONVIF camera.</li>
+<li><b>server-side</b> (<code>kind: "server"</code>) — there is no Link on the robot at all: Bot attaches the device itself from the server. Examples: the ${inLink('/docs/profiles', 'simulated rover')} and an ONVIF camera.</li>
 </ul>
 <p>The pairing's <code>device_kind</code> is <code>onboard</code> or <code>bridge</code>; a server-side robot is not installed on a machine.</p></section>
 
@@ -104,7 +104,7 @@ ${kit.pageHead({ title: `Write a driver`, icon: 'code', back: { href: '/', label
 <ol>
 <li>The core starts the process and sends <code>hello</code>.</li>
 <li>The driver answers <code>describe</code> <b>before touching any hardware</b>.</li>
-<li>Unless <code>hello.probe</code> is true, the driver opens its hardware with every actuator stopped and sends <code>ready</code> (or <code>fault</code> if it cannot). Probe mode is used by <code>openvibe-node pair</code> and <code>openvibe-node plugins</code>: describe, then wait for EOF without opening anything.</li>
+<li>Unless <code>hello.probe</code> is true, the driver opens its hardware with every actuator stopped and sends <code>ready</code> (or <code>fault</code> if it cannot). Probe mode is used by <code>openvibe-link pair</code> and <code>openvibe-link plugins</code>: describe, then wait for EOF without opening anything.</li>
 <li>The core sends <code>heartbeat</code> every 250 ms and commands as they arrive; the driver answers each command with <code>ack</code> or <code>nack</code>, and sends <code>telemetry</code>, <code>event</code> and <code>video</code> whenever it has them.</li>
 <li>On shutdown the core sends <code>stop</code> and closes stdin; the driver stops everything and exits. After 2 s it is killed.</li>
 </ol>
@@ -140,7 +140,7 @@ ${message('video', 'a frame written to a file; the core reads and encodes it', '
 <li>when its own sensors say so (for example a cliff or a pick-up).</li>
 </ul>
 <p><code>stop</code> must be idempotent and safe at any time, including before setup. <code>estop</code> latches: keep refusing motion until the core sends <code>resume</code>. The e-stop is the owner's and is latched across reconnects by Bot; a driver never clears it.</p>
-<p><b>A stop on the robot itself.</b> If your robot or bridge has its own stop (a button, a hotkey, a sensor you trust), send <code>{"op": "local_stop", "reason": "…"}</code> (Python: <code>self.local_stop("reason")</code>), or run <code>openvibe-node stop</code> from a terminal. That sets the Link's <i>local</i> latch: every actuator stops within a quarter second, the panel shows the robot as stopped on the robot, and the owner's remote clear cannot lift it. Only <code>openvibe-node resume</code> on that machine releases it, and the owner then clears the panel's e-stop. It works even when the Link is not answering and survives restarts. Handlers must not block — slow work (speech synthesis, file I/O) goes on a thread.</p></section>
+<p><b>A stop on the robot itself.</b> If your robot or bridge has its own stop (a button, a hotkey, a sensor you trust), send <code>{"op": "local_stop", "reason": "…"}</code> (Python: <code>self.local_stop("reason")</code>), or run <code>openvibe-link stop</code> from a terminal. That sets the Link's <i>local</i> latch: every actuator stops within a quarter second, the panel shows the robot as stopped on the robot, and the owner's remote clear cannot lift it. Only <code>openvibe-link resume</code> on that machine releases it, and the owner then clears the panel's e-stop. It works even when the Link is not answering and survives restarts. Handlers must not block — slow work (speech synthesis, file I/O) goes on a thread.</p></section>
 
 <section class="card"><h2>A minimal driver in Python</h2>
 <p>The Python runtime (<code>openvibe_plugin</code>, ${out(`${TREE}/plugins/sdk`, 'plugins/sdk')}) implements every safety rule above, so a driver only says how to move its hardware. <code>motion_kinds</code> is the set of kinds the runtime stops at their deadline.</p>
@@ -221,10 +221,10 @@ stop()`)}</section>
 <section class="card"><h2>Test it</h2>
 <p><b>With the <code>dryrun</code> driver</b> (${out(`${TREE}/plugins/dryrun`, 'plugins/dryrun')}): it accepts every kind, logs it, reports simulated battery and distance, and asks the core for the test-pattern camera. Add it to your <code>config.json</code> plugins and set <code>config.record: "&lt;path&gt;"</code> to append one JSON line per <code>setup</code>, <code>command</code> and <code>stop</code> — end-to-end tests read that file to check what reached the "robot".</p>
 ${code('{ "plugins": [ { "name": "dryrun", "config": { "record": "/tmp/dryrun.jsonl" } } ] }')}
-<p><b>With the simulated rover</b> on this site: add a robot and pick the <b>Simulated rover</b> profile (${inLink('/robots', 'Your robots')}). Bot runs it in-process, so the panel renders from the profile and drives with no hardware and no Node. Use it to see exactly what your profile shows before wiring a driver.</p></section>
+<p><b>With the simulated rover</b> on this site: add a robot and pick the <b>Simulated rover</b> profile (${inLink('/robots', 'Your robots')}). Bot runs it in-process, so the panel renders from the profile and drives with no hardware and no Link. Use it to see exactly what your profile shows before wiring a driver.</p></section>
 
 <section class="card"><h2>Contribute it</h2>
-<p>Open a pull request to ${out(NODE, 'OpenVibers/OpenVibe.Node')} adding your driver under ${out(`${TREE}/plugins`, 'plugins/')}, with the robot profile it pairs with. The profile is validated by Bot's loader (<code>bot.robot-profile@1</code> plus the capability, driver, widget and command registries), and the driver is reviewed before it runs on anyone's Link. A genuinely new capability, driver or widget name is one line in Bot's registries — never a schema change.</p></section>
+<p>Open a pull request to ${out(NODE, 'OpenVibers/OpenVibe.Link')} adding your driver under ${out(`${TREE}/plugins`, 'plugins/')}, with the robot profile it pairs with. The profile is validated by Bot's loader (<code>bot.robot-profile@1</code> plus the capability, driver, widget and command registries), and the driver is reviewed before it runs on anyone's Link. A genuinely new capability, driver or widget name is one line in Bot's registries — never a schema change.</p></section>
 `;
     return docsPage({ config, path: '/docs/drivers', title: 'Write a driver', description: 'How to write a driver for the OpenVibe Link: JSON lines over stdio, the lifecycle, every message, the safety rules, a Python example and how to test it.', content });
 }
@@ -369,11 +369,11 @@ ${code(COMMISSION_CALL)}
 
 const COMPUTER_INSTALL = `curl -fsSL https://openvibe.link/install | sh -s -- \\
   --network https://openvibe.network --pairing pair_… --code ABCD-1234 --computer ask`;
-const COMPUTER_APPROVE = `openvibe-node approvals          # what waits: id, kind, what it would do
-openvibe-node approve cmd_01J…   # let it run
-openvibe-node deny cmd_01J…      # refuse it
-openvibe-node stop               # the kill switch: observe only until resume
-openvibe-node tray               # the same in your notification area (Linux, Windows)`;
+const COMPUTER_APPROVE = `openvibe-link approvals          # what waits: id, kind, what it would do
+openvibe-link approve cmd_01J…   # let it run
+openvibe-link deny cmd_01J…      # refuse it
+openvibe-link stop               # the kill switch: observe only until resume
+openvibe-link tray               # the same in your notification area (Linux, Windows)`;
 const COMPUTER_CALL = `curl -X POST https://openvibe.bot/api/v1/machines/dev_…/commands \\
   -H "Authorization: Bearer $OPENVIBE_TOKEN" -H "Content-Type: application/json" \\
   -d '{"kind": "exec", "value": {"argv": ["git", "status", "--short"], "cwd": "/home/you/site"}}'
@@ -386,7 +386,7 @@ ${kit.pageHead({ title: `Your computer for your agents`, icon: 'code', back: { h
 <section class="card" aria-labelledby="install-h"><h2 id="install-h">Install it</h2>
 <p>On ${inLink('/machines', 'Your machines')}, choose <b>Add a machine</b> and run the command under <b>Let your agents use it</b> on the computer, from your own account (the installer uses sudo itself):</p>
 ${code(COMPUTER_INSTALL)}
-<p class="muted">The installer is also at <a href="https://openvibe.bot/install">openvibe.bot/install</a>, which keeps working. What the Link is and what it does is on <a href="https://openvibe.link">node.openvibe.network</a>.</p>
+<p class="muted">The installer is also at <a href="https://openvibe.link/install">openvibe.link/install</a>, which keeps working. What the Link is and what it does is on <a href="https://openvibe.link">openvibe.link</a>.</p>
 <p>The Link then runs as you, never as root, and its only folder is your home folder. Linux for now; elsewhere, run the Link in your own session with the plugin in its config (${out(`${BLOB}/docs/computer.md`, 'computer.md')}).</p></section>
 
 <section class="card" aria-labelledby="levels-h"><h2 id="levels-h">Levels, set on the computer</h2>
@@ -401,7 +401,7 @@ ${code(COMPUTER_INSTALL)}
 <section class="card" aria-labelledby="approve-h"><h2 id="approve-h">Approving on the computer</h2>
 <p>At level <b>ask</b>, a request waits up to two minutes for your answer. You can answer in three places:</p>
 <ul>
-<li><b>The tray</b> (Linux and Windows). <code>openvibe-node tray</code> lists what waits, each with <b>Approve</b> and <b>Deny</b>, beside the stop and resume. It raises a notification with the same two buttons, and its icon turns amber while something waits. The installer starts it when you sign in.</li>
+<li><b>The tray</b> (Linux and Windows). <code>openvibe-link tray</code> lists what waits, each with <b>Approve</b> and <b>Deny</b>, beside the stop and resume. It raises a notification with the same two buttons, and its icon turns amber while something waits. The installer starts it when you sign in.</li>
 <li><b>A notification or dialog</b> from the Link itself when it runs in your session: buttons on Linux, a dialog whose default is Deny on macOS.</li>
 <li><b>The command line</b>:</li>
 </ul>
@@ -422,7 +422,7 @@ ${code(COMPUTER_APPROVE)}
 <li><b>Sign in once.</b> On OpenVibe Link v0.24.0 or newer, your agent's browser profile is kept on each machine: a site you signed in to on one task's desk is still signed in on the next.</li>
 <li><b>Never your own network.</b> Every page the agent's browser opens goes through a guard on the machine (Link v0.25.0): nothing on it can reach your router, printer or other computers at home, unless you set the machine to <b>full</b>.</li>
 <li><b>A spare computer as a desk host.</b> An old laptop or a mini PC can host desks for all your tasks: on ${inLink('/machines', 'Your machines')}, choose <b>Add a machine</b> and run the desk host command (Linux). It needs no screen, keyboard or sign-in, runs under an account of its own, and is used before your own computer when a task can work anywhere.</li>
-<li><b>See and stop them.</b> Each machine says how many desks run on it; <b>See its desks</b> lists them, to watch, take over or stop. A desk nobody uses for 15 minutes stops by itself, and the computer's kill switch (<code>openvibe-node stop</code>) stops them all.</li>
+<li><b>See and stop them.</b> Each machine says how many desks run on it; <b>See its desks</b> lists them, to watch, take over or stop. A desk nobody uses for 15 minutes stops by itself, and the computer's kill switch (<code>openvibe-link stop</code>) stops them all.</li>
 </ul>
 <p>How many run at once depends on the machine's memory (one whole desk per 2 GB by default; a browser desk counts as half). The details are in ${out(`${BLOB}/docs/computer.md`, 'computer.md')}.</p></section>
 
@@ -442,8 +442,8 @@ ${code(COMPUTER_APPROVE)}
 <ul>
 <li><b>Private.</b> It goes to a private stream of that computer's own: nothing is recorded, it never appears on OpenVibe Live, and only you can open it. Your agents, your watches and anyone else cannot start it.</li>
 <li><b>How it is captured.</b> The computer takes a few pictures of its screen a second with the same tools as a screenshot. It needs OpenVibe Link v0.12.0 or newer, with the computer plugin running in your desktop session.</li>
-<li><b>It says so.</b> The desktop shows a notice when it starts, and <code>openvibe-node status</code> shows it while it runs.</li>
-<li><b>Stopping it.</b> <b>Stop showing my screen</b> ends it, and so do its time running out and <code>openvibe-node stop</code> on the computer, at once. To never offer it, set <code>allow_screen_stream: false</code> in the plugin's config.</li>
+<li><b>It says so.</b> The desktop shows a notice when it starts, and <code>openvibe-link status</code> shows it while it runs.</li>
+<li><b>Stopping it.</b> <b>Stop showing my screen</b> ends it, and so do its time running out and <code>openvibe-link stop</code> on the computer, at once. To never offer it, set <code>allow_screen_stream: false</code> in the plugin's config.</li>
 </ul>
 <p>From the API, with your own token: <code>POST /api/v1/machines/:id/screen</code> (<code>seconds</code>, <code>fps</code> from 1 to 5) starts it, <code>GET</code> answers <code>signaling_url</code> once the computer is sending, and <code>DELETE</code> stops it.</p></section>
 
@@ -468,7 +468,7 @@ The page answers with its URL, title, text and links. The browser is the agent's
 <li><code>ai</code>: <code>model</code> (one of its models), <code>messages</code> (<code>role</code> and <code>content</code>), <code>max_tokens</code>, <code>temperature</code> → <code>message</code>, <code>usage</code> and <code>ms</code>, from the computer's own model server. <code>POST /api/v1/machines/:id/ai-models</code> with <code>on</code> is the switch above; OpenVibe's own AI uses the models only while it is on.</li>
 <li><code>probe</code>: <code>target</code> (<code>http(s)://…</code> or <code>tcp://host:port</code> on the computer's own network) → the status and body of one GET, or whether the port is open. It is read-only and runs at every level.</li>
 </ul>
-<p class="muted"><code>GET /api/v1/machines</code> lists your machines with their level, its <code>node_id</code> on Network (<code>nod_…</code>) and, for a machine running OpenVibe.Codes agents, the <code>fleet</code> its Link last reported (<code>fleet_at</code> says when): each agent's id, whether it is installed and signed in, and each limit window's label, used and limit and when it frees — labels, numbers and times only, never a key, a token or an account name. A machine whose plugin is off answers <code>409 bot.computer_off</code>; a refusal on the computer answers <code>result: "nack"</code> with the reason. The audit keeps the program name or the file and path, never its content.</p></section>
+<p class="muted"><code>GET /api/v1/machines</code> lists your machines with their level, its <code>node_id</code> on Network (<code>lnk_…</code>) and, for a machine running OpenVibe.Codes agents, the <code>fleet</code> its Link last reported (<code>fleet_at</code> says when): each agent's id, whether it is installed and signed in, and each limit window's label, used and limit and when it frees — labels, numbers and times only, never a key, a token or an account name. A machine whose plugin is off answers <code>409 bot.computer_off</code>; a refusal on the computer answers <code>result: "nack"</code> with the reason. The audit keeps the program name or the file and path, never its content.</p></section>
 `;
     return docsPage({ config, path: '/docs/computers', title: 'Your computer for your agents', description: 'Let your agents use your own computer through the OpenVibe Link: a desk of its own for each task (watch it and take it over), its terminal, files, screen, mouse and keyboard, at the level you set on the computer, with approvals there and a kill switch; and let your AI think with the models you run on it.', content });
 }

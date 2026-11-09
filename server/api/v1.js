@@ -25,7 +25,7 @@
  * | DELETE /robots/:id/operators/:subject          | bot.robot.manage       | owner                               |
  * | GET    /robots/:id/devices                     | bot.robot.read         | a member                            |
  * | POST   /devices/:id/rotate, /revoke            | bot.device.connect     | the robot's owner                   |
- * | POST   /devices/bind                            | — (a node token)       | a machine paired for Bot on Network |
+ * | POST   /devices/bind                            | — (a Link token)       | a machine paired for Bot on Network |
  * | POST   /robots/:id/estop                        | bot.robot.control      | owner or operator                   |
  * | POST   /robots/:id/estop/clear                  | bot.robot.control      | the owner only                      |
  * | POST   /robots/:id/commands                     | bot.robot.control      | owner or operator                   |
@@ -75,7 +75,7 @@ const CAP = {
 const AGENT_SERVICES = new Set(['svc:actor']);
 /**
  * Services that use a person's machine, each only for the kinds it is allowed and only where the owner turned on its
- * switch on openvibe.bot/machines: the agent (any computer kind) and Watch's node source (read-only probes).
+ * switch on openvibe.link/machines: the agent (any computer kind) and Watch's node source (read-only probes).
  */
 const MACHINE_SERVICES = {
     'svc:actor': { kinds: null, flag: 'agent_computer', off: 'the owner has not let their agent use this computer' },
@@ -139,7 +139,7 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
 
     const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
     const me = (req) => (req.principal.kind === 'user' ? req.principal.subject : null);
-    /** Only a person or a service acts for an owner: no token → 401, any other kind (a node token) → 403. */
+    /** Only a person or a service acts for an owner: no token → 401, any other kind (a Link token) → 403. */
     const fence = (req) => {
         if (req.principal.kind === 'anonymous') fail(401, 'bot.sign_in', 'sign in to do that');
         if (req.principal.kind !== 'user' && req.principal.kind !== 'service') fail(403, 'bot.forbidden', 'this token may not act for an owner');
@@ -168,7 +168,7 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         if (!apiAuth.granted(req.principal, CAP.dispatch)) fail(403, 'capability.denied', `${CAP.dispatch} not granted`);
     };
 
-    // Both fence before the lookup: without a token (or with a node token) a real robot id and a made-up one
+    // Both fence before the lookup: without a token (or with a Link token) a real robot id and a made-up one
     // get the same answer.
     async function member(req, robotId, roles = ['owner', 'operator', 'viewer']) {
         fence(req);
@@ -552,7 +552,7 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
             os: (st.status && typeof st.status.os === 'string' && st.status.os) || null,
             node_version: device.agent_version || null,
             last_seen_at: device.last_seen ? new Date(device.last_seen).toISOString() : null,
-            // The machine's id on Network (`nod_…`) and the OpenVibe Link's name for it, so a caller that knows the
+            // The machine's id on Network (`lnk_…`) and the OpenVibe Link's name for it, so a caller that knows the
             // machine from Network (Codes' fleet, a Run pin) finds this row (Codes C9c).
             node_id: device.node_principal || null,
             // What its coding agents have left, as its Link last reported it, and when Bot stored that reading
@@ -910,11 +910,11 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         res.json(await claims.poll(req.params.id, String(req.headers['x-ov-claim-secret'] || '')));
     }));
 
-    // ── Bootstrap of a Network-paired machine (its node token, once after pairing) ────────────────
+    // ── Bootstrap of a Network-paired machine (its Link token, once after pairing) ────────────────
     // Binds the machine to its robot and issues its WHIP publish key; calling again re-issues the key (the
     // old one stops working) for the same device. POST /pair's answer without a credential.
     r.post('/devices/bind', pair, wrap(async (req, res) => {
-        if (req.principal.kind !== 'node') fail(401, 'bot.node_token_required', 'a Network node token (audience openvibe.bot) is required');
+        if (req.principal.kind !== 'link') fail(401, 'bot.link_token_required', 'a Network Link token (audience openvibe.bot) is required');
         const device = await domain.devices.bindNode(req.principal.principal);
         const issued = await domain.devices.issuePublishKey(device.id);
         res.setHeader('Cache-Control', 'no-store');

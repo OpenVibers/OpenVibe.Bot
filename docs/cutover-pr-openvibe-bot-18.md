@@ -10,8 +10,8 @@ PR #18 changes the default target of the `GET /install` redirect so it points at
 installer asset instead of a path on OpenVibe Link's `main` branch:
 
 - `server/config.js` — the `BOT_INSTALLER_SOURCE_URL` fallback becomes
-  `https://github.com/OpenVibers/OpenVibe.Node/releases/latest/download/install.sh` (was
-  `https://raw.githubusercontent.com/OpenVibers/OpenVibe.Node/main/install/install.sh`).
+  `https://github.com/OpenVibers/OpenVibe.Link/releases/latest/download/install.sh` (was
+  `https://raw.githubusercontent.com/OpenVibers/OpenVibe.Link/main/install/install.sh`).
 - `test/install.test.js` — asserts the new default, keeps the allow-list checks, and still proves no query
   parameter can change the redirect target.
 - `.env.example` and `README.md` — document the new default and why a released asset is used.
@@ -66,9 +66,9 @@ adds it from this file at the verified head; it resolves to:
 1. `openvibe-bot.service` is active after the restart (no crash loop).
 2. `GET http://127.0.0.1:4630/api/health` answers 2xx (the process, online devices and outbox status).
 3. `GET http://127.0.0.1:4630/api/ready` answers 2xx: database, Valkey, Network readiness and the outbox relay.
-4. `GET https://openvibe.bot/install` **without following redirects** answers HTTP 302 and `Location` equal to
+4. `GET https://openvibe.link/install` **without following redirects** answers HTTP 302 and `Location` equal to
    the configured `BOT_INSTALLER_SOURCE_URL`; with `BOT_INSTALLER_SOURCE_URL` unset the default is
-   `https://github.com/OpenVibers/OpenVibe.Node/releases/latest/download/install.sh`. Repeat with
+   `https://github.com/OpenVibers/OpenVibe.Link/releases/latest/download/install.sh`. Repeat with
    `?url=https://evil.test/x` and `?to=https://evil.test/x`: both must still answer the same 302 target.
 5. The installer command a pairing returns ends in `--driver adeept` for `adeept.adr036`, `--driver adeept-mecanum`
    for `adeept.adr036.mecanum` and `--driver cozmo` for `cozmo`, and has no `--driver` for `sim.rover`.
@@ -83,7 +83,7 @@ If any of 1–4 fails, the deploy is not good: roll back (below) and investigate
   sha. Nothing in this PR needs a data rollback, so the previous release serves immediately.
 - **Manual:** `ovhost rollback bot --to <previous sha>` on `openvibe-ovh`, then re-run the verification above.
 - **Configuration:** the only knob is `BOT_INSTALLER_SOURCE_URL`. Unset it to fall back to the new default, or
-  set it back to `https://raw.githubusercontent.com/OpenVibers/OpenVibe.Node/main/install/install.sh` to return
+  set it back to `https://raw.githubusercontent.com/OpenVibers/OpenVibe.Link/main/install/install.sh` to return
   to the previous target without a code change; both hosts are on the allow-list, so the service restarts clean.
 - **Data:** there is no data to roll back for this PR (no migration ran and no row changed). Restore from the
   pgBackRest backup taken in the backup step **only** if an unrelated data incident requires it, coordinating

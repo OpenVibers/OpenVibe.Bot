@@ -8,13 +8,13 @@ const { loadConfig } = require('../server/config');
 const { driverForProfile } = require('../server/domain');
 
 (async () => {
-    const NODE_INSTALLER = 'https://github.com/OpenVibers/OpenVibe.Node/releases/latest/download/install.sh';
+    const NODE_INSTALLER = 'https://github.com/OpenVibers/OpenVibe.Link/releases/latest/download/install.sh';
 
-    await check('BOT_INSTALLER_SOURCE_URL: Node\'s script by default, https on an allow-listed host or no boot', async () => {
+    await check('BOT_INSTALLER_SOURCE_URL: Link\'s script by default, https on an allow-listed host or no boot', async () => {
         assert.strictEqual(loadConfig({}).installer.sourceUrl, NODE_INSTALLER);
-        const release = 'https://github.com/OpenVibers/OpenVibe.Node/releases/latest/download/install.sh';
+        const release = 'https://github.com/OpenVibers/OpenVibe.Link/releases/latest/download/install.sh';
         assert.strictEqual(loadConfig({ BOT_INSTALLER_SOURCE_URL: release }).installer.sourceUrl, release);
-        for (const bad of ['http://raw.githubusercontent.com/OpenVibers/OpenVibe.Node/main/install/install.sh', 'https://evil.test/install.sh',
+        for (const bad of ['http://raw.githubusercontent.com/OpenVibers/OpenVibe.Link/main/install/install.sh', 'https://evil.test/install.sh',
             'https://raw.githubusercontent.com.evil.test/x.sh', 'javascript:alert(1)', 'not a url']) {
             assert.throws(() => loadConfig({ BOT_INSTALLER_SOURCE_URL: bad }), /BOT_INSTALLER_SOURCE_URL must be an https URL on raw\.githubusercontent\.com/, bad);
         }
@@ -30,7 +30,7 @@ const { driverForProfile } = require('../server/domain');
         for (const id of ['sim.rover', 'camera.onvif', 'toString', undefined]) assert.strictEqual(driverForProfile(id), 'none', String(id));
     });
 
-    const source = 'https://github.com/OpenVibers/OpenVibe.Node/releases/download/v1.2.3/install.sh';
+    const source = 'https://github.com/OpenVibers/OpenVibe.Link/releases/download/v1.2.3/install.sh';
     const t = await boot({ env: { BOT_INSTALLER_SOURCE_URL: source } });
     const alex = t.network.newUser('alex');
 
@@ -45,13 +45,13 @@ const { driverForProfile } = require('../server/domain');
     await check('the installer command ends with --driver for an adeept, mecanum or cozmo robot, and has none for sim.rover', async () => {
         for (const [profile_id, driver] of [['adeept.adr036', 'adeept'], ['adeept.adr036.mecanum', 'adeept-mecanum'], ['cozmo', 'cozmo']]) {
             const { robot, pairing } = await t.robot(alex, { profile_id });
-            assert.strictEqual(pairing.installer, `curl -fsSL https://openvibe.bot/install | sh -s -- --robot ${robot.id} --code ${pairing.code} --driver ${driver}`);
+            assert.strictEqual(pairing.installer, `curl -fsSL https://openvibe.link/install | sh -s -- --robot ${robot.id} --code ${pairing.code} --driver ${driver}`);
             const again = await t.call('POST', `/api/v1/robots/${robot.id}/pairing-code`, { user: alex });
             assert.strictEqual(again.status, 201, again.text);
             assert.match(again.json.installer, new RegExp(`--robot ${robot.id} --code ${again.json.code} --driver ${driver}$`));
         }
         const { robot, pairing } = await t.robot(alex, { profile_id: 'sim.rover' });
-        assert.strictEqual(pairing.installer, `curl -fsSL https://openvibe.bot/install | sh -s -- --robot ${robot.id} --code ${pairing.code}`);
+        assert.strictEqual(pairing.installer, `curl -fsSL https://openvibe.link/install | sh -s -- --robot ${robot.id} --code ${pairing.code}`);
     });
     await t.close();
 
@@ -60,7 +60,7 @@ const { driverForProfile } = require('../server/domain');
         const sam = n.network.newUser('sam');
         const { robot, pairing } = await n.robot(sam, { profile_id: 'cozmo' });
         const asked = n.network.pairings.at(-1);
-        assert.strictEqual(pairing.installer, `curl -fsSL https://openvibe.bot/install | sh -s -- --network ${n.network.url} --pairing ${asked.pairing_id} --code ${asked.code} --driver cozmo`);
+        assert.strictEqual(pairing.installer, `curl -fsSL https://openvibe.link/install | sh -s -- --network ${n.network.url} --pairing ${asked.pairing_id} --code ${asked.code} --driver cozmo`);
         const again = await n.call('POST', `/api/v1/robots/${robot.id}/pairing-code`, { user: sam });
         assert.strictEqual(again.status, 201, again.text);
         assert.match(again.json.installer, / --code \S+ --driver cozmo$/);

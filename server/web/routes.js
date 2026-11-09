@@ -47,7 +47,7 @@ const kits = require('../kits');
 // testing). Read on each request, so setting it in the env file and restarting is all a release needs.
 function linkApkUrl() {
     const v = String(process.env.LINK_ANDROID_APK_URL || '').trim();
-    return /^https:\/\/(github\.com\/OpenVibers\/OpenVibe\.Node\/releases\/|openvibe\.link\/)[^\s"'<>]+$/.test(v) ? v : null;
+    return /^https:\/\/(github\.com\/OpenVibers\/OpenVibe\.Link\/releases\/|openvibe\.link\/)[^\s"'<>]+$/.test(v) ? v : null;
 }
 const { renderPanel, renderEmbedRefused, renderDrivePage, renderPairingPage, renderPhonePage, renderPhoneLinkPage, renderMachinesPage, renderMachineDesksPage, renderMachineScreenPage, renderSharePage, renderShareGone, renderLinkPage, renderSignInPage, renderClaimPage, renderClaimApproved, renderFirstRunPage } = require('./render');
 const { createMachineScreen } = require('../machine-screen');
@@ -127,8 +127,8 @@ const LLMS_PAGES = [
     },
     {
         path: '/docs/computers', title: 'Your computer for your agents',
-        note: 'The Node\'s computer plugin: levels set on the computer, approvals there, the agent switch and the API.',
-        text: 'How to let your agents use your own computer through the OpenVibe Link\'s computer plugin. Installed with --computer, it runs as your own account, never root, and its only folder is your home. The level is set on the computer only: observe (screenshots, listing and reading files), ask (programs and writes each approved on the computer with openvibe-node approve), trusted (inside its folders without asking) or full. Programs are argv, never a shell line, time-limited and output-capped. The local stop drops it to observe. The switch Let my agent use this computer on openvibe.bot/machines lets your OpenVibe.Actor agent use it as you. Bot\'s machine commands take exec, fs and screen, and the computer\'s answer comes back in data.',
+        note: 'The Link\'s computer plugin: levels set on the computer, approvals there, the agent switch and the API.',
+        text: 'How to let your agents use your own computer through the OpenVibe Link\'s computer plugin. Installed with --computer, it runs as your own account, never root, and its only folder is your home. The level is set on the computer only: observe (screenshots, listing and reading files), ask (programs and writes each approved on the computer with openvibe-link approve), trusted (inside its folders without asking) or full. Programs are argv, never a shell line, time-limited and output-capped. The local stop drops it to observe. The switch Let my agent use this computer on openvibe.link/machines lets your OpenVibe.Actor agent use it as you. Bot\'s machine commands take exec, fs and screen, and the computer\'s answer comes back in data.',
     },
     {
         path: '/updates', title: 'What shipped on OpenVibe.Bot',
@@ -475,7 +475,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     }));
 
     // The guided first run's funnel, reviewers only (OpenVibe Link docs/install.md): the Link reports one
-    // node.first_run telemetry event per step, and Bot stores one row per device and step.
+    // link.first_run telemetry event per step, and Bot stores one row per device and step.
     r.get('/admin/first-run', page(async (req, res) => {
         const me = requireUser(req);
         if (!isReviewer(me)) throw new BotError(404, 'bot.not_found', 'no such page');
@@ -615,7 +615,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         const sensors = hub ? ((hub.deviceState(d.id).telemetry || {}).sensors || {}) : {};
         // Read online first: the first-run query must not make a machine look offline because the page took longer.
         const online = !!(hub && hub.isOnline(d.id));
-        // What the guided first run's one job found on this machine (Node's node.first_run first_job event).
+        // What the guided first run's one job found on this machine (Link's link.first_run first_job event).
         const firstRun = await domain.devices.firstRunOf(d.id);
         return {
             ...d, online, robot: robot ? robot.name : null,

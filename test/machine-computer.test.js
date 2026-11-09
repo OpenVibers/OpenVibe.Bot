@@ -17,7 +17,7 @@ const { boot, check, done } = require('./helpers/app');
     const COMPUTER = { terminal: { level: 'trusted', timeout_s: 30 }, files: { level: 'trusted', roots: ['/home/alex'] }, screen: { level: 'trusted', tool: 'grim' }, probe: { lan_only: true }, input: { level: 'trusted', tool: 'xdotool', scroll: true }, browser: { level: 'trusted', browser: 'chromium', headless: true } };
     const seen = [];
 
-    /** A Network-paired machine of `owner` whose fake Node answers computer commands like the plugin would. */
+    /** A Network-paired machine of `owner` whose fake Link answers computer commands like the plugin would. */
     async function machine(owner, computer = COMPUTER) {
         const principal = t.network.addNode({ owner: owner.subject, ref: `worker:${owner.subject}`, name: 'desk-pc' });
         const c = await t.ws('/device', { headers: { Authorization: `Bearer ${t.network.signNode(principal)}` } });
@@ -40,7 +40,7 @@ const { boot, check, done } = require('./helpers/app');
             else if (m.kind === 'screen' && m.value.desk && m.value.desk !== 'main') c.send(frame('ack', { id: m.id, data: { format: 'png', width: 1280, height: 800, content_b64: 'iVBORw0KGgo=' } }));
             else c.send(frame('nack', { id: m.id, fault_code: 'not_allowed', message: 'this machine allows observing only' }));
         });
-        // Beat like a real Node while the socket is open, so a longer check never sees its machine go offline.
+        // Beat like a real Link while the socket is open, so a longer check never sees its machine go offline.
         const beat = setInterval(() => { try { c.send(frame('heartbeat', { t: Date.now() })); } catch { /* closed */ } }, Math.max(100, Math.floor(config.heartbeat_ms / 2)));
         c.ws.on('close', () => clearInterval(beat));
         await poll(() => t.hub.computerOf(deviceId) !== null || !computer);

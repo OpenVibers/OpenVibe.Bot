@@ -7,7 +7,7 @@
  *
  * Every field of a reading is derived from the job and its second: id = idempotency_key = run:<job id>:<n>,
  * service run, operation function.invoke, unit s, quantity 1 (the partial last second (wall_ms mod 1000)/1000,
- * never 0), at = started_ms + n*1000, resource the job id, node the device id, source openvibe-node.worker, and
+ * never 0), at = started_ms + n*1000, resource the job id, node the device id, source openvibe-link.worker, and
  * project, subject and provider from Bot's own record of the job. Nothing depends on when a frame arrived, so a
  * resend, a job_usage and the job_exit backfill of one second are one key: the outbox keeps the first
  * (ON CONFLICT DO NOTHING) and Billing replays an identical reading (200) and refuses a different one (409).
@@ -29,7 +29,7 @@ const SCHEMA = 'platform.usage-sample@1';
 const SERVICE = 'run';
 const OPERATION = 'function.invoke';
 const UNIT = 's';
-const SOURCE = 'openvibe-node.worker';
+const SOURCE = 'openvibe-link.worker';
 const REFUSED = new Set([400, 409, 413, 422]);
 
 // Network's grant to the `bot` client on audience openvibe.billing (Network server/identity/principals.js

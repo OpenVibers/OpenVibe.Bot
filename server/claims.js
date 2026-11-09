@@ -3,7 +3,7 @@
  * A device that asks to be added: the one command on the machine (plan T15 "five-minute path", owner 2026-10-17: "I
  * should be able to run a single command on my raspi … ready to go live and controllable").
  *
- *   curl -fsSL https://openvibe.bot/install | sh          (no robot, no code)
+ *   curl -fsSL https://openvibe.link/install | sh          (no robot, no code)
  *
  * The installer looks at the machine (the kit on its I2C bus, the camera), then starts a claim here and shows the
  * person a code and openvibe.bot/link. Signed in there, they see what the device found and approve it (name, model,

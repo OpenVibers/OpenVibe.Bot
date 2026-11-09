@@ -9,7 +9,7 @@
  * Imager writes too) and both go only into the files you download. openvibe.bot is sent the robot's name, model, who
  * may drive, Live and the hostname, and answers a setup key for the card (server/setup-keys.js).
  *
- * In Node (tests) this file exports the pure parts: sha512Crypt, yamlQuote, userData, networkConfig.
+ * In Node.js (tests) this file exports the pure parts: sha512Crypt, yamlQuote, userData, networkConfig.
  */
 (function (root, factory) {
     'use strict';
@@ -82,12 +82,13 @@
     /**
      * user-data. Mirrors what Raspberry Pi Imager 2 writes (its customization_generator.cpp): the `user:` block, avahi
      * so <hostname>.local answers, SSH on, I2C and SPI for the robot's boards. Then the one thing Imager cannot do: a
-     * first-boot service that waits for the network and runs openvibe.bot's installer with the card's setup key, so the
+     * first-boot service that waits for the network and runs OpenVibe Link's installer with the card's setup key, so the
      * robot adds itself with nothing typed on it. Its output: `journalctl -u openvibe-setup`.
      */
-    function userData({ hostname, username, passwordHash, sshKeys = [], timezone = '', setupKey, server = 'https://openvibe.bot', robotName = '' }) {
+    function userData({ hostname, username, passwordHash, sshKeys = [], timezone = '', setupKey, server = 'https://openvibe.bot', installer = 'https://openvibe.link/install', robotName = '' }) {
         if (!/^osk_[A-Za-z0-9_-]{43}$/.test(setupKey || '')) throw new Error('no setup key');
         if (!/^https?:\/\/[A-Za-z0-9.-]+(:\d+)?$/.test(server)) throw new Error('bad server');
+        if (!/^https?:\/\/[A-Za-z0-9.-]+(:\d+)?\/install$/.test(installer)) throw new Error('bad installer');
         const keys = sshKeys.map((k) => k.trim()).filter(Boolean);
         const script = [
             '#!/bin/sh',
@@ -95,11 +96,11 @@
             '# Its output: journalctl -u openvibe-setup',
             'key="$(cat /etc/openvibe/setup-key)"',
             'for i in $(seq 1 90); do',
-            `  curl -fsS -o /dev/null --max-time 10 ${server}/install && break`,
+            `  curl -fsS -o /dev/null --max-time 10 ${installer} && break`,
             '  echo "waiting for the network ($i of 90)"; sleep 10',
             'done',
             'for try in 1 2 3; do',
-            `  if curl -fsSL ${server}/install | sh -s -- --setup "$key"; then rm -f /etc/openvibe/setup-key; exit 0; fi`,
+            `  if curl -fsSL ${installer} | sh -s -- --setup "$key"; then rm -f /etc/openvibe/setup-key; exit 0; fi`,
             '  echo "the installer stopped (try $try of 3): trying again in a minute"; sleep 60',
             'done',
             'exit 1',

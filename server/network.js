@@ -5,13 +5,13 @@
  *
  *   keys      the Network's RS256 signing keys: openvibe-sdk/auth createNetworkKeys (OV_NETWORK_PUBLIC_KEY pinned,
  *             else the JWKS, retried every 30 s until it loads, refreshed every 15 minutes, a rotation followed on an
- *             unknown kid). They verify service and node tokens (audience openvibe.bot) and the browser's Network
+ *             unknown kid). They verify service and Link tokens (audience openvibe.bot) and the browser's Network
  *             user JWT, all offline (openvibe-sdk/auth).
- *   nodes     Network's node principals (machines paired for Bot): POST /internal/node-pairings (a pairing
- *             code, BOT_PAIRING_AUTHORITY=network), GET /internal/node-principals/:id, POST …/:id/revoke and
+ *   nodes     Network's node principals (machines paired for Bot): POST /internal/link-pairings (a pairing
+ *             code, BOT_PAIRING_AUTHORITY=network), GET /internal/link-principals/:id, POST …/:id/revoke and
  *             POST /internal/machines/status (the machine's online state, which Network publishes as the
  *             hub's network.machine.online and network.machine.offline events) with Bot's own svc:bot token
- *             (audience openvibe.network, network.node.manage).
+ *             (audience openvibe.network, network.link.manage).
  *   identity  Network's people (identity.subject.resolve): resolve a username to a subject and look up the
  *             names of subjects the robot's owner added.
  */
@@ -28,15 +28,15 @@ function createKeyProvider(config, { fetchImpl = globalThis.fetch, log = console
 function createUserAuth(config, keys) {
     /**
      * Claims of a valid user token, or null. openvibe-sdk/auth verifyUserToken refuses service, app and mod principals
-     * and typed tokens (a realtime ticket, a FedCM assertion, an export token); a node token (a machine paired for Bot)
+     * and typed tokens (a realtime ticket, a FedCM assertion, an export token); a Link token (a machine paired for Bot)
      * is refused here too.
      */
     async function verify(token) {
         if (!token) return null;
         let claims;
         try { claims = await verifyUserToken(String(token), { ...keys.verifyOptions, issuer: config.network.issuer }); } catch { return null; }
-        if (typeof claims.sub === 'string' && /^node:/.test(claims.sub)) return null;
-        if (claims.actor_type === 'node') return null;
+        if (typeof claims.sub === 'string' && /^link:/.test(claims.sub)) return null;
+        if (claims.actor_type === 'link') return null;
         return claims;
     }
     return { verify };
@@ -48,13 +48,13 @@ function createUserAuth(config, keys) {
  * get(id) → that view, or null when Network knows no such principal paired by Bot (it answers 404, never 403).
  * revoke(id) → the revoked view, or null for the same 404; idempotent on Network's side.
  * pair({subject, ref}) → { pairing_id, code, expires_at }: a one-time code for the person `subject` to pair a
- * machine for robot `ref` (POST /internal/node-pairings; Network keeps one live code per ref).
+ * machine for robot `ref` (POST /internal/link-pairings; Network keeps one live code per ref).
  * Any other failure throws 503 bot.network_unavailable.
  */
 function createNodePrincipals(config, { fetchImpl = globalThis.fetch } = {}) {
     const tokens = serviceAuth.createTokenClient({
         tokenUrl: `${config.network.internalUrl}/oauth/token`, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret,
-        audience: 'openvibe.network', scope: 'network.node.manage', fetchImpl,
+        audience: 'openvibe.network', scope: 'network.link.manage', fetchImpl,
     });
     async function call(method, path, body) {
         let res;
@@ -72,11 +72,11 @@ function createNodePrincipals(config, { fetchImpl = globalThis.fetch } = {}) {
         if (!res.ok || !out) throw new BotError(503, 'bot.network_unavailable', `Network answered ${res.status} for the machine`);
         return out;
     }
-    const principal = (id) => `/internal/node-principals/${encodeURIComponent(id)}`;
+    const principal = (id) => `/internal/link-principals/${encodeURIComponent(id)}`;
     return {
         get: (id) => call('GET', principal(id)),
         revoke: (id) => call('POST', `${principal(id)}/revoke`),
-        pair: ({ subject, ref }) => call('POST', '/internal/node-pairings', { owner: { kind: 'user', subject }, ref }),
+        pair: ({ subject, ref }) => call('POST', '/internal/link-pairings', { owner: { kind: 'user', subject }, ref }),
         // The machine's online state (plan L34): Network publishes it as the hub's machine events.
         status: (body) => call('POST', '/internal/machines/status', body),
     };
