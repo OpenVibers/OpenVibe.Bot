@@ -562,7 +562,7 @@ ${embed ? '' : tryIt ? topbar('<span class="crumb">Try the panel</span>', '/') :
 </header>
 <main id="panel" tabindex="0" data-robot-id="${esc(robot.id)}" data-role="${esc(role)}" data-hold-ms="${esc(holdResendMs)}" data-allowed="${data(allowed_commands)}"${tryIt ? ' data-transport="local"' : ''}${embed && parentOrigins.length ? ` data-parent-origins="${esc(parentOrigins.join(' '))}"` : ''}>
 <div class="panel-head">
-${kit.pageHead({ title: `${robot.name}`, icon: 'gear', back: { href: '/', label: 'Home' } })}
+${kit.pageHead({ title: `${robot.name}`, icon: 'gear', back: embed ? null : { href: '/', label: 'Home' } })}
 <p class="meta"><span class="pill online" data-online-pill data-state="connecting"><span class="dot"></span><span data-online-label>Connecting…</span></span> <span class="pill">${esc(profile.name || robot.profile_id)}</span> <span class="pill role" data-role-label>${esc(ROLE_LABEL[role] || role)}</span></p>
 ${turnStrip(robot, role)}
 </div>
