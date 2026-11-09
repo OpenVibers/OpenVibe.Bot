@@ -136,13 +136,22 @@ function drivePad(axes, enabled) {
 const humanName = (name) => { const s = String(name).replace(/_/g, ' '); return s.charAt(0).toUpperCase() + s.slice(1); };
 
 /** One control per actuator the widget drives, by the actuator's declared type. */
-function actuatorControl(name, a, enabled) {
+/**
+ * Sliders that repeat while held (2026-11-09, the LOOI bridge's short head-target leases): by profile and actuator, the
+ * cadence in ms (75-250). The panel's own setting, not the profile contract's (bot.robot-profile@1 takes no extra
+ * fields); a profile field can replace it with the next Contracts release.
+ */
+const HOLD_REPEAT_MS = { looi: { head: 90 } };
+const holdRepeatOf = (profileId, name) => { const v = (HOLD_REPEAT_MS[profileId] || {})[name]; return v ? Math.min(250, Math.max(75, v)) : 0; };
+
+function actuatorControl(name, a, enabled, profileId = '') {
+    const repeat = a.type === 'number' ? holdRepeatOf(profileId, name) : 0;
     const off = disabledUnless(enabled);
     const label = humanName(name);
     if (a.type === 'number') {
         const [lo, hi] = a.range;
         const start = Math.min(hi, Math.max(lo, 0));
-        return `<label class="control slider"><span class="control-name">${esc(label)}</span> <input type="range" min="${esc(lo)}" max="${esc(hi)}" step="${esc((hi - lo) / 40)}" value="${esc(start)}" data-actuator="${esc(name)}"${off}></label>`;
+        return `<label class="control slider"><span class="control-name">${esc(label)}</span> <input type="range" min="${esc(lo)}" max="${esc(hi)}" step="${esc((hi - lo) / 40)}" value="${esc(start)}" data-actuator="${esc(name)}"${repeat ? ` data-hold-repeat="${esc(repeat)}"` : ''}${off}></label>`;
     }
     if (a.type === 'rgb') {
         return `<div class="control colour"><label><span class="control-name">${esc(label)}</span> <input type="color" value="#ffffff" data-rgb="${esc(name)}"${off}></label>`
@@ -221,7 +230,7 @@ function renderWidget(w, { profile = {}, allowed_commands = [], signaling_url = 
         }
         case 'pan-tilt': case 'servo': case 'head': case 'lift': case 'lights': case 'horn': {
             const names = (commands.actuator && commands.actuator.names) || {};
-            inner = `<div class="controls">${(w.command && w.command.names ? w.command.names : []).filter((n) => names[n]).map((n) => actuatorControl(n, names[n], enabled)).join('')}</div>`;
+            inner = `<div class="controls">${(w.command && w.command.names ? w.command.names : []).filter((n) => names[n]).map((n) => actuatorControl(n, names[n], enabled, profile.id)).join('')}</div>`;
             break;
         }
         case 'speaker': {
