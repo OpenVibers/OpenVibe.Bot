@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use OpenVibe.Bot in research or a product, cite it as below."
+title: openvibe-bot
+type: software
+authors:
+  - name: OpenVibe
+    alias: OpenVibers
+    website: https://openvibe.network
+repository-code: https://github.com/OpenVibers/OpenVibe.Bot
+url: https://openvibe.bot
+license: AGPL-3.0-only
+abstract: "Pair a robot in minutes and drive it safely from a browser, from anywhere, at openvibe.bot."
+keywords:
+  - openvibe
+  - control-panel
+  - iot
+  - nodejs
+  - raspberry-pi
