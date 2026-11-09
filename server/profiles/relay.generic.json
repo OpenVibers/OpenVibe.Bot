@@ -4,7 +4,7 @@
   "name": "Generic relay",
   "vendor": "OpenVibe",
   "kind": "bridge",
-  "description": "A robot with no hardware of its own: the owner's Node runs the relay plugin and forwards the panel's button and video-click commands to a local script. The shape OpenVibe.Live's camp controls convert to (plan T15 R9 step 5); the buttons live in the robot's local profile.",
+  "description": "A robot with no hardware of its own: the owner's Link runs the relay plugin and forwards the panel's button and video-click commands to a local script. The shape OpenVibe.Live's camp controls convert to (plan T15 R9 step 5); the buttons live in the robot's local profile.",
   "capabilities": ["relay"],
   "mapping": { "driver": "relay", "plugin": "relay" },
   "commands": {

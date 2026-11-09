@@ -60,8 +60,8 @@ const { HOME_CSP: SITE_CSP } = require('../server/web/home');
         assert.match(html, /no_heartbeat/);
         assert.match(html, /e-stop/);
         // Links out to the full protocol and the contributor path.
-        assert.match(html, /OpenVibe\.Node\/blob\/main\/docs\/plugins\.md/);
-        assert.match(html, /OpenVibe\.Node\/blob\/main\/docs\/protocol\.md/);
+        assert.match(html, /OpenVibe\.Link\/blob\/main\/docs\/plugins\.md/);
+        assert.match(html, /OpenVibe\.Link\/blob\/main\/docs\/protocol\.md/);
         assert.match(html, /pull request/);
     });
 

@@ -187,7 +187,7 @@ function moreSection({ config, kit: k, models }) {
     const model = k ? models.find((m) => m.id === k.profile_id) : null;
     const kitBody = k && k.parts && k.parts.length
         ? `<p class="hm-fold-lede">What to get for the robot OpenVibe.Bot was built around. The OpenVibe Link drives its Robot HAT directly, publishes the Pi camera and stops the motors the moment commands stop.</p><ul class="hm-parts">${k.parts.map((p) => `<li><b>${esc(p.qty || 1)}×</b><span>${esc(p.name)}${p.note ? `<small>${esc(p.note)}</small>` : ''}</span></li>`).join('')}</ul>
-<p class="hm-kit-actions">${link(k.build_guide_url, 'Adeept\'s build guide', 'sc-btn')}${model ? ` ${link(`/models/${model.id}`, 'Its model page', 'sc-btn')}` : ''} ${link('https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/hardware-adeept.md', 'Setup guide for Link', 'sc-btn')}</p>`
+<p class="hm-kit-actions">${link(k.build_guide_url, 'Adeept\'s build guide', 'sc-btn')}${model ? ` ${link(`/models/${model.id}`, 'Its model page', 'sc-btn')}` : ''} ${link('https://github.com/OpenVibers/OpenVibe.Link/blob/main/docs/hardware-adeept.md', 'Setup guide for Link', 'sc-btn')}</p>`
         : '';
     const build = rows([
         ['/docs/drivers', 'Write a driver', 'A separate program in any language that speaks JSON lines with the OpenVibe Link: every message and the safety rules.'],
@@ -201,7 +201,7 @@ function moreSection({ config, kit: k, models }) {
         html: `<section class="sc-sec hm-sec hm-more-sec" id="more" aria-labelledby="more-h"><h2 class="hm-h">More on OpenVibe.Bot</h2>
 ${kit.fold({ id: 'panel', title: 'What the panel does', meta: 'controls, safety, sharing', body: panel })}
 ${kit.fold({ id: 'automate', title: 'Let it run without you', meta: 'routines, webhooks, your agent', body: `<p class="hm-fold-lede">They all go through the gate a person does: the same limits, the same e-stop, the same audit.</p>${automate}` })}
-${kit.fold({ id: 'computers', title: 'Your computers, for your agents and your AI', meta: 'the same Node', body: `<p class="hm-fold-lede">The same OpenVibe Link runs on your own computers. It connects out, nobody else's work reaches them, and the limits you set on each computer always win.</p>${computers}` })}
+${kit.fold({ id: 'computers', title: 'Your computers, for your agents and your AI', meta: 'the same Link', body: `<p class="hm-fold-lede">The same OpenVibe Link runs on your own computers. It connects out, nobody else's work reaches them, and the limits you set on each computer always win.</p>${computers}` })}
 ${kit.fold({ id: 'code', title: 'The same robot from your own code', meta: 'REST and the SDK', body: api })}
 ${kitBody ? kit.fold({ id: 'kit', title: `The first kit: ${k.name}`, meta: plural(k.parts.length, 'part', 'parts'), body: kitBody }) : ''}
 ${kit.fold({ id: 'build', title: 'Build for OpenVibe.Bot', meta: 'drivers, profiles, the source', body: `${build}<p class="hm-fold-lede">${link('/docs', 'All build pages', 'hm-more')}</p>` })}</section>`,

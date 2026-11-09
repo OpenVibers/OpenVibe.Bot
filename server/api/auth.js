@@ -5,7 +5,7 @@
  *
  *   { kind: 'service', sub: 'svc:live', cap: [...] }   a Network client-credentials token for audience
  *                                                       openvibe.bot; each route checks ONE capability
- *   { kind: 'node', principal: 'nod_…', sub: 'node:nod_…' }   a Network node token (actor_type node, audience
+ *   { kind: 'link', principal: 'lnk_…', sub: 'link:lnk_…' }   a Network Link token (actor_type node, audience
  *                                                       openvibe.bot): a machine paired for Bot; it may only bind
  *   { kind: 'user', subject: 'usr_…', username, name, avatar, role }
  *   { kind: 'anonymous' }
@@ -17,8 +17,8 @@ const { verifyServiceToken } = require('openvibe-sdk/auth');
 
 const { capabilities, http, ids } = contracts;
 
-const PRINCIPAL_SUB = /^(svc|app|mod|node):/;
-const NODE_SUB = /^node:(nod_[0-9A-HJKMNP-TV-Z]{26})$/;
+const PRINCIPAL_SUB = /^(svc|app|mod|link):/;
+const LINK_SUB = /^link:(lnk_[0-9A-HJKMNP-TV-Z]{26})$/;
 const ANON = Object.freeze({ kind: 'anonymous' });
 
 function decodePayload(token) {
@@ -57,21 +57,21 @@ async function verifyService(token, opts) {
     return { ok: true, claims: r.claims };
 }
 
-/** A Bearer that claims to be a node token (actor_type node); verifyNode decides whether it is one. */
-function isNodeToken(token) {
+/** A Bearer that claims to be a Link token (actor_type node); verifyLink decides whether it is one. */
+function isLinkToken(token) {
     const payload = decodePayload(token);
-    return !!payload && payload.actor_type === 'node';
+    return !!payload && payload.actor_type === 'link';
 }
 
 /**
- * Verify a node token: signed by Network, audience openvibe.bot, actor_type node, sub node:nod_…
- * Returns { ok, principal: 'nod_…', claims } or { ok:false, code, reason }.
+ * Verify a Link token: signed by Network, audience openvibe.bot, actor_type node, sub link:lnk_…
+ * Returns { ok, principal: 'lnk_…', claims } or { ok:false, code, reason }.
  */
-async function verifyNode(token, opts) {
+async function verifyLink(token, opts) {
     const r = await principalToken(token, opts);
     if (!r.ok) return { ok: false, code: r.code, reason: r.reason };
-    const m = NODE_SUB.exec(String(r.claims.sub || ''));
-    if (r.claims.actor_type !== 'node' || !m) return { ok: false, code: 'token.invalid', reason: 'not a node token' };
+    const m = LINK_SUB.exec(String(r.claims.sub || ''));
+    if (r.claims.actor_type !== 'link' || !m) return { ok: false, code: 'token.invalid', reason: 'not a Link token' };
     return { ok: true, principal: m[1], claims: r.claims };
 }
 
@@ -84,10 +84,10 @@ function createApiAuth({ config, keys, userAuth }) {
         const token = header.slice(7).trim();
         if (!keys.loaded()) return { error: [503, 'identity.unavailable', 'the Network signing key is not loaded yet'] };
         const payload = decodePayload(token);
-        if (payload && payload.actor_type === 'node') {
-            const r = await verifyNode(token, opts());
+        if (payload && payload.actor_type === 'link') {
+            const r = await verifyLink(token, opts());
             if (!r.ok) return { error: [401, r.code, r.reason] };
-            return { principal: { kind: 'node', principal: r.principal, sub: r.claims.sub, jti: r.claims.jti } };
+            return { principal: { kind: 'link', principal: r.principal, sub: r.claims.sub, jti: r.claims.jti } };
         }
         if (payload && typeof payload.sub === 'string' && PRINCIPAL_SUB.test(payload.sub)) {
             const r = await principalToken(token, opts());
@@ -114,4 +114,4 @@ function createApiAuth({ config, keys, userAuth }) {
     return { middleware, resolve, granted };
 }
 
-module.exports = { createApiAuth, userPrincipal, verifyService, verifyNode, isNodeToken, decodePayload, PRINCIPAL_SUB };
+module.exports = { createApiAuth, userPrincipal, verifyService, verifyLink, isLinkToken, decodePayload, PRINCIPAL_SUB };

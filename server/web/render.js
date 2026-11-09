@@ -708,11 +708,11 @@ function renderSignInPage({ next = '/robots', what = 'this page' } = {}) {
 }
 
 /**
- * /link (server/claims.js): the code a device shows after `curl -fsSL https://openvibe.bot/install | sh` with no code.
+ * /link (server/claims.js): the code a device shows after `curl -fsSL https://openvibe.link/install | sh` with no code.
  * renderLinkPage asks for it; renderClaimPage shows what that device found and the choices its robot starts with;
  * renderClaimApproved follows the device as it pairs on its own.
  */
-function renderLinkPage({ code = '', error = null, installer = 'curl -fsSL https://openvibe.bot/install | sh' } = {}) {
+function renderLinkPage({ code = '', error = null, installer = 'curl -fsSL https://openvibe.link/install | sh' } = {}) {
     const body = `${topbar('<span class="crumb">Add a device</span>')}
 <main class="page link">
 <h1>Add a device</h1>
@@ -939,7 +939,7 @@ function renderMachinesPage({ machines = [], pairing = null, phoneReady = false 
     const list = machines.length
         ? `<ul class="robots">${machines.map((m) => `<li class="robot-card"><span class="robot-name">${icon('plug')}<span>${esc(m.name || m.id)}</span></span>`
             + `<span class="robot-meta"><span class="pill">${m.online ? 'Online' : 'Offline'}</span>${classesOf(m).map((c) => ` <span class="pill">${esc(c)} jobs</span>`).join('')}`
-            + `${m.agent_version ? ` <span class="pill">Node ${esc(m.agent_version)}</span>` : ''}${m.robot ? ` <span class="pill">Serves ${esc(m.robot)}</span>` : ''}</span>`
+            + `${m.agent_version ? ` <span class="pill">Link ${esc(m.agent_version)}</span>` : ''}${m.robot ? ` <span class="pill">Serves ${esc(m.robot)}</span>` : ''}</span>`
             + firstRunRow(m) + computerRow(m) + voiceRow(m)
             + `<span class="robot-actions"><form method="post" action="/machines/${esc(m.id)}/remove"><button type="submit" class="button quiet">Remove</button></form></span></li>`).join('')}</ul>`
         : `<div class="empty">${icon('plug', 'icon empty-icon')}<p class="empty-title">No machines yet.</p><p>Add your computer or a server you own. It runs the jobs you start, such as a coding task on openvibe.codes, and nobody else's.</p></div>`;
@@ -953,9 +953,9 @@ function renderMachinesPage({ machines = [], pairing = null, phoneReady = false 
 <p class="muted">Pick one and run its command on the computer: it installs OpenVibe Link and pairs the computer with your account. Add <code>--ai</code> to any of them to use its models too.</p>
 <ul class="choices" aria-labelledby="add-h">
 ${choice('Run your coding jobs', ' --worker', 'Linux with systemd. It turns Link\'s job worker on: jobs run as a separate user, in a sandbox, with the limits you set. For coding jobs the computer also needs Node.js 22 or newer and git, and a coding agent: Claude Code, Codex, OpenCode, or a DeepSeek key.')}
-${choice('Let your agents use it', ' --computer ask', 'The computer\'s terminal, files and screen become usable by your agents, at the level you set on the computer: <code>ask</code> waits for <code>openvibe-node approve</code> there before anything runs or changes. The Link runs as your own account, never root. <a href="https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/computer.md">How it works</a>.')}
-${choice('Make a spare computer a desk host', ' --desk-host', 'An old laptop, a mini PC or a spare workstation becomes a place where your agents work: each task gets a desk of its own, with its own browser, and you can watch any desk and take it over. No screen, keyboard or sign-in needed on it. It runs as its own account and only for your agents; the installer adds what desks need and sizes them to its memory. Linux. <a href="https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/computer.md#desk-hosts---desk-host-node-v0200">How it works</a>.')}
-${choice('Use the models you run on it', ' --ai', 'If this computer runs Ollama, LM Studio or llama.cpp\'s server, your Vibe and your AI members can think with its models: free, and no port is opened. The installer says which server it finds. Once it is paired, turn on "Let my AI use this computer\'s models" for it here. Link v0.28.0 or newer. <a href="https://github.com/OpenVibers/OpenVibe.Node/blob/main/docs/ai.md">How it works</a>.')}
+${choice('Let your agents use it', ' --computer ask', 'The computer\'s terminal, files and screen become usable by your agents, at the level you set on the computer: <code>ask</code> waits for <code>openvibe-link approve</code> there before anything runs or changes. The Link runs as your own account, never root. <a href="https://github.com/OpenVibers/OpenVibe.Link/blob/main/docs/computer.md">How it works</a>.')}
+${choice('Make a spare computer a desk host', ' --desk-host', 'An old laptop, a mini PC or a spare workstation becomes a place where your agents work: each task gets a desk of its own, with its own browser, and you can watch any desk and take it over. No screen, keyboard or sign-in needed on it. It runs as its own account and only for your agents; the installer adds what desks need and sizes them to its memory. Linux. <a href="https://github.com/OpenVibers/OpenVibe.Link/blob/main/docs/computer.md#desk-hosts---desk-host-node-v0200">How it works</a>.')}
+${choice('Use the models you run on it', ' --ai', 'If this computer runs Ollama, LM Studio or llama.cpp\'s server, your Vibe and your AI members can think with its models: free, and no port is opened. The installer says which server it finds. Once it is paired, turn on "Let my AI use this computer\'s models" for it here. Link v0.28.0 or newer. <a href="https://github.com/OpenVibers/OpenVibe.Link/blob/main/docs/ai.md">How it works</a>.')}
 <li class="card"><h2>Or enter the pairing code</h2><p><strong class="code">${esc(pairing.code)}</strong></p>
 <p class="muted">Valid until <time datetime="${esc(pairing.expires_at)}" data-local-time>${esc(String(pairing.expires_at).slice(11, 16))} UTC</time>. It works once.</p></li></ul>
 <p class="muted">Reload this page once the installer says it is paired: the machine shows up above.</p>`
@@ -964,8 +964,8 @@ ${choice('Use the models you run on it', ' --ai', 'If this computer runs Ollama,
     const body = `${topbar('<span class="crumb">Machines</span>')}
 <main class="page">
 <h1>Your machines</h1>
-<p class="muted">A machine here runs jobs for you and only you. It connects out to OpenVibe and needs no open ports. The limits in its own config and its local kill switch (<code>openvibe-node stop</code>) always win.</p>
-<p class="muted"><a href="https://openvibe.network/machines">All your machines are on openvibe.network/machines</a></p>
+<p class="muted">A machine here runs jobs for you and only you. It connects out to OpenVibe and needs no open ports. The limits in its own config and its local kill switch (<code>openvibe-link stop</code>) always win.</p>
+<p class="muted"><a href="https://openvibe.link/machines">All your machines are on openvibe.link/machines</a></p>
 ${list}
 ${add}
 ${phoneReady ? '<p class="muted">In your pocket: <a href="/link/phone">Link on your phone</a> adds the Android app, which shows your agents\' approvals and takes files from any share sheet.</p>' : ''}
@@ -1104,7 +1104,7 @@ ${takeOver}
 <form method="post" action="/machines/${esc(machine.id)}/screen/stop"><button type="submit" class="primary">Stop showing it</button></form>
 <form method="post" action="/machines/${esc(machine.id)}/screen">${desk !== 'main' ? `<input type="hidden" name="desk" value="${esc(desk)}">` : ''}<button type="submit" class="button quiet">${error ? 'Try again' : 'Start again (10 more minutes)'}</button></form>
 </div>
-<p class="muted small">${desk === 'main' ? 'The machine says on its desktop that its screen is live. ' : 'Nothing of your own screen is shown: this is the desk\'s own. '}<code>openvibe-node stop</code> on the machine ends it at once, and it ends on its own after its time.</p>
+<p class="muted small">${desk === 'main' ? 'The machine says on its desktop that its screen is live. ' : 'Nothing of your own screen is shown: this is the desk\'s own. '}<code>openvibe-link stop</code> on the machine ends it at once, and it ends on its own after its time.</p>
 ${sharesBlock(machine, shares, madeLink, madeShare, hasDesk, hasScreen)}
 </main>`;
     return page(`${name}: screen`, body, { scripts: ['/panel/panel.js', '/panel/screen-share.js'], description: 'Your machine\'s screen, live, for you only.', canonical: '/machines' });
@@ -1145,7 +1145,7 @@ function renderPhonePage() {
 }
 
 /**
- * /admin/first-run: the measured first run, reviewers only. One row per step the Link reported (node.first_run), so
+ * /admin/first-run: the measured first run, reviewers only. One row per step the Link reported (link.first_run), so
  * the number that reach each step and the median time between them answer whether installs get to a working machine.
  */
 function renderFirstRunPage({ rows = [] }) {
@@ -1193,12 +1193,12 @@ function renderFirstRunPage({ rows = [] }) {
         ? `<ul class="dir-list">${latest.map(({ id, last, at }) => {
             const row = byStep.get(last).find((r) => r.device_id === id);
             return `<li class="dir-card"><div class="dir-card-link"><code>${esc(id)}</code><span class="dir-card-text">${esc(last.replace('_', ' '))}`
-                + `${row && row.agent_version ? ` · Node ${esc(row.agent_version)}` : ''}${row && row.os ? ` · ${esc(row.os)}` : ''}`
+                + `${row && row.agent_version ? ` · Link ${esc(row.agent_version)}` : ''}${row && row.os ? ` · ${esc(row.os)}` : ''}`
                 + `${at ? ` · <time datetime="${esc(new Date(at).toISOString())}" data-local-time>${esc(new Date(at).toISOString().slice(0, 16).replace('T', ' '))}</time> UTC` : ''}</span></div></li>`;
         }).join('')}</ul>`
         : '<p class="muted">No machine has reported a first run yet.</p>';
     const body = `<p class="dir-crumb"><a href="/robots/submissions">Review</a> / First runs</p>
-<header class="dir-hero"><h1>First run</h1><p class="muted">How many machines reach each step of OpenVibe Link's guided first run, and the median time from the step before. A machine reports one event per step over its own device link (<code>node.first_run</code>); nothing here names a person, folder or address.</p></header>
+<header class="dir-hero"><h1>First run</h1><p class="muted">How many machines reach each step of OpenVibe Link's guided first run, and the median time from the step before. A machine reports one event per step over its own device link (<code>link.first_run</code>); nothing here names a person, folder or address.</p></header>
 <section class="dir-sec"><h2>The funnel</h2>
 <table class="dir-table"><caption class="sr-only">First-run steps, machines and median time</caption>
 <thead><tr><th scope="col">Step</th><th scope="col">Machines</th><th scope="col">Median from the step before</th></tr></thead>

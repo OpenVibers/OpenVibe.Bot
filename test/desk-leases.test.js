@@ -18,7 +18,7 @@ const { boot, check, done } = require('./helpers/app');
     const seen = [];
     const DESK = (isolation, max = 1) => ({ level: 'trusted', window_manager: null, input: true, screen: true, named: true, max_desks: max, kinds: ['browser'], profiles: false, ...(isolation ? { isolation } : {}) });
 
-    /** A machine of `owner` whose fake Node answers desk and browser commands like the computer plugin would. */
+    /** A machine of `owner` whose fake Link answers desk and browser commands like the computer plugin would. */
     async function machine(owner, computer) {
         const principal = t.network.addNode({ owner: owner.subject, ref: `worker:${owner.subject}`, name: 'desks' });
         const c = await t.ws('/device', { headers: { Authorization: `Bearer ${t.network.signNode(principal)}` } });

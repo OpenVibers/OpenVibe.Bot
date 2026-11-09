@@ -18,7 +18,7 @@ const { boot, check, done } = require('./helpers/app');
     const SCREEN = { screen: { level: 'observe', tool: 'grim', stream: true }, files: { level: 'observe', roots: ['/home/alex'] } };
     const seen = [];
 
-    /** A machine of `owner` whose fake Node answers screen_stream like Link v0.12.0. */
+    /** A machine of `owner` whose fake Link answers screen_stream like Link v0.12.0. */
     async function machine(owner, computer = SCREEN) {
         const principal = t.network.addNode({ owner: owner.subject, ref: `worker:${owner.subject}`, name: 'desk-pc' });
         const c = await t.ws('/device', { headers: { Authorization: `Bearer ${t.network.signNode(principal)}` } });
@@ -36,7 +36,7 @@ const { boot, check, done } = require('./helpers/app');
             else if (m.kind === 'input') c.send(frame('ack', { id: m.id, data: { done: true, action: m.value.action } }));
             else c.send(frame('nack', { id: m.id, fault_code: 'unsupported' }));
         });
-        // Heartbeats keep it online, as a real Node's do.
+        // Heartbeats keep it online, as a real Link's do.
         const beat = setInterval(() => { try { c.send(frame('heartbeat', { t: Date.now() })); } catch { /* closed */ } }, Math.max(100, Math.floor(config.heartbeat_ms / 2)));
         c.ws.on('close', () => clearInterval(beat));
         await poll(() => t.hub.computerOf(deviceId) !== null);

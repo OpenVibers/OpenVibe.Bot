@@ -5,7 +5,7 @@
  *   startNetwork()  JWKS and user/service JWTs (signUser, signService, newUser); POST /oauth/token mints
  *                   client-credentials tokens and records every request in tokenCalls ({client_id, audience,
  *                   scope}); node principals as
- *                   GET /internal/node-principals/:id and POST …/:id/revoke answer them (addNode, signNode,
+ *                   GET /internal/link-principals/:id and POST …/:id/revoke answer them (addNode, signNode,
  *                   nodes, revokes), scoped to the calling service like Network's own routes; the machine's
  *                   online state (POST /internal/machines/status) is recorded (statuses). Identity
  *                   resolution for people (identity.subject.resolve): GET /internal/identity/resolve?username=
@@ -57,12 +57,21 @@ async function startNetwork() {
         return jwt.sign({ sub: String(u.networkId || ++n), subject_id: u.subject, username: u.username, display_name: u.display_name || u.username, role: u.role || 'user', ...extra },
             privatePem, { algorithm: 'RS256', issuer, expiresIn: '1h' });
     }
-    // Node principals: the view Network's principalView answers (server/registry/node-principals.js).
+    // Link principals: the view Network's principalView answers (server/registry/node-principals.js).
     // `unscoped: true` answers a principal to any service, so Bot's own paired_for check is exercised too.
     const nodes = new Map();
     const revokes = [];
+    // A principal id (lnk_…): the contracts package mints it once its 'link' kind ships; until it does, this builds
+    // the same shape, so the tests do not wait for that release.
+    function linkId() {
+        try { return ids.newId('link'); } catch { /* the pinned contracts has no 'link' kind yet */ }
+        const alphabet = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+        let s = '';
+        for (const b of crypto.randomBytes(26)) s += alphabet[b % alphabet.length];
+        return 'lnk_' + s;
+    }
     function addNode({ owner, ref, service = 'bot', status = 'active', name = 'garage-pi', unscoped = false } = {}) {
-        const id = ids.newId('node');
+        const id = linkId();
         nodes.set(id, {
             unscoped,
             view: {
@@ -75,17 +84,17 @@ async function startNetwork() {
     }
     function signNode(principal, { aud = ['openvibe.bot'], expSec = 300 } = {}) {
         const now = Math.floor(Date.now() / 1000);
-        return serviceAuth.signServiceToken({ iss: issuer, sub: `node:${principal}`, actor_type: 'node', aud, cap: [], iat: now, exp: now + expSec, jti: `tok_${crypto.randomBytes(12).toString('hex')}` }, privatePem);
+        return serviceAuth.signServiceToken({ iss: issuer, sub: `link:${principal}`, actor_type: 'link', aud, cap: [], iat: now, exp: now + expSec, jti: `tok_${crypto.randomBytes(12).toString('hex')}` }, privatePem);
     }
-    /** The calling service (svc:<id> → <id>) of a valid network.node.manage token for openvibe.network, or null. */
+    /** The calling service (svc:<id> → <id>) of a valid network.link.manage token for openvibe.network, or null. */
     function nodeManager(req) {
         const h = String(req.headers.authorization || '');
         const r = serviceAuth.verifyServiceToken(h.slice(7), { publicKey: publicPem, issuer, audience: 'openvibe.network' });
-        if (!h.startsWith('Bearer ') || !r.ok || !(r.claims.cap || []).includes('network.node.manage')) return null;
+        if (!h.startsWith('Bearer ') || !r.ok || !(r.claims.cap || []).includes('network.link.manage')) return null;
         return r.claims.sub.replace(/^svc:/, '');
     }
 
-    // Node pairings (POST /internal/node-pairings): every call is kept; failPairings(status) answers that status
+    // Link pairings (POST /internal/link-pairings): every call is kept; failPairings(status) answers that status
     // instead (null: mint again).
     const pairings = [];
     let pairingFailure = null;
@@ -152,7 +161,7 @@ async function startNetwork() {
             }
             return send(res, 200, { results });
         }
-        if (req.url === '/internal/node-pairings' && req.method === 'POST') {
+        if (req.url === '/internal/link-pairings' && req.method === 'POST') {
             const service = nodeManager(req);
             if (!service) return send(res, 401, { code: 'token.invalid' });
             if (pairingFailure) return send(res, pairingFailure, { code: 'registry.failed' });
@@ -171,7 +180,7 @@ async function startNetwork() {
             statuses.push({ service, body });
             return send(res, 200, { ok: true });
         }
-        const np = /^\/internal\/node-principals\/([^/]+)(\/revoke)?$/.exec(req.url);
+        const np = /^\/internal\/link-principals\/([^/]+)(\/revoke)?$/.exec(req.url);
         if (np && (req.method === (np[2] ? 'POST' : 'GET'))) {
             const service = nodeManager(req);
             if (!service) return send(res, 401, { code: 'token.invalid' });

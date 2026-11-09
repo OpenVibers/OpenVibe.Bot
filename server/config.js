@@ -107,7 +107,7 @@ function loadConfig(env = process.env) {
     if (!PAIRING_AUTHORITIES.includes(pairingAuthority)) {
         throw new Error(`BOT_PAIRING_AUTHORITY must be ${PAIRING_AUTHORITIES.join(' or ')}, not ${JSON.stringify(pairingAuthority)}`);
     }
-    const installerSource = String(env.BOT_INSTALLER_SOURCE_URL || 'https://github.com/OpenVibers/OpenVibe.Node/releases/latest/download/install.sh').trim();
+    const installerSource = String(env.BOT_INSTALLER_SOURCE_URL || 'https://github.com/OpenVibers/OpenVibe.Link/releases/latest/download/install.sh').trim();
     checkInstallerSource(installerSource);
     const embedOrigins = parseEmbedOrigins(env.BOT_EMBED_ORIGINS, isProduction);
     return {
@@ -160,7 +160,7 @@ function loadConfig(env = process.env) {
 
         // Pairing (ADR-043 decision 2): an 8-character Crockford base32 code, XXXX-XXXX, 10 minutes,
         // single use, 5 wrong tries end it. Only the hash is stored. `authority` network (plan T15 B2): the
-        // code is minted by Network (POST /internal/node-pairings), Bot stores none, and POST /pair and the
+        // code is minted by Network (POST /internal/link-pairings), Bot stores none, and POST /pair and the
         // `pair` frame answer 410 bot.pairing_moved. An unknown value refuses to boot.
         pairing: {
             authority: pairingAuthority,
@@ -279,7 +279,7 @@ function loadConfig(env = process.env) {
             maxPerRobot: Math.max(1, int(env.BOT_WATCH_MAX_PER_ROBOT, 500)),
         },
         installer: {
-            scriptUrl: trim(env.BOT_INSTALLER_URL || 'https://openvibe.bot/install'),
+            scriptUrl: trim(env.BOT_INSTALLER_URL || 'https://openvibe.link/install'),
             sourceUrl: installerSource,
             sourceHosts: INSTALLER_SOURCE_HOSTS,
         },

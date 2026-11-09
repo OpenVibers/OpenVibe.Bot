@@ -18,7 +18,7 @@ const { boot, check, done } = require('./helpers/app');
         desk: { level: 'trusted', window_manager: 'openbox', input: true, screen: true, named: true, max_desks: 4 } };
     const seen = [];
 
-    /** A Network-paired machine of `owner` whose fake Node answers screen and input like the plugin would. */
+    /** A Network-paired machine of `owner` whose fake Link answers screen and input like the plugin would. */
     async function machine(owner, computer = COMPUTER) {
         const principal = t.network.addNode({ owner: owner.subject, ref: `worker:${owner.subject}`, name: 'desk-pc' });
         const c = await t.ws('/device', { headers: { Authorization: `Bearer ${t.network.signNode(principal)}` } });

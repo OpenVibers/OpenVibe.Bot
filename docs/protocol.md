@@ -32,7 +32,7 @@ header; such a socket may only send `pair` until it is answered (anything else �
 so a reconnecting agent cannot be shadowed by a stale socket.
 
 **Pairing authority** (`BOT_PAIRING_AUTHORITY`, `bot` by default, or `network`). With `network` the
-pairing code is minted by OpenVibe.Network (Bot calls `POST /internal/node-pairings` with its own service
+pairing code is minted by OpenVibe.Network (Bot calls `POST /internal/link-pairings` with its own service
 token, `{owner: {kind: 'user', subject}, ref: <robot id>}`) and Bot stores none; the installer command
 carries `--network <Network URL> --pairing pair_… --code XXXX-XXXX` (plus `--driver <kind>`, as below), and the machine pairs on Network and
 connects with a node token (below). The `pair` frame is then answered `error` `bot.pairing_moved` (its
@@ -44,9 +44,9 @@ Network form above), plus `--driver adeept`, `adeept-mecanum` or `cozmo` for the
 `adeept.adr036.mecanum` and `cozmo` profiles; any other profile gets no `--driver` (the installer's dry-run
 `none`). `GET /install` answers a 302 to `BOT_INSTALLER_SOURCE_URL` (OpenVibe Link's `install/install.sh`).
 
-**A Network-paired machine** (a node principal `nod_…`, paired on OpenVibe.Network for one of its
+**A Network-paired machine** (a node principal `lnk_…`, paired on OpenVibe.Network for one of its
 owner's robots) carries `Authorization: Bearer <node token>` instead: a Network JWT with `actor_type`
-`node`, `sub` `node:nod_…` and audience `openvibe.bot`. Bot binds it to a device on first use (from
+`node`, `sub` `link:lnk_…` and audience `openvibe.bot`. Bot binds it to a device on first use (from
 Network's record: the robot the machine was paired for, which must be one of the principal's owner's
 robots, and the principal must be `active`), then speaks first exactly as for a credential — `hello`,
 `config` — with **no** `paired` frame. A refused node token, or a principal Bot will not bind (revoked,
@@ -112,7 +112,7 @@ Bot sent them (one WebSocket), and OpenVibe Link handles them in that order. Two
   a late one (`expired`) before any driver sees it, and gives a driver only the time left.
 
 Across a reconnect nothing is replayed. Bot never queues commands for an offline device ("commands are never
-queued"), `seq` starts again on each connection, and the device sees only server-minted command ids (Node
+queued"), `seq` starts again on each connection, and the device sees only server-minted command ids (Link
 answers a repeated id from its dedup cache instead of running it again). A command in flight when the
 socket drops is lost, and its operator gets `expired`.
 
@@ -121,7 +121,7 @@ across a Bot restart:
 - It moves when a turn ends, is left or is taken over. The halt for that change carries the new value, and every
   command carries the epoch current when it is sent. An owner's command right after a takeover carries the epoch its
   halt moved to.
-- OpenVibe Link (Node#55) keeps the newest epoch a halt carried per robot, nacks `expired` any command older than it,
+- OpenVibe Link (Link#55) keeps the newest epoch a halt carried per robot, nacks `expired` any command older than it,
   and passes the epoch to drivers (`cmd.turn_epoch`), so a driver can check it too.
 - It is absent until a robot's first turn change since Bot started. A command without it runs as before.
 
@@ -214,8 +214,8 @@ only (`robot_state.state.device_estop`); it never clears Bot's latch — clearin
 and audited (`kind: estop_state`, `result: refused`); nothing changes on that robot.
 
 **A local stop** (`latched: true, local_stop: true`, with an optional `reason`) is one held on the machine
-itself: `openvibe-node stop`, or a driver's own stop button through it. Only a release on that machine
-(`openvibe-node resume`) lifts it; the owner's clear does not. The Link keeps refusing motion (`nack`
+itself: `openvibe-link stop`, or a driver's own stop button through it. Only a release on that machine
+(`openvibe-link resume`) lifts it; the owner's clear does not. The Link keeps refusing motion (`nack`
 `local_stop`) and reports the latch again after the owner's clear, which latches the robot again. Bot keeps
 `local` and `reason` (plain text, at most 120 characters) in `device_estop`, and the panel says the robot is
 stopped on the robot and holds back its Clear button until the device reports the release. After the release
@@ -335,7 +335,7 @@ States (`run_jobs.state`): `queued` → `placed` (ack) → `running` (`job_start
 | `service` / `operation` / `unit` | `run` / `function.invoke` / `s` |
 | `quantity` | `1`; the partial last second `(wall_ms mod 1000)/1000`, never 0 |
 | `at` | `new Date(started_ms + n*1000).toISOString()` |
-| `resource` / `node` / `source` | the job id / the device id (`dev_…`) / `openvibe-node.worker` |
+| `resource` / `node` / `source` | the job id / the device id (`dev_…`) / `openvibe-link.worker` |
 | `project`, `subject`, `provider` | from Bot's record of the job (what `dispatch` was given); left out when unset |
 
 No field depends on when or how often a frame arrived, and no rating field is set. `job_exit` writes seconds
@@ -554,7 +554,7 @@ node token, and a service token is judged on `bot.job.dispatch` alone.
 | `GET /robots/:id/devices` | member, or `bot.robot.read` | `{ devices[] }` (no hashes, `online`) |
 | `POST /devices/:id/rotate` | the robot's owner, `bot.device.connect` | `{ device, credential, publish_key, whip_url }` (once; `video: "not_configured"` instead of the key without OpenRestream); for a Network-paired machine `{ device, sent }` — the machine is sent `rotate`, no credential is answered |
 | `POST /devices/:id/revoke` | the robot's owner, `bot.device.connect` | `{ device }`; the socket closes at once. A Network-paired machine's principal is revoked on Network too (`503 bot.network_unavailable` if Network did not answer: revoked here, retry) and never binds again. The OpenRestream key the device holds is revoked and its live session ended (`502`/`503 bot.openre_*` if OpenRestream did not: revoked here, retry) |
-| `POST /devices/bind` | a Network node token (audience `openvibe.bot`), no body | `201 { device_id, publish_key, whip_url, robot_id, profile }` — `POST /pair`'s answer without `credential`; again → the same device and a new publish key (the old one stops working); without OpenRestream `video: "not_configured"` instead of the key. Refused: `401 bot.node_token_required`, `403 bot.node_not_bound` |
+| `POST /devices/bind` | a Network node token (audience `openvibe.bot`), no body | `201 { device_id, publish_key, whip_url, robot_id, profile }` — `POST /pair`'s answer without `credential`; again → the same device and a new publish key (the old one stops working); without OpenRestream `video: "not_configured"` instead of the key. Refused: `401 bot.link_token_required`, `403 bot.link_not_bound` |
 | `POST /robots/:id/estop` | owner/operator, `bot.robot.control` | `{ robot }` |
 | `POST /robots/:id/estop/clear` | **owner only**, `bot.robot.control` | `{ robot }` |
 | `POST /robots/:id/commands` | owner/operator, `bot.robot.control` | `{ robot_id, id, result, code?, reason?, latency_ms?, cached? }` — one command through the same gate, audit and per-subject `id` idempotency key as `/control` (a bound channel's chat forwards here instead of a hardware socket). `result` is `ack`, `nack` or `expired` (a repeated `id` answers `cached: true`); a gate refusal is its code as an RFC 9457 problem: `403 bot.not_an_operator` / `bot.read_only` / `bot.not_your_turn`, `404 bot.robot_not_found`, `409 bot.device_offline` / `bot.estop_latched` / `bot.command_pending` (the same `id` is still in flight), `422` the command-shape codes, `429 bot.cooldown` / `bot.turn_budget`. A service acting for a subject is rate-limited as that person (`user:<subject>`) and also, as a service, at 1200 a minute and 12000 an hour on its own token (`bot.control.service`), so naming a fresh well-formed subject on every request never lifts every ceiling |

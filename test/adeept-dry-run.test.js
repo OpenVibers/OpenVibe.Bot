@@ -26,7 +26,7 @@ const WHIP_BASE = 'https://whip.test/ingest';
     };
     const result = (id) => op.waitFor((m) => m.type === 'command_result' && m.id === id);
 
-    // ── 1. the owner creates the robot; the fake device pairs over HTTP like `openvibe-node pair` ────
+    // ── 1. the owner creates the robot; the fake device pairs over HTTP like `openvibe-link pair` ────
     await check('step 1: an owner robot pairs over HTTP with --robot/--name and gets a whip_url', async () => {
         const created = await t.robot(alex, { profile_id: 'adeept.adr036' });
         robot = created.robot;
@@ -61,7 +61,7 @@ const WHIP_BASE = 'https://whip.test/ingest';
         assert.deepStrictEqual(config.allowed_commands, ['drive', 'actuator', 'halt'], 'the adeept profile takes drive/actuator/halt');
         assert.ok(Number.isInteger(config.heartbeat_ms) && config.heartbeat_ms > 0, `a heartbeat interval: ${config.heartbeat_ms}`);
         // Only now does the Link report: its link holds every frame until hello.
-        dev.send({ type: 'status', firmware: 'openvibe-node-0.1.0', capabilities: {}, agent_version: '0.1.0',
+        dev.send({ type: 'status', firmware: 'openvibe-link-0.1.0', capabilities: {}, agent_version: '0.1.0',
             device_kind: 'onboard', os: 'linux', arch: 'arm64', drivers: [], faults: [], estop_latched: false, local_stop: false });
         dev.send({ type: 'estop_state', latched: false, robot_id: robot.id, local_stop: false });
         assert.ok(await poll(() => t.hub.isOnline(deviceId)), 'the device is online');
@@ -101,7 +101,7 @@ const WHIP_BASE = 'https://whip.test/ingest';
         }
     });
 
-    // ── 4. a Node-shaped battery object becomes a numeric fraction on the robot state ────────────────
+    // ── 4. a Link-shaped battery object becomes a numeric fraction on the robot state ────────────────
     await check("step 4: a Link {volts, percent} battery shows a non-null numeric battery", async () => {
         dev.send({ type: 'telemetry', battery: { volts: 7.42, percent: 59 }, voltage: 7.42, sensors: { ultrasonic: 118, line: [0, 1, 1, 0] } });
         const frame = await op.waitFor((m) => m.type === 'robot_state' && m.state && m.state.telemetry && m.state.telemetry.battery

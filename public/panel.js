@@ -877,7 +877,7 @@
         if (!code || QUIET_NACKS.has(code)) return '';
         return NACK_TEXT[code] || `The robot refused that (${code}).`;
     }
-    /** The device's own faults (status.faults from the Node: { code, driver, message }), while it is online. */
+    /** The device's own faults (status.faults from the Link: { code, driver, message }), while it is online. */
     function paintFaults(state) {
         const el = $('[data-device-fault]');
         if (!el) return;
@@ -917,7 +917,7 @@
     function paint(state) {
         if (!state) return;
         const latched = !!(state.estop && state.estop.latched);
-        // The robot's own stop (openvibe-node stop, or its driver's stop button) holds until it is released on the
+        // The robot's own stop (openvibe-link stop, or its driver's stop button) holds until it is released on the
         // robot: clearing here cannot lift it, so the button waits and the note says where to release it.
         const held = !!(state.device_estop && state.device_estop.latched && state.device_estop.local);
         const banner = $('[data-estop-banner]');
@@ -927,7 +927,7 @@
         const note = $('.estop-note');
         if (note) {
             const why = held && state.device_estop.reason ? ` (${state.device_estop.reason})` : '';
-            note.textContent = held ? ` — its local stop${why} holds until it is released on the robot (openvibe-node resume); then the owner clears it here.`
+            note.textContent = held ? ` — its local stop${why} holds until it is released on the robot (openvibe-link resume); then the owner clears it here.`
                 : latched ? ' — the robot stays still until the owner clears it.' : '';
         }
         const clear = $('[data-estop-clear]');

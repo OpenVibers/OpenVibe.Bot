@@ -3,7 +3,7 @@
 /**
  * The simulated rover's world (sim.rover): one small arena that Bot's in-process simulator (server/sim) and the
  * browser (the /try page's local rover, and the camera of every sim robot's panel) share, so the picture a panel
- * draws and the pose the server keeps always agree. No DOM, no Node API: it loads as a CommonJS module on the
+ * draws and the pose the server keeps always agree. No DOM, no Node.js API: it loads as a CommonJS module on the
  * server and as `window.OVSimWorld` in a page.
  *
  * Units are metres, seconds and degrees, with +y "up" a top-down view and +x to its right. Heading 0 faces +y and

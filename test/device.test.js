@@ -152,7 +152,7 @@ const { boot, check, done } = require('./helpers/app');
         op.close(); dev.close();
     });
 
-    await check('a Node-style battery object becomes a 0..1 fraction, raw frame kept in telemetry', async () => {
+    await check('a Link-style battery object becomes a 0..1 fraction, raw frame kept in telemetry', async () => {
         const { robot, pairing } = await t.robot(alex);
         const { dev } = await pairOverWs(robot.id, pairing.code);
         const op = await ownerJoined(robot.id);

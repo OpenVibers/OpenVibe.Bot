@@ -17,7 +17,7 @@ one priority"):
 - **Chat commands reach a button robot.** `!forward`, `!left` … press the robot's buttons of the same name when it
   has no drive, and any other `!word` that is not a channel sound presses the button of that name (Live#383,
   Chat#194).
-- **The Link's lifecycle:** `openvibe-node quit` ends a running Link cleanly with nothing latched (Link 0.16.0), for
+- **The Link's lifecycle:** `openvibe-link quit` ends a running Link cleanly with nothing latched (Link 0.16.0), for
   launchers that start and stop it with the rest of a stream setup. `stop` stays the kill switch.
 
 ## What Live has today
@@ -62,7 +62,7 @@ lines) let viewers drive a streamer's hardware from the channel page:
 3. **Built — Bot gate and panel**: the gate accepts `button`/`point` only for names and shapes the profile
    declares; the panel renders `buttons` (keyboard bindings, hold behaviour) and `video_click` (a click layer on the
    camera tile, normalised coordinates).
-4. **Built — Node, the relay plugin**: forwards `button`/`point` commands to the owner's local script in the shape Live's
+4. **Built — Link, the relay plugin**: forwards `button`/`point` commands to the owner's local script in the shape Live's
    hardware clients already understand — one JSON line per command on stdout of a supervised child process, or a
    loopback WebSocket that speaks Live's `{type:'command'|'key_held'|'key_released'|'video_click'}` messages — so an
    existing Pi script keeps working with a one-line change of where it connects. Local policy and the kill switch
@@ -79,7 +79,7 @@ lines) let viewers drive a streamer's hardware from the channel page:
    ONVIF control and a disabled button are reported and left out; an owner with no Network subject is reported
    and skipped (they must sign in to Network once). Idempotent on the Live config id (`live_conversions`,
    migration 0007): a second `--apply` changes nothing and says "already converted". The owner then pairs a
-   Node (the five-minute path) and moves the script onto the relay plugin.
+   Link (the five-minute path) and moves the script onto the relay plugin.
 6. **Done — Live**: `LIVE_BOT_EMBED=1`; the channel page shows the robot's embedded panel for a stream whose owner has a
    robot; then delete `server/controls/*`, the hardware WebSocket path and its stream-key auth, the controls tables
    and `public/js/controls.js` / `onvif-dashboard.js` (the embed stays).
@@ -115,7 +115,7 @@ if anything, needs redoing by hand.
 
 ### What each owner does next
 
-1. Bot robot page → **Pair a Node** (the five-minute path): run the installer command Bot prints for the new
+1. Bot robot page → **Pair a Link** (the five-minute path): run the installer command Bot prints for the new
    robot on the machine that drives the hardware.
 2. Move the local script onto the **relay plugin**: it forwards `button` (`{name, state}` for a hold) and
    `point` (`{x, y}`) commands to the script in the shape Live's hardware clients already speak. The Live

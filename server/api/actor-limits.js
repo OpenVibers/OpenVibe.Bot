@@ -13,7 +13,7 @@ function actor(req) {
     // person, exactly as their own token would — never against the shared service principal.
     if (req.limitSubject) return `user:${req.limitSubject}`;
     const p = req.principal;
-    if (p && (p.kind === 'service' || p.kind === 'node') && p.sub) return p.sub;
+    if (p && (p.kind === 'service' || p.kind === 'link') && p.sub) return p.sub;
     if (p && p.kind === 'user' && p.subject) return `user:${p.subject}`;
     return defaultActor(req);
 }

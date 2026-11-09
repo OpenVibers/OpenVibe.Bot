@@ -54,7 +54,7 @@ const { boot, check, done } = require('./helpers/app');
         op.close(); dev.close();
     });
 
-    await check('a local stop on the device (openvibe-node stop) is shown as one, and the owner clear cannot lift it', async () => {
+    await check('a local stop on the device (openvibe-link stop) is shown as one, and the owner clear cannot lift it', async () => {
         const { robot, dev } = await connected();
         const op = await ownerJoined(robot.id);
         dev.send({ type: 'estop_state', latched: true, local_stop: true, reason: 'stop\u0007 button\n on the robot', robot_id: robot.id });
