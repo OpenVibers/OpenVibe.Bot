@@ -95,6 +95,14 @@ const { boot, check, done } = require('./helpers/app');
         assert.deepStrictEqual([r.status, r.json.result, r.json.desk], [200, 'ack', 'desk-s01'], r.text);
         assert.strictEqual(seen.at(-1).value.desk, 'desk-s01', 'Run never names the desk: Bot does');
         assert.strictEqual((await t.call('POST', url, { ...asRun(bob.subject), body: { kind: 'browser', value: { action: 'read', desk: 'desk-other' } } })).status, 422, 'a value naming a desk');
+        for (const value of [{ action: 'profile_export' }, { action: 'profile_import', profile: { cookies: [], origins: [] } }, { action: 'profile_sign_out', site: 'example.org' }]) {
+            const saved = await t.call('POST', url, { ...asRun(bob.subject), body: { kind: 'browser', value } });
+            assert.equal(saved.status, 200, saved.text); assert.equal(saved.json.result, 'ack', saved.text);
+        }
+        assert.equal((await t.call('POST', url, { ...asRun(carol.subject), body: { kind: 'browser', value: { action: 'profile_export' } } })).status, 404);
+        const privateCommand = await t.hub.machineCommand(own.deviceId, { kind: 'user', subject: bob.subject }, bob.subject, { kind: 'browser', value: { action: 'profile_export', desk: 'private' } });
+        assert.equal(privateCommand.result, 'refused');
+
         assert.strictEqual((await t.call('POST', url, { ...asRun(bob.subject), body: { kind: 'exec', value: { argv: ['id'] } } })).status, 422, 'never the machine itself');
         assert.strictEqual((await t.call('POST', url, { ...asRun(carol.subject), body: { kind: 'screen', value: {} } })).status, 404, 'another person');
         assert.strictEqual((await t.call('GET', `/api/v1/machines/${host.deviceId}/desk-leases/desk-s01`, asRun(carol.subject))).status, 404);
