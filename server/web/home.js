@@ -18,6 +18,7 @@
 const shell = require('openvibe-shared/shell');
 const showcase = require('openvibe-shared/showcase');
 const kit = require('openvibe-shared/kit');
+const sectionIcon = (name) => kit.icon(name, { cls: 'ovk-heading-icon' });
 const ovServe = require('openvibe-shared/serve');
 const frame = require('openvibe-shared/frame');
 const appIcon = require('openvibe-shared/app-icon');
@@ -61,7 +62,7 @@ const capWord = (c) => require('./directory').CAPABILITY_WORDS[c] || c;
 const POLICY_WORDS = { private: 'Its owner and the people they add drive it', invite: 'People the owner invites drive it', queue: 'Anyone signed in can take a turn' };
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const link = (href, text, cls = '') => `<a${cls ? ` class="${cls}"` : ''} href="${esc(href)}"${/^https?:/.test(href) ? ' rel="noopener"' : ''}>${esc(text)}</a>`;
-const sec = (id, title, lede, inner, more = '') => `<section class="sc-sec hm-sec" id="${id}" aria-labelledby="${id}-h"><div class="hm-head"><h2 id="${id}-h">${esc(title)}</h2>${more}</div>${lede ? `<p class="sc-lede">${esc(lede)}</p>` : ''}${inner}</section>`;
+const sec = (id, title, lede, inner, more = '') => kit.section({ id, cls: 'sc-sec hm-sec', title, icon: id === 'connect' ? 'link' : 'gear', note: lede, body: inner, actions: more ? [more] : [] });
 
 /** The model's first sentence, cut near `max` characters at a word. */
 function short(text, max = 120) {
@@ -111,14 +112,14 @@ function stats({ models, robots }) {
 function onlineNow({ robots }) {
     const sim = kit.card({ href: '/try', title: 'Simulated rover', type: 'game', ratio: '16/9', badge: 'Online', sub: 'Camera, range finder, line sensors, lights, horn', who: 'Anyone, no account', share: false });
     const cards = robots.slice(0, 8).map((r) => kit.card({ href: `/r/${r.id}`, title: r.name, type: 'game', ratio: '16/9', badge: r.online ? 'Online' : 'Offline', sub: `${r.model_name}${r.owner && r.owner.username ? ` · @${r.owner.username}` : ''}`, who: POLICY_WORDS[r.access_policy] || '', share: false }));
-    return `<section class="sc-sec hm-sec" id="now">${kit.rail({ id: 'now-rail', title: 'Drive one now', more: { href: '/robots', label: robots.length ? 'The directory' : 'Browse robots' }, items: [sim].concat(cards), wrap: true })}</section>`;
+    return `<section class="sc-sec hm-sec" id="now">${kit.rail({ id: 'now-rail', title: 'Drive one now', icon: 'game', more: { href: '/robots', label: robots.length ? 'The directory' : 'Browse robots' }, items: [sim].concat(cards), wrap: true })}</section>`;
 }
 
 function modelsSection({ models }) {
     if (!models.length) return '';
     const kindOf = (m) => (KINDS.find((k) => k[0] === m.connect) || [, m.connect])[1];
     const cards = models.map((m) => kit.card({ href: `/models/${m.id}`, title: m.name, type: 'game', ratio: '16/9', badge: kindOf(m), sub: m.capabilities.slice(0, 3).map(capWord).join(' · '), peek: short(m.description), share: false }));
-    return `<section class="sc-sec hm-sec" id="models">${kit.rail({ id: 'models-rail', title: 'Robots it drives today', more: { href: '/models', label: `All ${models.length} models` }, items: cards, wrap: true })}
+    return `<section class="sc-sec hm-sec" id="models">${kit.rail({ id: 'models-rail', title: 'Robots it drives today', icon: 'gear', more: { href: '/models', label: `All ${models.length} models` }, items: cards, wrap: true })}
 <p class="hm-under">Each has a profile the panel draws its controls from: a joystick for a base that drives, sliders for a pan-tilt head, buttons for lights and a horn.</p></section>`;
 }
 
@@ -141,7 +142,7 @@ function connectSection({ models }) {
 function startSection() {
     return foldBlock({
         id: 'how',
-        head: '<h2 id="how-h">Online in a minute</h2>',
+        head: `<h2 id="how-h" class="ovk-titled">${sectionIcon('grid')}Online in a minute</h2>`,
         html: showcase.steps({
         id: 'how',
         title: 'Online in a minute',
@@ -197,14 +198,14 @@ function moreSection({ config, kit: k, models }) {
     ]);
     return foldBlock({
         id: 'more',
-        head: '<h2 id="more-h" class="hm-h">More on OpenVibe.Bot</h2>',
-        html: `<section class="sc-sec hm-sec hm-more-sec" id="more" aria-labelledby="more-h"><h2 class="hm-h">More on OpenVibe.Bot</h2>
+        head: `<h2 id="more-h" class="ovk-titled hm-h">${sectionIcon('grid')}More on OpenVibe.Bot</h2>`,
+        html: `<section class="sc-sec hm-sec hm-more-sec" id="more" aria-labelledby="more-h"><h2 class="ovk-titled hm-h">${sectionIcon('grid')}More on OpenVibe.Bot</h2>
 ${kit.fold({ id: 'panel', title: 'What the panel does', meta: 'controls, safety, sharing', body: panel })}
 ${kit.fold({ id: 'automate', title: 'Let it run without you', meta: 'routines, webhooks, your agent', body: `<p class="hm-fold-lede">They all go through the gate a person does: the same limits, the same e-stop, the same audit.</p>${automate}` })}
 ${kit.fold({ id: 'computers', title: 'Your computers, for your agents and your AI', meta: 'the same Node', body: `<p class="hm-fold-lede">The same OpenVibe Link runs on your own computers. It connects out, nobody else's work reaches them, and the limits you set on each computer always win.</p>${computers}` })}
 ${kit.fold({ id: 'code', title: 'The same robot from your own code', meta: 'REST and the SDK', body: api })}
 ${kitBody ? kit.fold({ id: 'kit', title: `The first kit: ${k.name}`, meta: plural(k.parts.length, 'part', 'parts'), body: kitBody }) : ''}
-${kit.fold({ id: 'build', title: 'Build for OpenVibe.Bot', meta: 'drivers, profiles, the source', body: `${build}<p class="hm-fold-lede">${link('/docs', 'All build pages', 'hm-more')}</p>` })}</section>`,
+${kit.fold({ id: 'build', title: 'Build for OpenVibe.Bot', meta: 'drivers, profiles, the source', body: `${build}<p class="hm-fold-lede">${kit.button({ href: '/docs', label: 'All build pages', icon: 'code', kind: 'quiet' })}</p>` })}</section>`,
     });
 }
 
@@ -212,7 +213,7 @@ function jobsSection({ jobs }) {
     if (!jobs || !jobs.length) return '';
     return foldBlock({
         id: 'jobs',
-        head: '<h2 id="jobs-h">Robotics jobs on OpenVibe.Work</h2>',
+        head: `<h2 id="jobs-h" class="ovk-titled">${sectionIcon('gear')}Robotics jobs on OpenVibe.Work</h2>`,
         html: `<section class="sc-sec hm-sec" id="jobs">${kit.list(jobs.slice(0, 3).map((j) => kit.row({ href: j.url, rel: 'noopener', title: j.title, sub: [j.location, j.remote ? 'Remote' : '', j.type].filter(Boolean).join(' · ') })), { title: 'Robotics jobs on OpenVibe.Work', more: { href: 'https://openvibe.work/jobs?q=robotics', label: 'More jobs' } })}</section>`,
     });
 }
@@ -239,7 +240,7 @@ function faqItems({ models }) {
 function faqSection(items) {
     return foldBlock({
         id: 'faq',
-        head: '<h2 id="faq-h">Questions</h2>',
+        head: `<h2 id="faq-h" class="ovk-titled">${sectionIcon('help')}Questions</h2>`,
         html: `<section class="sc-sec hm-sec" id="faq">${showcase.faq({ id: 'faq-list', title: 'Questions', items: items.map((x) => [x.q, x.a]) })}</section>`,
     });
 }
@@ -256,7 +257,7 @@ function sections({ signedIn = false, config, models = [], robots = [], kit: k =
         + faqSection(faq || faqItems({ models }))
         + foldBlock({
             id: 'network',
-            head: '<h2 id="network-h">Part of OpenVibe</h2>',
+            head: `<h2 id="network-h" class="ovk-titled">${sectionIcon('task')}Part of OpenVibe</h2>`,
             html: showcase.network({ service: 'bot' }),
         });
 }
