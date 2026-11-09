@@ -58,6 +58,16 @@ const buttonsOf = (profile, allowed = ['button']) => renderWidget(profile.widget
         assert.ok(!renderWidget(w, { profile: zoomOnly, allowed_commands: ['ptz'] }).includes('data-ptz-stick'));
     });
 
+    await check('panel.js: a held slider repeats its value as new commands and stops on release, cancel, blur, a hidden page and the e-stop', () => {
+        const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'panel.js'), 'utf8');
+        assert.ok(js.includes("const every = Number(el.dataset.holdRepeat) || 0;"), 'only a slider that asks for it');
+        assert.ok(js.includes("if (Date.now() - lastSent >= every - 5) sendNow();"), 'each tick is a new send of the current value, skipped right after a move');
+        assert.ok(js.includes("el.addEventListener(ev, stop);"), 'release, cancel and a lost capture stop it');
+        assert.ok(js.includes("['pointerup', 'pointercancel', 'lostpointercapture']) el.addEventListener(ev, stop)"), 'all three pointer ends');
+        assert.ok(js.includes("window.addEventListener('blur', stopRepeats);") && js.includes("if (document.hidden) stopRepeats();") && js.includes("window.addEventListener('pagehide', stopRepeats);"), 'blur, a hidden page and pagehide stop it');
+        assert.ok(js.includes("window.dispatchEvent(new Event('ov-bot-release-all'))") && js.includes("window.addEventListener('ov-bot-release-all', stopRepeats);"), 'releaseAll (the e-stop) stops it');
+    });
+
     await check('panel.js: keys, stick and gamepad press direction buttons; the PTZ stick holds pan and tilt', () => {
         const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'panel.js'), 'utf8');
         assert.ok(js.includes("const KEY_DIR = { ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right' };"));

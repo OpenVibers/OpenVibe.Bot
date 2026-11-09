@@ -801,7 +801,14 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             };
             const screen = msg.screen === true && kind === SCREEN_KIND;
             if (!screen && !COMPUTER_CAP[kind]) return refuse('bot.invalid_input', `kind is ${COMPUTER_KINDS.join(', ')}`);
-            if (!screen) {
+            const profileAction = kind === 'browser' && ['profile_export', 'profile_import', 'profile_sign_out'].includes(value.action);
+            if (profileAction) {
+                const lease = /^desk-[a-z0-9][a-z0-9-]{0,23}$/.test(value.desk || '') ? await domain.deskLeases.get(deviceId, value.desk) : null;
+                if (conn.principal.kind !== 'service' || conn.principal.sub !== 'svc:run' || !lease || lease.owner !== `user:${subject}` || !capabilities.grants(conn.principal.cap, 'bot.desk.session')) return refuse('bot.forbidden', 'Saved sign-ins belong to Run and its leased desk.');
+                const keys = value.action === 'profile_import' ? ['action', 'desk', 'profile'] : value.action === 'profile_sign_out' ? ['action', 'desk', 'site'] : ['action', 'desk'];
+                if (Object.keys(value).some(k => !keys.includes(k)) || JSON.stringify(value).length > 48000 || (value.action === 'profile_import' && (!value.profile || !Array.isArray(value.profile.cookies) || !Array.isArray(value.profile.origins))) || (value.action === 'profile_sign_out' && !/^[a-z0-9.-]{1,253}$/.test(value.site || ''))) return refuse('bot.invalid_input', 'Invalid saved sign-ins.');
+            }
+            if (!screen && !profileAction) {
                 const check = validate('bot.command@1', { v: 1, seq: 0, ts: 0, type: 'command', id, kind, value });
                 if (!check.valid) return refuse('bot.invalid_input', `invalid ${kind}: ${(check.errors && check.errors[0] && (check.errors[0].message || JSON.stringify(check.errors[0]))) || 'bad value'}`.slice(0, 300));
             }
