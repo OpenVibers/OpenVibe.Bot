@@ -78,7 +78,7 @@ function hero({ signedIn, config }) {
 <pre tabindex="0"><code><span class="hm-prompt">$</span> ${esc(install)}</code></pre>
 <ol class="hm-term-steps"><li>It finds the kit and shows a short code.</li><li>Approve the code at ${link('/link', 'openvibe.bot/link')}.</li><li>Open the robot's panel and drive.</li></ol>
 <p class="hm-term-foot">Raspberry Pi OS or any Linux. A blank microSD card? ${link('/setup/sd-card', 'Make its setup files')}, no screen needed.</p></div>`;
-    return showcase.hero({
+    return showcase.hero({ pageHead: { icon: 'gear' },
         eyebrow: 'OpenVibe.Bot · alpha',
         title: 'Drive your robot', accent: 'from any browser.',
         lede: 'An open control panel for robots. Pair a robot with one pasted command, then drive it with a touch joystick, '
@@ -270,7 +270,7 @@ function sections({ signedIn = false, config, models = [], robots = [], kit: k =
 const footerBoot = (footer) => `<script>document.addEventListener('DOMContentLoaded', function () { try { if (window.OpenVibeFooter) OpenVibeFooter.init(${JSON.stringify(footer)}); } catch (e) { /* the Frame is optional */ } });</script>`;
 
 /** The OpenVibe Frame around one of Bot's public pages (the front page, the Build docs): navbar, footer, theme. */
-function framePage({ config, title, description, canonicalPath = '/', body, head = '', noindex = false }) {
+function framePage({ config, title, description, canonicalPath = '/', body, head = '', noindex = false, jsonLd = null }) {
     const nav = {
         service: 'bot',
         apiBase: NETWORK_URL,
@@ -283,14 +283,14 @@ function framePage({ config, title, description, canonicalPath = '/', body, head
         notificationsRealtime: true,
     };
     return shell.page({
-        name: SITE_NAME, service: 'bot', lang: 'en', title, siteName: SITE_NAME, description,
+        name: SITE_NAME, service: 'bot', lang: 'en', title, siteName: SITE_NAME, description, jsonLd,
         ...(noindex ? {} : { summary: description }),
         canonical: noindex ? undefined : `${config.baseUrl}${canonicalPath}`,
         robots: noindex ? 'noindex, follow' : 'index, follow',
         agentLayer: !noindex && require('../agent-pages').TWIN_PATH_RE.test(canonicalPath), llms: '/llms.txt',
         navbar: nav, footer: { service: 'bot', variant: 'full', mount: '#ov-footer', brandName: SITE_NAME, updates: '/updates' }, home: '/',
         navLinks: [{ label: 'Robots', href: '/robots' }, { label: 'Build', href: '/docs' }],
-        head: [appIcon.headTags({ site: 'bot' }), '<link rel="manifest" href="/manifest.webmanifest">', `<link rel="apple-touch-icon" href="${require('openvibe-shared/app-icons').url('bot', 192)}">`, head].filter(Boolean).join('\n'),
+        head: [`<link rel="stylesheet" href="${ovServe.url('kit.css')}"><script src="${ovServe.url('kit-web.js')}" defer></script>`, appIcon.headTags({ site: 'bot' }), '<link rel="manifest" href="/manifest.webmanifest">', `<link rel="apple-touch-icon" href="${require('openvibe-shared/app-icons').url('bot', 192)}">`, head].filter(Boolean).join('\n'),
         body: `<div id="navbar-mount"></div>\n${body}\n${footerBoot({ service: 'bot', variant: 'full', mount: '#ov-footer', brandName: SITE_NAME, updates: '/updates' })}`,
     });
 }
@@ -308,7 +308,7 @@ function renderNotFound({ config }) {
             UPDATES_FONT,
         ].join('\n'),
         body: `<main id="main" class="page">
-<h1>Page not found</h1>
+${kit.pageHead({ title: `Page not found`, icon: 'gear', back: { href: '/', label: 'Home' } })}
 <p>There is no page at this address on ${esc(host)}. The link may be old or mistyped.</p>
 <div class="sc-actions">
 <a class="sc-btn sc-primary" href="/">${SITE_NAME} home</a>
@@ -367,7 +367,7 @@ function renderHome({ config, signedIn = false, models = [], robots = [], kit = 
         head: [
             appIcon.headTags({ site: 'bot' }),
             '<link rel="manifest" href="/manifest.webmanifest">', `<link rel="apple-touch-icon" href="${require('openvibe-shared/app-icons').url('bot', 192)}">`,
-            `<link rel="stylesheet" href="${ovServe.url('kit.css')}">`,
+            `<link rel="stylesheet" href="${ovServe.url('kit.css')}"><script src="${ovServe.url('kit-web.js')}" defer></script>`,
             `<link rel="stylesheet" href="${ovServe.url('room.css')}">`,
             `<link rel="stylesheet" href="${ovServe.url(showcase.STYLESHEET)}">`,
             '<link rel="stylesheet" href="/home.css">',
