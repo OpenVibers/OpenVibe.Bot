@@ -2,7 +2,7 @@
   "name": "openvibe-bot",
   "version": "0.1.0",
   "private": true,
-  "description": "OpenVibe.Bot \u2014 devices, pairing and control for robots on the OpenVibe network: one outbound WebSocket per device, profiles instead of rows, safety by default.",
+  "description": "OpenVibe.Bot — devices, pairing and control for robots on the OpenVibe network: one outbound WebSocket per device, profiles instead of rows, safety by default.",
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",

@@ -1,4 +1,5 @@
 'use strict';
+const kit = require('openvibe-shared/kit');
 
 /**
  * The signed-in pages, rendered on the server from data alone (pure functions, testable without a server).
@@ -80,6 +81,7 @@ function page(title, body, { scripts = [], bodyClass = '', description = null, c
 <meta property="og:url" content="https://openvibe.bot${esc(canonical)}">
 <meta property="og:image" content="https://openvibe.bot${esc(social.url('bot'))}">
 <meta name="twitter:card" content="summary_large_image">` : ''}
+<link rel="stylesheet" href="${require('openvibe-shared/serve').url('kit.css')}">
 <link rel="stylesheet" href="/panel/panel.css">
 </head>
 <body${bodyClass ? ` class="${esc(bodyClass)}"` : ''}>
@@ -569,7 +571,7 @@ ${embed ? '' : tryIt ? topbar('<span class="crumb">Try the panel</span>', '/') :
 </header>
 <main id="panel" tabindex="0" data-robot-id="${esc(robot.id)}" data-role="${esc(role)}" data-hold-ms="${esc(holdResendMs)}" data-allowed="${data(allowed_commands)}"${tryIt ? ' data-transport="local"' : ''}${embed && parentOrigins.length ? ` data-parent-origins="${esc(parentOrigins.join(' '))}"` : ''}>
 <div class="panel-head">
-<h1>${esc(robot.name)}</h1>
+${kit.pageHead({ title: `${robot.name}`, icon: 'gear', back: embed ? null : { href: '/', label: 'Home' } })}
 <p class="meta"><span class="pill online" data-online-pill data-state="connecting"><span class="dot"></span><span data-online-label>Connecting…</span></span> <span class="pill">${esc(profile.name || robot.profile_id)}</span> <span class="pill role" data-role-label>${esc(ROLE_LABEL[role] || role)}</span></p>
 ${turnStrip(robot, role)}
 </div>
@@ -616,7 +618,7 @@ function tryOutro(profile) {
  */
 function renderDrivePage({ robot }) {
     const body = `<main class="page drive-page" data-drive-page data-robot-id="${esc(robot.id)}">
-<div class="card"><h1>${esc(robot.name)}</h1>
+<div class="card">${kit.pageHead({ title: `${robot.name}`, icon: 'gear', back: { href: '/', label: 'Home' } })}
 <p data-drive-status role="status">Connecting the panel…</p>
 <p>${outLink(`/panel/${robot.id}`, 'Open the full panel instead')}</p></div>
 </main>`;
@@ -672,7 +674,7 @@ ${error ? `<p class="error" role="alert">${esc(error)}</p>` : ''}
 <label class="field"><span class="field-label">Who may drive</span><select name="access_policy">${POLICIES.map(([v, label]) => option(v, label, v === (values.access_policy || 'private'))).join('')}</select></label>
 <button type="submit" class="primary">Add robot</button>
 </form>`;
-    return page('Your robots', `${topbar()}\n<main class="page">\n<h1>Your robots</h1>\n${list}\n${form}\n${kitsSection(kits, profiles)}\n</main>`);
+    return page('Your robots', `${topbar()}\n<main class="page">\n${kit.pageHead({ title: `Your robots`, icon: 'gear', back: { href: '/', label: 'Home' } })}\n${list}\n${form}\n${kitsSection(kits, profiles)}\n</main>`);
 }
 
 function renderPairingPage({ robot, pairing, profile = null, phoneUrl = null }) {
@@ -688,7 +690,7 @@ function renderPairingPage({ robot, pairing, profile = null, phoneUrl = null }) 
 <button type="button" class="copy" data-copy>${icon('copy')}<span data-copy-label>Copy the command</span></button></li>`;
     const body = `${topbar(`<span class="crumb">${esc(robot.name)}</span>`)}
 <main class="page pairing" data-pair-robot="${esc(robot.id)}">
-<h1>Pair ${esc(robot.name)}</h1>
+${kit.pageHead({ title: `Pair ${robot.name}`, icon: 'gear', back: { href: '/', label: 'Home' } })}
 <p class="pair-status" data-pair-status data-state="waiting" role="status" aria-live="polite"><span class="dot"></span><span data-pair-text>Waiting for the device.</span> <a class="button primary" href="/panel/${esc(robot.id)}" data-pair-open hidden>Open the panel</a></p>
 <ol class="steps">
 ${first}
@@ -709,7 +711,7 @@ ${first}
 function renderSignInPage({ next = '/robots', what = 'this page' } = {}) {
     const body = `${topbar('')}
 <main class="page">
-<h1>Sign in to continue</h1>
+${kit.pageHead({ title: `Sign in to continue`, icon: 'gear', back: { href: '/', label: 'Home' } })}
 <p>${esc(what.charAt(0).toUpperCase() + what.slice(1))} is for OpenVibe accounts. Sign in and you come straight back here.</p>
 <p><a class="button primary" href="/auth/login?next=${esc(encodeURIComponent(next))}">Sign in with OpenVibe</a></p>
 </main>`;
@@ -724,7 +726,7 @@ function renderSignInPage({ next = '/robots', what = 'this page' } = {}) {
 function renderLinkPage({ code = '', error = null, installer = 'curl -fsSL https://openvibe.bot/install | sh' } = {}) {
     const body = `${topbar('<span class="crumb">Add a device</span>')}
 <main class="page link">
-<h1>Add a device</h1>
+${kit.pageHead({ title: `Add a device`, icon: 'gear', back: { href: '/', label: 'Home' } })}
 <form class="card" method="get" action="/link">
 <p>Enter the code the robot's computer shows. It shows one when you run this on it:</p>
 <pre tabindex="0" class="installer"><code>${esc(installer)}</code></pre>
@@ -745,7 +747,7 @@ function renderPhoneLinkPage({ pairing = null, apkUrl = null } = {}) {
     if (!apkUrl || !pairing) {
         const body = `${topbar('<span class="crumb">Link on your phone</span>')}
 <main class="page pairing">
-<h1>Link on your phone</h1>
+${kit.pageHead({ title: `Link on your phone`, icon: 'gear', back: { href: '/', label: 'Home' } })}
 <p>OpenVibe Link for Android puts your agents' approvals in your pocket and adds <b>Send to OpenVibe</b> to every app's
 share sheet. It is in testing and not published yet: when it is, you install it from here and pair it with a code.</p>
 <p class="muted"><a href="/machines">Your machines</a> · <a href="/robots">Your robots</a></p>
@@ -756,7 +758,7 @@ share sheet. It is in testing and not published yet: when it is, you install it 
     const minutes = Math.max(1, Math.round((Date.parse(pairing.expires_at) - Date.now()) / 60000)) || 15;
     const body = `${topbar('<span class="crumb">Link on your phone</span>')}
 <main class="page pairing">
-<h1>Link on your phone</h1>
+${kit.pageHead({ title: `Link on your phone`, icon: 'gear', back: { href: '/', label: 'Home' } })}
 <p>OpenVibe Link puts your agents' approvals in your pocket and adds <b>Send to OpenVibe</b> to every app's share sheet.
 First <a href="${esc(apkUrl)}" rel="noopener">install it on your Android phone</a>, then scan or type the code below.</p>
 <ol class="steps">
@@ -792,8 +794,7 @@ function renderClaimPage({ claim, models = [], values = {}, error = null, now = 
     const live = values.live !== false;
     const body = `${topbar('<span class="crumb">Add a device</span>')}
 <main class="page link">
-<h1>Add ${esc(claim.hostname)}?</h1>
-<p class="muted">Only approve a device you set up yourself, just now. If you did not run the command on it, deny it.</p>
+${kit.pageHead({ title: `Add ${claim.hostname}?`, icon: 'gear', back: { href: '/', label: 'Home' } , lede: `Only approve a device you set up yourself, just now. If you did not run the command on it, deny it.` })}
 <dl class="card facts">${facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
 <form class="card" method="post" action="/link/${esc(claim.id)}/approve">
 ${error ? `<p class="error" role="alert">${esc(error)}</p>` : ''}
@@ -811,7 +812,7 @@ ${error ? `<p class="error" role="alert">${esc(error)}</p>` : ''}
 function renderClaimApproved({ robot, profile = null, live = false, chatUrl = null }) {
     const body = `${topbar(`<span class="crumb">${esc(robot.name)}</span>`)}
 <main class="page pairing" data-pair-robot="${esc(robot.id)}">
-<h1>${esc(robot.name)} is yours</h1>
+${kit.pageHead({ title: `${robot.name} is yours`, icon: 'gear', back: { href: '/', label: 'Home' } })}
 <p class="pair-status" data-pair-status data-state="waiting" role="status" aria-live="polite"><span class="dot"></span><span data-pair-text>Waiting for the device.</span> <a class="button primary" href="/panel/${esc(robot.id)}" data-pair-open hidden>Open the panel</a></p>
 <ol class="steps">
 <li class="card"><h2>The device carries on by itself${profile ? ` <span class="pill">${esc(profile.name)}</span>` : ''}</h2>
@@ -972,8 +973,7 @@ ${choice('Use the models you run on it', ' --ai', 'If this computer runs Ollama,
 <p class="muted">You get a one-line install command with a one-time code.</p><button type="submit" class="primary">Add a machine</button></form>`;
     const body = `${topbar('<span class="crumb">Machines</span>')}
 <main class="page">
-<h1>Your machines</h1>
-<p class="muted">A machine here runs jobs for you and only you. It connects out to OpenVibe and needs no open ports. The limits in its own config and its local kill switch (<code>openvibe-node stop</code>) always win.</p>
+${kit.pageHead({ title: `Your machines`, icon: 'gear', back: { href: '/', label: 'Home' } , lede: `A machine here runs jobs for you and only you. It connects out to OpenVibe and needs no open ports. The limits in its own config and its local kill switch (openvibe-node stop) always win.` })}
 <p class="muted"><a href="https://openvibe.network/machines">All your machines are on openvibe.network/machines</a></p>
 ${list}
 ${add}
@@ -1010,7 +1010,7 @@ ${rows ? `<ul class="share-list">${rows}</ul>` : ''}</section>`;
 
 /** A screen link that does not work (stopped, ended, never existed): one answer for every reason. */
 function renderShareGone() {
-    return page('Screen link', `<main class="page share-page"><h1>This screen link does not work</h1><p class="muted">It was stopped, it ended, or it never existed. Ask whoever shared it for a new one.</p></main>`, { description: 'A shared computer screen on OpenVibe.Bot.' });
+    return page('Screen link', `<main class="page share-page">${kit.pageHead({ title: `This screen link does not work`, icon: 'gear', back: { href: '/', label: 'Home' } , lede: `It was stopped, it ended, or it never existed. Ask whoever shared it for a new one.` })}</main>`, { description: 'A shared computer screen on OpenVibe.Bot.' });
 }
 
 /** /screen/:token: a shared screen, live, for a frame or a tab; with "use" links, the mouse and keyboard too. */
@@ -1060,8 +1060,7 @@ function renderMachineDesksPage({ machine, desks = [], maxDesks = null, error = 
             : `<div class="empty">${icon('plug', 'icon empty-icon')}<p class="empty-title">No desks are running.</p><p>An agent's task starts a desk of its own here when it needs one, and stops it when it is done.</p></div>`;
     const body = `${topbar(`<a class="crumb" href="/machines">Machines</a><span class="crumb">${esc(name)}</span>`)}
 <main class="page">
-<h1>${esc(name)}: desks</h1>
-<p class="muted">Each desk is a computer of its own on this machine, where one of your agents works: its own screen or browser, files and sign-ins. Watch one live and take it over, or stop it; a task whose desk you stop goes on without it.</p>
+${kit.pageHead({ title: `${name}: desks`, icon: 'gear', back: { href: '/', label: 'Home' } , lede: `Each desk is a computer of its own on this machine, where one of your agents works: its own screen or browser, files and sign-ins. Watch one live and take it over, or stop it; a task whose desk you stop goes on without it.` })}
 ${stopped ? `<p class="setting-ok" role="status">${icon('check')}<span>Stopped <code>${esc(stopped)}</code>.</span></p>` : ''}
 ${live ? `<p class="setting-ok" role="status">${icon('check')}<span><code>${esc(live.desk)}</code> is live${live.channel ? ` on <a href="${esc(live.channel)}">${esc(live.channel.replace(/^https:\/\//, ''))}</a>` : ' on your OpenVibe Live channel'} for up to 30 minutes. <a href="/machines/${id}/screen?desk=${encodeURIComponent(live.desk)}">Its screen page</a> stops it.</span></p>` : ''}
 ${list}
@@ -1081,7 +1080,7 @@ function renderMachineScreenPage({ machine, until = null, error = null, idle = f
     if (idle && !error) {
         const body = `${topbar(`<a class="crumb" href="/machines">Machines</a><span class="crumb">${esc(name)}</span>`)}
 <main class="page">
-<h1>${esc(name)}: screen</h1>
+${kit.pageHead({ title: `${name}: screen`, icon: 'gear', back: { href: '/', label: 'Home' } })}
 ${agentDesk ? `<p>Your agent works on a desk of its own on this computer. Watch it live, and take it over whenever you like: while you use the mouse and keyboard, the agent waits; when you stop, it goes on.</p>
 <form method="post" action="/machines/${esc(machine.id)}/screen" class="inline-form"><input type="hidden" name="desk" value="${esc(desk)}"><button type="submit" class="primary">Watch your agent's desk</button></form>` : ''}
 ${hasScreen ? `<p class="muted">Show this computer's screen here, live, to you only, for 10 minutes. Nothing is recorded, and the computer says on its desktop that its screen is live.</p>
@@ -1102,7 +1101,7 @@ ${desk !== 'main' ? '<p class="muted small">While you use it, the agent waits on
     const body = `${topbar(`<a class="crumb" href="/machines">Machines</a><span class="crumb">${esc(name)}</span>`)}
 <main class="page" data-share="${esc(base)}" data-control="${error ? '0' : '1'}" data-owner="1">
 <p class="muted small">Showing ${esc(deskWords)}${agentDesk ? ` (<code>${esc(desk)}</code>)` : ''}.</p>
-<h1>${esc(name)}: screen</h1>
+${kit.pageHead({ title: `${name}: screen`, icon: 'gear', back: { href: '/', label: 'Home' } })}
 ${error ? `<p class="error" role="alert">${esc(error)}</p>` : ends}
 <figure class="camera machine-screen" data-screen-state="${esc(stateUrl)}" tabindex="0" aria-label="The screen: turn on the mouse and keyboard to click and type on it">
 <div class="camera-screen" data-camera-screen>${icon('plug', 'icon camera-icon')}<p class="camera-title" data-screen-status role="status">${error ? 'The screen is not shown.' : 'Waiting for the machine…'}</p>
@@ -1128,8 +1127,7 @@ function renderPhonePage() {
     const body = `<main id="phone" class="phone" data-state="setup">
 <section class="phone-setup" data-setup>
 <p class="phone-brand">${icon('robot')}<span>OpenVibe<b>.Bot</b></span></p>
-<h1>Make this phone a robot</h1>
-<p class="muted">Pair it with a robot you added on openvibe.bot. Its camera streams to the robot's panel, it says what the driver types, shows a face, and reports its battery and tilt. Nothing to install: keep this page open.</p>
+${kit.pageHead({ title: `Make this phone a robot`, icon: 'gear', back: { href: '/', label: 'Home' } , lede: `Pair it with a robot you added on openvibe.bot. Its camera streams to the robot's panel, it says what the driver types, shows a face, and reports its battery and tilt. Nothing to install: keep this page open.` })}
 <form class="phone-form" data-pair-form>
 <div data-pair-fields>
 <label class="field" data-robot-field><span class="field-label">Robot</span><input name="robot" autocomplete="off" spellcheck="false" placeholder="rob_…"></label>
@@ -1207,7 +1205,7 @@ function renderFirstRunPage({ rows = [] }) {
         }).join('')}</ul>`
         : '<p class="muted">No machine has reported a first run yet.</p>';
     const body = `<p class="dir-crumb"><a href="/robots/submissions">Review</a> / First runs</p>
-<header class="dir-hero"><h1>First run</h1><p class="muted">How many machines reach each step of OpenVibe Link's guided first run, and the median time from the step before. A machine reports one event per step over its own device link (<code>node.first_run</code>); nothing here names a person, folder or address.</p></header>
+<div class="dir-hero">${kit.pageHead({ title: `First run`, icon: 'gear', back: { href: '/', label: 'Home' } , lede: `How many machines reach each step of OpenVibe Link's guided first run, and the median time from the step before. A machine reports one event per step over its own device link (node.first_run); nothing here names a person, folder or address.` })}</div>
 <section class="dir-sec"><h2>The funnel</h2>
 <table class="dir-table"><caption class="sr-only">First-run steps, machines and median time</caption>
 <thead><tr><th scope="col">Step</th><th scope="col">Machines</th><th scope="col">Median from the step before</th></tr></thead>

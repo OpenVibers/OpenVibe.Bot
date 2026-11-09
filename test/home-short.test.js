@@ -18,7 +18,7 @@ const { boot, check, done } = require('./helpers/app');
 
         // The ways to connect: one pick block, a chip link per way, every way in the page.
         assert.ok(html.includes('<div class="pick" id="pick-connect">'), 'the ways to connect are one pick block');
-        assert.match(html, /<nav class="pick-row" aria-label="The ways to connect">/);
+        assert.match(html, /<nav class="pick-row" data-ovk-scroll aria-label="The ways to connect">/);
         const paneIds = [...html.matchAll(/<div class="pick-pane" id="(pp-connect-[a-z-]+)">/g)].map((m) => m[1]);
         const chips = [...html.matchAll(/<a class="pick-chip" href="#(pp-connect-[a-z-]+)">([^<]+)<\/a>/g)];
         assert.ok(chips.length >= 3, 'a chip per way to connect');

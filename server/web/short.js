@@ -23,7 +23,7 @@ function pickBlock({ key, label, head = '', headId = '', bodyClass = '', panes }
     const chips = panes.map((p) => `<a class="pick-chip" href="#pp-${esc(key)}-${esc(p.id)}">${esc(p.label)}</a>`).join('');
     const body = panes.map((p) => `<div class="pick-pane" id="pp-${esc(key)}-${esc(p.id)}">${p.html}</div>`).join('');
     const heading = `<h2${headId ? ` id="${esc(headId)}"` : ''}>${esc(head || label)}</h2>`;
-    return `<div class="pick" id="pick-${esc(key)}"><div class="pick-bar"><div class="pick-head">${heading}</div><nav class="pick-row" aria-label="${esc(label)}">${chips}</nav></div><div class="pick-body${bodyClass ? ` ${bodyClass}` : ''}">${body}</div></div>`;
+    return `<div class="pick" id="pick-${esc(key)}"><div class="pick-bar"><div class="pick-head">${heading}</div><nav class="pick-row" data-ovk-scroll aria-label="${esc(label)}">${chips}</nav></div><div class="pick-body${bodyClass ? ` ${bodyClass}` : ''}">${body}</div></div>`;
 }
 
 /**

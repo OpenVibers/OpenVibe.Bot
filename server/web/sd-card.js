@@ -1,4 +1,5 @@
 'use strict';
+const kit = require('openvibe-shared/kit');
 /**
  * GET /setup/sd-card: a robot from a blank microSD card (owner 2026-10-24: "if you just have a fresh MicroSD card how to
  * flash … and be able to connect to the device headlessly … the site needs to guide the user").
@@ -58,8 +59,7 @@ function renderSdCard({ config, signedIn = false, models = [], values = {} }) {
         : `<p class="sd-signin">${link('/auth/login?next=%2Fsetup%2Fsd-card', 'Sign in')} to make your card's files: they add the robot to your account.</p>`;
 
     const body = `<p class="dir-crumb">${link('/robots', 'Robots')} · ${link('/robots/new', 'Add a robot')}</p>
-<header class="dir-hero"><h1>A robot from a blank microSD card</h1>
-<p class="muted">No screen, no keyboard, nothing to type on the robot. This page makes the card's setup files: on its first boot your Raspberry Pi joins your Wi-Fi, turns on SSH, installs OpenVibe and adds itself to your robots.</p></header>
+<div class="dir-hero">${kit.pageHead({ title: `A robot from a blank microSD card`, icon: 'server', back: { href: '/', label: 'Home' } , lede: `No screen, no keyboard, nothing to type on the robot. This page makes the card's setup files: on its first boot your Raspberry Pi joins your Wi-Fi, turns on SSH, installs OpenVibe and adds itself to your robots.` })}</div>
 <section class="dir-sec sd-need" aria-labelledby="sd-need-h"><h2 id="sd-need-h">What you need</h2>
 <ul class="sd-list"><li>The robot's Raspberry Pi (3B+, 4, 5 or Zero 2 W)</li><li>A microSD card, 16 GB or more: everything on it is erased</li><li>A computer with a card reader</li><li>Your Wi-Fi name and password (2.4 GHz works on every Pi)</li></ul></section>
 <ol class="sd-steps">
