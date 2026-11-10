@@ -39,8 +39,8 @@ function createBotReadiness({ db, valkey = null, keys, config, outbox, hub = nul
             { name: 'events', required: false, cacheMs: outbox.enabled ? PING_TTL_MS : 0, timeoutMs: 2500, check: events },
         ],
         details: async (body) => (body.checks.db.status === 'ok'
-            ? { events_outbox: await outbox.status(), devices_online: hub ? hub.onlineCount() : 0, queue_waiting: await queueWaiting(db) }
-            : { events_outbox: null, devices_online: null, queue_waiting: null }),
+            ? { events_outbox: await outbox.status(), devices_online: hub ? hub.onlineCount() : 0, queue_waiting: await queueWaiting(db), protected_sessions: hub ? hub.protectedSessions() : 0 }
+            : { events_outbox: null, devices_online: null, queue_waiting: null, protected_sessions: null }),
     });
 }
 
