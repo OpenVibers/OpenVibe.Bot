@@ -384,7 +384,7 @@ function renderComputersPage({ config }) {
 ${kit.pageHead({ title: `Your computer for your agents`, icon: 'code', back: { href: '/', label: 'Home' } , lede: `The OpenVibe Link's computer plugin lets your agents use your own computer: its terminal, its files, its screen and (when you allow it) its mouse and keyboard. It is off unless you install it, it never runs as root, and you decide what it may do on the computer itself. Nothing on OpenVibe can raise that level.` })}
 
 <section class="card" aria-labelledby="install-h"><h2 id="install-h">Install it</h2>
-<p>On ${inLink('/machines', 'Your machines')}, choose <b>Add a machine</b> and run the command under <b>Let your agents use it</b> on the computer, from your own account (the installer uses sudo itself):</p>
+<p>On ${out('https://openvibe.link/machines', 'Your machines')}, choose <b>Add a machine</b> and run the command under <b>Let your agents use it</b> on the computer, from your own account (the installer uses sudo itself):</p>
 ${code(COMPUTER_INSTALL)}
 <p class="muted">The installer is also at <a href="https://openvibe.link/install">openvibe.link/install</a>, which keeps working. What the Link is and what it does is on <a href="https://openvibe.link">openvibe.link</a>.</p>
 <p>The Link then runs as you, never as root, and its only folder is your home folder. Linux for now; elsewhere, run the Link in your own session with the plugin in its config (${out(`${BLOB}/docs/computer.md`, 'computer.md')}).</p></section>
@@ -410,7 +410,7 @@ ${code(COMPUTER_APPROVE)}
 <p>The local stop drops the computer to observe at once: what runs is killed, what waits is denied, and nothing runs or changes until you resume.</p></section>
 
 <section class="card" aria-labelledby="agent-c-h"><h2 id="agent-c-h">Your agent</h2>
-<p>On ${inLink('/machines', 'Your machines')}, <b>Let my agent use this computer</b> is off until you turn it on. With it on, a task you give ${out('https://openvibe.actor', 'OpenVibe.Actor')}, such as "what changed in ~/site today?", can list and read files, run programs and write files there, as you and at your level. The ${out('https://openvibe.actor/console', 'Console')} shows what waits for you. Turning the switch off stops it at once.</p>
+<p>On ${out('https://openvibe.link/machines', 'Your machines')}, <b>Let my agent use this computer</b> is off until you turn it on. With it on, a task you give ${out('https://openvibe.actor', 'OpenVibe.Actor')}, such as "what changed in ~/site today?", can list and read files, run programs and write files there, as you and at your level. The ${out('https://openvibe.actor/console', 'Console')} shows what waits for you. Turning the switch off stops it at once.</p>
 <p><b>Let my watches check things from this computer</b> is a separate switch. It lets ${out('https://openvibe.watch', 'OpenVibe.Watch')} probe your own network from the computer for your watches, for example "tell me when my NAS stops answering". It allows only probes: one GET or one TCP connect, to private addresses only.</p></section>
 
 <section class="card" aria-labelledby="desks-h"><h2 id="desks-h">Desks: a computer of its own for each task</h2>
@@ -421,7 +421,7 @@ ${code(COMPUTER_APPROVE)}
 <li><b>It hands you the steps that are yours.</b> For a sign-in, a code sent to your phone, a CAPTCHA or a payment, the agent gets the page ready and asks you to do that step on its desk ("Needs you"). It never types a password itself.</li>
 <li><b>Sign in once.</b> On OpenVibe Link v0.24.0 or newer, your agent's browser profile is kept on each machine: a site you signed in to on one task's desk is still signed in on the next.</li>
 <li><b>Never your own network.</b> Every page the agent's browser opens goes through a guard on the machine (Link v0.25.0): nothing on it can reach your router, printer or other computers at home, unless you set the machine to <b>full</b>.</li>
-<li><b>A spare computer as a desk host.</b> An old laptop or a mini PC can host desks for all your tasks: on ${inLink('/machines', 'Your machines')}, choose <b>Add a machine</b> and run the desk host command (Linux). It needs no screen, keyboard or sign-in, runs under an account of its own, and is used before your own computer when a task can work anywhere.</li>
+<li><b>A spare computer as a desk host.</b> An old laptop or a mini PC can host desks for all your tasks: on ${out('https://openvibe.link/machines', 'Your machines')}, choose <b>Add a machine</b> and run the desk host command (Linux). It needs no screen, keyboard or sign-in, runs under an account of its own, and is used before your own computer when a task can work anywhere.</li>
 <li><b>See and stop them.</b> Each machine says how many desks run on it; <b>See its desks</b> lists them, to watch, take over or stop. A desk nobody uses for 15 minutes stops by itself, and the computer's kill switch (<code>openvibe-link stop</code>) stops them all.</li>
 </ul>
 <p>How many run at once depends on the machine's memory (one whole desk per 2 GB by default; a browser desk counts as half). The details are in ${out(`${BLOB}/docs/computer.md`, 'computer.md')}.</p></section>
@@ -429,7 +429,7 @@ ${code(COMPUTER_APPROVE)}
 <section class="card" aria-labelledby="models-c-h"><h2 id="models-c-h">Your own models</h2>
 <p>If you run a model on your computer (Ollama, LM Studio or llama.cpp's server), your OpenVibe AI can think with it: free, private to you, and with no port opened.</p>
 <ul>
-<li><b>Set it up.</b> On ${inLink('/machines', 'Your machines')}, choose <b>Add a machine</b> and run the command under <b>Use the models you run on it</b>, or add <code>--ai</code> to any other one (OpenVibe Link v0.28.0 or newer). The installer says which model server it finds.</li>
+<li><b>Set it up.</b> On ${out('https://openvibe.link/machines', 'Your machines')}, choose <b>Add a machine</b> and run the command under <b>Use the models you run on it</b>, or add <code>--ai</code> to any other one (OpenVibe Link v0.28.0 or newer). The installer says which model server it finds.</li>
 <li><b>Turn it on.</b> The machine's card lists its models and how fast they answer there. <b>Let my AI use this computer's models</b> lets OpenVibe ask them for you; nothing reaches them before that.</li>
 <li><b>Use it.</b> <b>Use these models in OpenVibe.Chat</b> fills in "Your AI key" on OpenVibe.Chat. Your Vibe and the AI members you set up can then think with your computer. On OpenVibe.Live, a streamer's AI viewers can too: choose <b>A model on my own computer</b> as their AI source.</li>
 <li><b>Any of your computers.</b> Choose <b>any of my computers</b> instead of one, and OpenVibe asks the fastest of yours that is on and has the model, then the next when one is busy.</li>
@@ -438,7 +438,7 @@ ${code(COMPUTER_APPROVE)}
 <p>The details are in ${out(`${BLOB}/docs/ai.md`, 'ai.md')}.</p></section>
 
 <section class="card" aria-labelledby="screen-c-h"><h2 id="screen-c-h">Watch your screen live</h2>
-<p>On ${inLink('/machines', 'Your machines')}, <b>Show my screen</b> shows the computer's screen live, to you only, for 10 minutes (30 seconds to 30 minutes through the API).</p>
+<p>On ${out('https://openvibe.link/machines', 'Your machines')}, <b>Show my screen</b> shows the computer's screen live, to you only, for 10 minutes (30 seconds to 30 minutes through the API).</p>
 <ul>
 <li><b>Private.</b> It goes to a private stream of that computer's own: nothing is recorded, it never appears on OpenVibe Live, and only you can open it. Your agents, your watches and anyone else cannot start it.</li>
 <li><b>How it is captured.</b> The computer takes a few pictures of its screen a second with the same tools as a screenshot. It needs OpenVibe Link v0.12.0 or newer, with the computer plugin running in your desktop session.</li>

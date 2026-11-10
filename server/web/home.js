@@ -174,7 +174,6 @@ function moreSection({ config, kit: k, models }) {
     ]);
     const computers = rows([
         ['/docs/computers#desks-h', 'A desk for each task', 'Your agents work on desks of their own on your computer, a browser or a whole screen, never yours. Watch any of them live and take it over.'],
-        ['/machines', 'A spare computer as a desk host', 'An old laptop or a mini PC hosts desks for all your agents\' tasks, with no screen or sign-in, sized to its memory.'],
         ['/docs/computers#models-c-h', 'Your own AI models', 'Ollama, LM Studio or llama.cpp on your computer answers your Vibe, your AI members and your stream\'s AI viewers: free, and no port is opened.'],
         ['/docs/computers', 'A desk live on your channel', 'When you choose, an agent\'s desk shows on your OpenVibe Live channel for up to 30 minutes, so people can watch it work.'],
     ]);

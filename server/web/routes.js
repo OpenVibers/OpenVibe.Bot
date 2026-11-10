@@ -32,7 +32,6 @@
  * Pages are never cached: a pairing page carries a live code. Adding a robot and minting a code count against
  * the signed-in person's `bot.robot.manage` limit, the same one /api/v1 applies.
  */
-const { validCallWord } = require('../voice');
 const path = require('path');
 const express = require('express');
 const seo = require('openvibe-shared/seo');
@@ -41,7 +40,6 @@ const appIcon = require('openvibe-shared/app-icon');
 const { getProfile, listProfiles, loadProfiles } = require('../profiles');
 const { frameAncestors } = require('../config');
 const { BotError, json } = require('../util');
-const { aiOf } = require('../machine-ai');
 const kits = require('../kits');
 // The Android app's published download: an https URL on GitHub releases or openvibe.link, or nothing (the app is in
 // testing). Read on each request, so setting it in the env file and restarting is all a release needs.
@@ -49,7 +47,7 @@ function linkApkUrl() {
     const v = String(process.env.LINK_ANDROID_APK_URL || '').trim();
     return /^https:\/\/(github\.com\/OpenVibers\/OpenVibe\.Link\/releases\/|openvibe\.link\/)[^\s"'<>]+$/.test(v) ? v : null;
 }
-const { renderPanel, renderEmbedRefused, renderDrivePage, renderPairingPage, renderPhonePage, renderPhoneLinkPage, renderMachinesPage, renderMachineDesksPage, renderMachineScreenPage, renderSharePage, renderShareGone, renderLinkPage, renderSignInPage, renderClaimPage, renderClaimApproved, renderFirstRunPage } = require('./render');
+const { renderPanel, renderEmbedRefused, renderDrivePage, renderPairingPage, renderPhonePage, renderPhoneLinkPage, renderSharePage, renderShareGone, renderLinkPage, renderSignInPage, renderClaimPage, renderClaimApproved, renderFirstRunPage } = require('./render');
 const { createMachineScreen } = require('../machine-screen');
 const { createScreenShares } = require('../screen-shares');
 const { renderDocsIndex, renderDriversPage, renderProfilesPage, renderAutomationPage, renderComputersPage } = require('./docs');
@@ -166,6 +164,13 @@ const embedCsp = (config) => ["default-src 'self'", `script-src 'self' ${PANEL_S
 
 function createWebRoutes(config, { domain = null, sim = null, onvif = null, limits = null, identity = null, hub = null, log = console, submissions = null, routines = null, webhooks = null, claims = null, setupKeys = null, releaseLastmod } = {}) {
     const r = express.Router();
+    // The machines hub belongs to OpenVibe Link (owner, 11-09): every /machines path answers a 301 to Link's hub,
+    // signed in or not, so nobody sees a sign-in bounce on the way. There is no page behind this path here any more.
+    const LINK_MACHINES = 'https://openvibe.link/machines';
+    r.use('/machines', (req, res) => {
+        res.setHeader('Cache-Control', 'public, max-age=3600');
+        res.redirect(301, LINK_MACHINES);
+    });
     const networkReads = createNetworkReads({ searchUrl: config.search && config.search.url, log });
     // The public front page is crawlable; sign-in, the API and every signed-in or per-robot page are not.
     r.get('/robots.txt', (req, res) => res.type('text/plain').send(['User-agent: *', 'Allow: /$', 'Disallow: /auth/', 'Disallow: /api/',
@@ -608,182 +613,13 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         const purpose = String(req.headers['sec-purpose'] || req.headers.purpose || req.headers['x-moz'] || '');
         return (site && site !== 'same-origin' && site !== 'none') || /prefetch|prerender/i.test(purpose);
     };
-    // ── The person's own machines that run their jobs (plan T14/T16) ──
-    const machineRows = async (subject) => Promise.all((await domain.machines.list(subject)).map(async (d) => {
-        const robotId = Array.isArray(d.robot_ids) ? d.robot_ids[0] : null;
-        const robot = robotId ? await domain.robots.get(robotId) : null;
-        const sensors = hub ? ((hub.deviceState(d.id).telemetry || {}).sensors || {}) : {};
-        // Read online first: the first-run query must not make a machine look offline because the page took longer.
-        const online = !!(hub && hub.isOnline(d.id));
-        // What the guided first run's one job found on this machine (Link's link.first_run first_job event).
-        const firstRun = await domain.devices.firstRunOf(d.id);
-        return {
-            ...d, online, robot: robot ? robot.name : null,
-            first_run: firstRun,
-            computer_level: typeof sensors.computer_level === 'string' ? sensors.computer_level : null,
-            computer_waiting: Number.isInteger(sensors.computer_waiting) ? sensors.computer_waiting : null,
-            computer_screen_stream: sensors.computer_screen_stream === 'live' ? 'live' : 'off',
-            computer_desks: Number.isInteger(sensors.computer_desks) ? sensors.computer_desks : null,
-            desk_leases: d.shared_desks ? await domain.deskLeases.count(d.id) : 0,
-            ai_models: !!d.ai_models,
-            // The Link ai plugin's community offer, when it has one (models, hours, price, audience, paused, privacy).
-            ai_offer: (() => { const ai = aiOf(d.capabilities); return ai && ai.offer && typeof ai.offer === 'object' ? ai.offer : null; })(),
-            // How fast its last model answered there (Link v0.29.0's ai plugin), and whether one is answering now.
-            ai_speed: typeof sensors.ai_tokens_per_s === 'number' && sensors.ai_tokens_per_s > 0 && typeof sensors.ai_model === 'string'
-                ? { model: sensors.ai_model.slice(0, 120), tokens_per_s: sensors.ai_tokens_per_s } : null,
-            ai_busy: sensors.ai_busy === 1,
-        };
-    }));
-    // ── The live screen (plan T14): the owner watches their machine's screen on their own private stream ──
+    // ── Screen share links (server/screen-shares.js): the owner's agent makes one (POST /api/v1/machines/:id/watch-links,
+    // server/api/v1.js) and the link shows the desk live in a chat turn, on this site or in a frame in OpenVibe's workspaces. ──
     const machineScreen = createMachineScreen({ domain, hub });
-    const myMachine = async (req, me) => {
-        const mine = (await domain.machines.list(me.subject)).find((d) => d.id === req.params.id);
-        if (!mine) throw new BotError(404, 'bot.device_not_found', 'no such machine of yours');
-        return mine;
-    };
-    const asUser = (me) => ({ kind: 'user', sub: me.subject });
-    // The machine has a private desk to show (Link v0.15.0 on Linux): its owner may show it, or share it, instead.
-    // The private desk is a whole desk: a machine that runs browser desks only (a Mac, Link v0.23.0) has none to show.
-    const hasDesk = (mine) => {
-        const d = hub && (hub.computerOf(mine.id) || {}).desk;
-        return !!d && (!Array.isArray(d.kinds) || d.kinds.includes('desktop'));
-    };
-    // A screen of its own to show live: a desk host (install.sh --desk-host) has none, only its desks.
-    const hasScreen = (mine) => {
-        const c = hub && hub.computerOf(mine.id);
-        return !!(c && c.screen && c.screen.stream === true);
-    };
-    r.post('/machines/:id/screen', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
-        const me = requireUser(req);
-        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
-        const mine = await myMachine(req, me);
-        try {
-            // Any desk: the person's own screen (main), the private desk, or an agent task's own desk (desk-<name>).
-            const desk = req.body && machineScreen.DESK.test(String(req.body.desk || '')) ? String(req.body.desk) : 'main';
-            const out = await machineScreen.start(mine, me.subject, asUser(me), { desk });
-            res.redirect(303, `/machines/${encodeURIComponent(mine.id)}/screen?until=${encodeURIComponent(out.until)}${desk !== 'main' ? `&desk=${encodeURIComponent(desk)}` : ''}`);
-        } catch (e) {
-            if (!(e instanceof BotError)) throw e;
-            res.setHeader('Content-Security-Policy', PANEL_CSP);
-            res.status(e.status).type('html').send(renderMachineScreenPage({ machine: mine, error: e.detail || e.message, hasDesk: hasDesk(mine), hasScreen: hasScreen(mine) }));
-        }
-    }));
-    r.get('/machines/:id/screen', page(async (req, res) => {
-        const me = requireUser(req);
-        const mine = await myMachine(req, me);
-        const until = typeof req.query.until === 'string' && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,3})?Z$/.test(req.query.until) ? req.query.until : null;
-        // A link from an agent's task names its desk (Desks plan D4: Watch, Take over): offer that one first.
-        const desk = typeof req.query.desk === 'string' && machineScreen.DESK.test(req.query.desk) ? req.query.desk : 'main';
-        // Opened from a link with nothing shown: offer to start it rather than wait for a stream nobody started.
-        const st = await machineScreen.state(mine, me.subject);
-        const idle = !until && st.state !== 'live';
-        res.setHeader('Vary', 'Cookie');
-        res.setHeader('Content-Security-Policy', PANEL_CSP);
-        res.type('html').send(renderMachineScreenPage({ machine: mine, until, idle, shares: await shares.list(mine, me.subject).catch(() => []), hasDesk: hasDesk(mine), hasScreen: hasScreen(mine), desk: idle ? desk : st.desk }));
-    }));
-    // The owner's page drives what it shows (public/screen-share.js, owner mode): its state, start, stop and the mouse
-    // and keyboard ("Take over"), as JSON, same-site only.
-    r.get('/machines/:id/screen/state.json', page(async (req, res) => {
-        const me = requireUser(req);
-        const mine = await myMachine(req, me);
-        res.setHeader('Cache-Control', 'private, no-store');
-        res.json(await machineScreen.state(mine, me.subject));
-    }));
-    r.post('/machines/:id/screen/start', ...manage, express.json({ limit: '1kb' }), page(async (req, res) => {
-        const me = requireUser(req);
-        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site requests are refused');
-        const mine = await myMachine(req, me);
-        const desk = req.body && machineScreen.DESK.test(String(req.body.desk || '')) ? String(req.body.desk) : 'main';
-        res.json(await machineScreen.start(mine, me.subject, asUser(me), { desk }));
-    }));
-    r.post('/machines/:id/screen/input', ...manage, express.json({ limit: '2kb' }), page(async (req, res) => {
-        const me = requireUser(req);
-        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site requests are refused');
-        const mine = await myMachine(req, me);
-        res.json(await machineScreen.input(mine, me.subject, req.body || {}));
-    }));
-    // The desks running on the machine (Desks plan): asked of the machine when the owner opens the page, never on a
-    // schedule; each can be watched, taken over or stopped.
-    r.get('/machines/:id/desks', page(async (req, res) => {
-        const me = requireUser(req);
-        const mine = await myMachine(req, me);
-        res.setHeader('Vary', 'Cookie');
-        res.setHeader('Cache-Control', 'private, no-store');
-        let desks = [];
-        let maxDesks = null;
-        let error = null;
-        if (!hub || !hub.isOnline(mine.id)) error = 'The machine is offline: its desks stopped with it, or show here when it is back.';
-        else if (!(hub.computerOf(mine.id) || {}).desk) error = 'This machine runs no desks: it needs OpenVibe Link with the computer plugin (Linux with Xvfb, or Chromium for browser desks).';
-        else {
-            const r = await hub.machineCommand(mine.id, asUser(me), me.subject, { kind: 'desk', value: { action: 'list' }, ms: 8000 });
-            if (r && r.result === 'ack') {
-                const d = r.data || {};
-                desks = (Array.isArray(d.desks) ? d.desks : []).filter((x) => x && machineScreen.DESK.test(String(x.desk || '')) && x.desk !== 'main').slice(0, 50);
-                maxDesks = Number.isInteger(d.max_desks) ? d.max_desks : null;
-            } else error = `The machine did not list its desks: ${(r && (r.reason || r.result)) || 'no answer'}`.slice(0, 300);
-        }
-        const stopped = typeof req.query.stopped === 'string' && machineScreen.DESK.test(req.query.stopped) ? req.query.stopped : null;
-        const liveDesk = typeof req.query.live === 'string' && machineScreen.DESK.test(req.query.live) && req.query.live !== 'main' ? req.query.live : null;
-        const channel = typeof req.query.channel === 'string' && /^https:\/\/openvibe\.live\/@[A-Za-z0-9_.-]{1,40}$/.test(req.query.channel) ? req.query.channel : null;
-        res.type('html').send(renderMachineDesksPage({ machine: mine, desks, maxDesks, error, stopped, live: liveDesk ? { desk: liveDesk, channel } : null }));
-    }));
-    // A desk on the owner's OpenVibe Live channel for up to 30 minutes (the Desks plan's D8), from the desks page's
-    // "Show live on my channel" and its confirmation.
-    r.post('/machines/:id/desks/live', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
-        const me = requireUser(req);
-        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
-        const mine = await myMachine(req, me);
-        const desk = req.body && typeof req.body.desk === 'string' ? req.body.desk : '';
-        if (!machineScreen.DESK.test(desk) || desk === 'main') throw new BotError(422, 'bot.invalid_input', 'desk is private or desk-<name>');
-        const out = await machineScreen.start(mine, me.subject, asUser(me), { desk, live: true, seconds: machineScreen.limits.SECONDS.max });
-        const channel = out.live && /^https:\/\/openvibe\.live\/@[A-Za-z0-9_.-]{1,40}$/.test(String(out.live.channel_url || '')) ? out.live.channel_url : '';
-        res.redirect(303, `/machines/${encodeURIComponent(mine.id)}/desks?live=${encodeURIComponent(desk)}${channel ? `&channel=${encodeURIComponent(channel)}` : ''}`);
-    }));
-    r.post('/machines/:id/desks/stop', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
-        const me = requireUser(req);
-        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
-        const mine = await myMachine(req, me);
-        const desk = req.body && typeof req.body.desk === 'string' ? req.body.desk : '';
-        if (!machineScreen.DESK.test(desk) || desk === 'main') throw new BotError(422, 'bot.invalid_input', 'desk is private or desk-<name>');
-        if (!hub || !hub.isOnline(mine.id)) throw new BotError(409, 'bot.device_offline', 'the machine is offline');
-        const r = await hub.machineCommand(mine.id, asUser(me), me.subject, { kind: 'desk', value: { action: 'stop', desk }, ms: 15000 });
-        if (!r || r.result !== 'ack') throw new BotError(409, 'bot.device_refused', `the machine did not stop it: ${(r && (r.reason || r.result)) || 'no answer'}`.slice(0, 300));
-        res.redirect(303, `/machines/${encodeURIComponent(mine.id)}/desks?stopped=${encodeURIComponent(desk)}`);
-    }));
-    r.get('/machines/:id/screen.json', page(async (req, res) => {
-        const me = requireUser(req);
-        const mine = await myMachine(req, me);
-        res.setHeader('Cache-Control', 'private, no-store');
-        res.json(await machineScreen.state(mine, me.subject));
-    }));
-    r.post('/machines/:id/screen/stop', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), express.json({ limit: '1kb' }), page(async (req, res) => {
-        const me = requireUser(req);
-        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
-        const mine = await myMachine(req, me);
-        const out = await machineScreen.stop(mine, me.subject, asUser(me));
-        if (req.is('application/json')) return res.json(out);   // the page's own Stop (owner mode)
-        res.redirect(303, '/machines');
-    }));
-    // ── Screen share links (server/screen-shares.js): the owner shares the live screen with a group, to watch or use ──
     const shares = createScreenShares({ db: domain && domain.db, domain, hub, machineScreen });
     // A share page may sit in OpenVibe's own workspaces (a room on OpenVibe.Chat, the admin panel) and the configured embeds.
     const shareCsp = ["default-src 'self'", `script-src 'self' ${PANEL_SCRIPT_SRC}`, `connect-src 'self' ${PANEL_CONNECT_SRC}`,
         `frame-ancestors ${frameAncestors(config)} https://openvibe.chat https://openvibe.network https://openvibe.actor`, "object-src 'none'", "base-uri 'self'"].join('; ');
-    r.post('/machines/:id/shares', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
-        const me = requireUser(req);
-        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
-        const mine = await myMachine(req, me);
-        const made = await shares.create(mine, me.subject, { label: req.body && req.body.label, control: req.body && req.body.control === '1', days: (req.body && req.body.days) || 30, desk: req.body && req.body.desk });
-        res.setHeader('Content-Security-Policy', PANEL_CSP);
-        res.type('html').send(renderMachineScreenPage({ machine: mine, idle: true, shares: await shares.list(mine, me.subject), madeLink: `${config.baseUrl}/screen/${made.token}`, madeShare: made.share, hasDesk: hasDesk(mine), hasScreen: hasScreen(mine) }));
-    }));
-    r.post('/machines/:id/shares/:share/revoke', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
-        const me = requireUser(req);
-        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
-        const mine = await myMachine(req, me);
-        await shares.revoke(mine, me.subject, req.params.share);
-        res.redirect(303, `/machines/${encodeURIComponent(mine.id)}/screen`);
-    }));
     const shareJson = (fn) => async (req, res) => {
         res.setHeader('Cache-Control', 'no-store');
         try { res.json(await fn(req)); } catch (e) {
@@ -806,16 +642,11 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     r.post('/screen/:token/stop', ...shareLimit, shareJson(async (req) => await shares.stop(req.params.token)));
     r.post('/screen/:token/input', ...shareLimit, express.json({ limit: '2kb' }), shareJson(async (req) => await shares.input(req.params.token, req.body || {})));
 
-    r.get('/machines', frameCsp, page(async (req, res) => {
-        const me = requireUser(req);
-        res.setHeader('Vary', 'Cookie');
-        res.type('html').send(renderMachinesPage({ machines: await machineRows(me.subject), phoneReady: !!linkApkUrl() }));
-    }));
     // Link on your phone (plan 2026-11-07 §13.2): the code the Android app pairs with, and the QR it can scan. A code
-    // is minted on the visit, never for a cross-site navigation or a prefetch (the same rule as /pair/:id).
+    // is minted on the visit, never for a cross-site navigation or a prefetch. The machines hub it belongs to is Link's.
     r.get('/link/phone', ...manage, page(async (req, res) => {
         const me = requireUser(req);
-        if (crossSiteOrPrefetch(req)) return res.redirect(303, '/machines');
+        if (crossSiteOrPrefetch(req)) return res.redirect(303, LINK_MACHINES);
         res.setHeader('Vary', 'Cookie');
         // Until the Android app has a published download (LINK_ANDROID_APK_URL, the signed release), the page says it is
         // in testing and mints no code: a QR for an app nobody can install is a dead end (Opus, 11-07).
@@ -823,78 +654,6 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         const pairing = apkUrl ? await domain.phone.mint(me.subject) : null;
         res.type('html').send(renderPhoneLinkPage({ pairing, apkUrl }));
     }));
-    r.post('/machines', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
-        const me = requireUser(req);
-        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
-        const pairing = await domain.machines.mint(me.subject);
-        res.status(201).type('html').send(renderMachinesPage({ machines: await machineRows(me.subject), pairing, phoneReady: !!linkApkUrl() }));
-    }));
-    // The owner lets their watches (OpenVibe.Watch's node source) probe from this machine, or stops them.
-    r.post('/machines/:id/watch-probe', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
-        const me = requireUser(req);
-        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
-        const mine = (await domain.machines.list(me.subject)).find((d) => d.id === req.params.id);
-        if (!mine) throw new BotError(404, 'bot.device_not_found', 'no such machine of yours');
-        await domain.machines.setWatchProbe(mine.id, req.body && req.body.on === '1');
-        res.redirect(303, '/machines');
-    }));
-    // The owner lets their agent (OpenVibe.Actor) use this machine's computer plugin, or stops it.
-    // The owner lets their AI run models on this machine, or stops it (AI on your own machines, contracts 0.219.0).
-    r.post('/machines/:id/ai-models', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
-        const me = requireUser(req);
-        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
-        const mine = await myMachine(req, me);
-        await domain.machines.setAiModels(mine.id, req.body && req.body.on === '1');
-        res.redirect(303, '/machines');
-    }));
-    r.post('/machines/:id/agent-computer', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
-        const me = requireUser(req);
-        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
-        const mine = (await domain.machines.list(me.subject)).find((d) => d.id === req.params.id);
-        if (!mine) throw new BotError(404, 'bot.device_not_found', 'no such machine of yours');
-        await domain.machines.setAgentComputer(mine.id, req.body && req.body.on === '1');
-        res.redirect(303, '/machines');
-    }));
-    // The owner offers this desk host's desks to other people's sessions (OpenVibe.Run, contracts 0.223.0), or stops: only
-    // where its Link sandboxes every desk (Link v0.32.0, install.sh --desk-host --shared).
-    r.post('/machines/:id/shared-desks', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
-        const me = requireUser(req);
-        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
-        const mine = (await domain.machines.list(me.subject)).find((d) => d.id === req.params.id);
-        if (!mine) throw new BotError(404, 'bot.device_not_found', 'no such machine of yours');
-        const on = req.body && req.body.on === '1';
-        const desk = ((hub && hub.computerOf(mine.id)) || {}).desk;
-        if (on && !(desk && desk.isolation === 'sandbox')) {
-            throw new BotError(409, 'bot.computer_off', 'this machine does not sandbox its desks: install it with --desk-host --shared (OpenVibe Link v0.32.0 or newer), then try again');
-        }
-        await domain.machines.setSharedDesks(mine.id, on);
-        res.redirect(303, '/machines');
-    }));
-    // The owner lets Vibe answer their voice on this machine (OpenVibe Link's voice plugin), with a call word, or stops it.
-    r.post('/machines/:id/voice', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
-        const me = requireUser(req);
-        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
-        const mine = (await domain.machines.list(me.subject)).find((d) => d.id === req.params.id);
-        if (!mine) throw new BotError(404, 'bot.device_not_found', 'no such machine of yours');
-        const on = req.body && req.body.on === '1';
-        const word = req.body && req.body.call_word ? validCallWord(req.body.call_word) : null;
-        if (on && req.body && req.body.call_word && !word) throw new BotError(422, 'bot.invalid_input', 'a call word is 1 to 4 words, 3 to 40 characters, with one word of three letters or more');
-        const row = await domain.machines.setVoice(mine.id, on, word);
-        if (hub && hub.machineChanged) await hub.machineChanged(row);
-        res.redirect(303, '/machines');
-    }));
-    r.post('/machines/:id/remove', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
-        const me = requireUser(req);
-        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
-        const mine = (await domain.machines.list(me.subject)).find((d) => d.id === req.params.id);
-        if (!mine) throw new BotError(404, 'bot.device_not_found', 'no such machine of yours');
-        await domain.devices.revoke(mine.id);
-        await domain.machines.screen.archive(mine, me.subject).catch((e) => log.warn(`[Bot] machine ${mine.id} screen stream: ${e.message}`));
-        if (mine.node_principal) await domain.devices.revokeNode(mine.node_principal).catch((e) => log.warn(`[Bot] machine ${mine.id} on Network: ${e.message}`));
-        if (hub) hub.closeDevice(mine.id, 'revoked');
-        res.redirect(303, '/machines');
-    }));
-
     r.get('/pair/:id', ...manage, page(async (req, res) => {
         const me = requireUser(req);
         if (crossSiteOrPrefetch(req)) return res.redirect(303, '/robots');

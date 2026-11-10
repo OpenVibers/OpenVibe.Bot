@@ -52,14 +52,11 @@ const { renderPhoneLinkPage } = require('../server/web/render');
         assert.match(html, /for the next 15 minutes \(until <time datetime="[^"]+">\d\d:\d\d UTC<\/time>\)/, 'the expiry in plain words');
     });
 
-    await check('before the Android app is published, /link/phone says so and mints no code; /machines does not link it', async () => {
+    await check('before the Android app is published, /link/phone says so and mints no code', async () => {
         const html = renderPhoneLinkPage({ pairing: null, apkUrl: null });
         assert.match(html, /in testing and not published yet/);
         assert.doesNotMatch(html, /qr-box|class="code"/, 'no QR and no code for an app nobody can install');
         assert.doesNotMatch(html, /releases"/, 'no link to a release that has no APK');
-        const { renderMachinesPage } = require('../server/web/render');
-        assert.doesNotMatch(renderMachinesPage({ machines: [] }), /href="\/link\/phone"/);
-        assert.match(renderMachinesPage({ machines: [], phoneReady: true }), /href="\/link\/phone"/);
     });
 
     done();

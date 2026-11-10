@@ -47,14 +47,14 @@ Sitemap entries use the release commit time for these code-backed pages.
 - **Desks for OpenVibe.Run's sessions** (contracts 0.223.0, `bot.desk.session`, the Desks plan's D6; migration 0026). Run, with a service token naming the session's person in `X-OV-Subject`, leases one named browser desk per session (`bot.desk-lease@1`).
   - `GET /api/v1/desk-hosts` lists where a desk may go for that person:
     - their own machines where "Let my agent use this computer" is on (trust `user-owned`);
-    - desk hosts whose owner offers them to other people (`devices.shared_desks`, the "Offer my desks to other people" button on `/machines`), only where the Link sandboxes every desk (`desk.isolation: sandbox`, OpenVibe Link v0.32.0, `install.sh --desk-host --shared`); these are `community`, or `first-party` for the owners in `BOT_FIRST_PARTY_DESK_OWNERS`.
+    - desk hosts whose owner offers them to other people (`devices.shared_desks`, the `devices.shared_desks` switch), only where the Link sandboxes every desk (`desk.isolation: sandbox`, OpenVibe Link v0.32.0, `install.sh --desk-host --shared`); these are `community`, or `first-party` for the owners in `BOT_FIRST_PARTY_DESK_OWNERS`.
     - Each host comes with its room: a browser desk counts as half of `max_desks`.
   - `POST /api/v1/machines/:id/desk-leases` starts the desk. Then `POST …/desk-leases/:desk/commands` carries `screen`, `input` and `browser` (`bot.command@1` without `desk`) to that desk alone, and `DELETE …/desk-leases/:desk` stops it.
   - A leased desk is the session's alone: the machine's own `POST /machines/:id/commands` answers it `409 bot.desk_leased`, its owner's included.
   - A full machine answers `409 bot.machine_busy`; anyone else gets 404.
   - Shared hosts are also reported to the Network as `worker:browser` offers (`desk:<id>`).
-- **A person's computer for their agents** (plan T14/T17, contracts 0.166.0): a machine installed with `--computer observe|ask|trusted|full` runs OpenVibe Link's `computer` plugin as the person's own account, and the level set on the machine decides what may happen there (`ask` waits for `openvibe-link approve <id>`). `POST /api/v1/machines/:id/commands` sends `exec`, `fs` and `screen` (`bot.command@1`, the value checked against the contract) to it as its owner, or as their agent (`svc:actor` with `bot.computer.control`, acting as the owner) once the owner turned "Let my agent use this computer" on at `/machines` (migration 0014, `devices.agent_computer`). The answer comes back in `data` (the device socket takes frames up to 640 KB so it fits; a repeated id answers its result without the data). A machine whose plugin is off answers `bot.computer_off`. The audit keeps the program name and argument count, or the file op and path, never stdin, arguments or content. The machines page shows each machine's level, what waits for approval there, and the switch. OpenVibe.Watch (`svc:watch`, `bot.computer.control`, contracts 0.167.0) may send only `probe`: one GET or TCP connect from the machine to its own network, for a watch's `node` source. It works only where the owner turned on "Let my watches check things from this computer" (migration 0015, `devices.watch_probe`), and the audit keeps the probe's host, not its path. Every device's config lists the computer kinds, which only this route sends (a robot's operators never can).
-- **The live screen** (plan T14, contracts 0.182.0, OpenVibe Link v0.12.0): the machine's owner, signed in as themselves, watches its screen at `/machines/:id/screen` or through `POST|GET|DELETE /api/v1/machines/:id/screen` (`server/machine-screen.js`).
+- **A person's computer for their agents** (plan T14/T17, contracts 0.166.0): a machine installed with `--computer observe|ask|trusted|full` runs OpenVibe Link's `computer` plugin as the person's own account, and the level set on the machine decides what may happen there (`ask` waits for `openvibe-link approve <id>`). `POST /api/v1/machines/:id/commands` sends `exec`, `fs` and `screen` (`bot.command@1`, the value checked against the contract) to it as its owner, or as their agent (`svc:actor` with `bot.computer.control`, acting as the owner) once the owner turned "Let my agent use this computer" on (`POST /api/v1/machines/:id/agent-computer`; migration 0014, `devices.agent_computer`). The answer comes back in `data` (the device socket takes frames up to 640 KB so it fits; a repeated id answers its result without the data). A machine whose plugin is off answers `bot.computer_off`. The audit keeps the program name and argument count, or the file op and path, never stdin, arguments or content. The machines API shows each machine's level, what waits for approval there, and the switch. OpenVibe.Watch (`svc:watch`, `bot.computer.control`, contracts 0.167.0) may send only `probe`: one GET or TCP connect from the machine to its own network, for a watch's `node` source. It works only where the owner turned on "Let my watches check things from this computer" (migration 0015, `devices.watch_probe`), and the audit keeps the probe's host, not its path. Every device's config lists the computer kinds, which only this route sends (a robot's operators never can).
+- **The live screen** (plan T14, contracts 0.182.0, OpenVibe Link v0.12.0): the machine's owner, signed in as themselves, watches its screen through `POST|GET|DELETE /api/v1/machines/:id/screen` (`server/machine-screen.js`).
   - **The stream.** Each start makes or rotates the machine's own OpenRestream stream (external ref `bot:machine:<id>`, playback private, no recording, never mirrored to Live; `devices.screen_stream_id`, migration 0017). Rotating ends any session still open.
   - **The command.** `screen_stream` start goes to the machine with that stream's WHIP URL and key. It is not a `bot.command@1` kind, so the commands route, agents, watches and operators can never send it or choose where the screen goes.
   - **The audit** keeps the action, seconds and fps, never the URL or key.
@@ -70,11 +70,10 @@ Sitemap entries use the release commit time for these code-backed pages.
   - **The person always wins.** A person's mouse, keyboard or browser action on a screen (the owner's, or through a
     share link) holds that screen (main or the desk) for `BOT_PERSON_TURN_MS` (15 s). An agent's acting command there
     meanwhile answers `409 bot.person_driving` ("a person is using this screen right now"); reading goes on.
-  - **The live screen** of the desk: `POST /machines/:id/screen` with `desk: "private"` (or the page's "Show the
-    private desk" button) sends `screen_stream` with `desk: private`.
+  - **The live screen** of the desk: `POST /api/v1/machines/:id/screen` with `desk: "private"` sends `screen_stream` with `desk: private`.
 - **Vibe by voice** (`server/voice.js`, migration `0024_machine_voice.sql`, contracts 0.214.0 `voice_ask` /
   `voice_answer`; consumer plan §8). On a machine whose Link runs the voice plugin (`capabilities.voice`), the owner
-  turns voice on and chooses a call word ("hey vibe" by default) on /machines or `POST /api/v1/machines/:id/voice`.
+  turns voice on and chooses a call word ("hey vibe" by default) with `POST /api/v1/machines/:id/voice`.
   - **Config** then carries `voice: true` and `call_word`, and the machine listens for the word on its own. Only what
     the person says after it comes as `voice_ask`.
   - **Answers:** Bot answers `working` at once, then asks Vibe as the owner through Chat (`POST <BOT_CHAT_INTERNAL_URL>
@@ -111,11 +110,10 @@ Sitemap entries use the release commit time for these code-backed pages.
     (`kind: browser`) are a headless browser alone; a desk host or a Mac runs browser desks only.
   - **Programs on a desk:** `exec` with `desk`, and `detach` for an app that lasts until the desk stops.
   - **Watch and take over:** the desk's live screen, where the person's own input wins (`bot.person_driving`).
-  - **The desks page** `/machines/:id/desks` lists what runs there. The machines API reports `desks_running`, so
-    Actor's `machine: "any"` places a desk on a desk host first, then on the machine with the most room.
+  - The machines API reports `desks_running`, so Actor's `machine: "any"` places a desk on a desk host first, then
+    on the machine with the most room.
   - **Desk hosts:** `install.sh --desk-host` turns a spare computer into a host for its owner's agents.
-  - **A desk on the owner's OpenVibe Live channel**, at their request (`POST /machines/:id/screen { desk, live: true }`,
-    or the desks page's "Show live on my channel" and its second step): a second, public OpenRestream stream of the
+  - **A desk on the owner's OpenVibe Live channel**, at their request (`POST /api/v1/machines/:id/screen { desk, live: true }`): a second, public OpenRestream stream of the
     machine's (`bot:machine_live:<id>`) whose `mirror_to_live` OpenRestream links to their channel. It is never the
     person's own screen and never the private screen stream, and it lasts up to 30 minutes.
 - **Your own models** (AI on your own machines; contracts 0.219.0 `bot.command@1` kind `ai`, capability

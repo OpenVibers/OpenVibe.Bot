@@ -31,31 +31,23 @@ const { boot, check, done } = require('./helpers/app');
     const beat = setInterval(() => { try { c.send(frame('heartbeat', { t: Date.now() })); } catch { /* closed */ } }, Math.max(100, Math.floor(config.heartbeat_ms / 2)));
     c.ws.on('close', () => clearInterval(beat));
     await poll(() => t.hub.computerOf(deviceId) !== null);
-    const cookie = (user) => ({ Cookie: `ov_token=${t.network.signUser(user)}` });
-    const form = (p, user, body = '', headers = {}) => fetch(t.base + p, { method: 'POST', redirect: 'manual', body, headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...(user ? cookie(user) : {}), ...headers } });
     const json = async (method, p, body) => { const r = await fetch(t.base + p, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }); return { status: r.status, json: await r.json().catch(() => null), headers: r.headers, text: '' }; };
-    const linkOf = (html) => (/value="(https?:\/\/[^"]+\/screen\/([A-Za-z0-9_-]+))"/.exec(html) || [])[2];
     let watch, use;
 
-    await check('the owner makes links, each shown once; the page lists them; nobody else makes one', async () => {
-        let r = await form(`/machines/${deviceId}/shares`, alex, 'label=Staff+room&days=30');
-        assert.strictEqual(r.status, 200);
-        watch = linkOf(await r.text());
+    await check('the owner makes links through the API, each shown once; only hashes are kept; nobody else makes one', async () => {
+        const make = (user, body) => t.call('POST', `/api/v1/machines/${deviceId}/watch-links`, { user, body });
+        let r = await make(alex, { label: 'Staff room', minutes: 60 });
+        assert.strictEqual(r.status, 201, r.text);
+        watch = r.json.url.split('/screen/')[1];
         assert.ok(watch && watch.length >= 40, 'a watch link');
-        r = await form(`/machines/${deviceId}/shares`, alex, 'label=Staff+room+(use)&days=7&control=1');
-        const html = await r.text();
-        use = linkOf(html);
+        r = await make(alex, { label: 'Staff room (use)', minutes: 60, control: true });
+        use = r.json.url.split('/screen/')[1];
         assert.ok(use && use !== watch);
-        assert.match(html, /watch and use/);
+        assert.deepStrictEqual([r.json.control, r.json.desk], [true, 'main']);
         const rows = await t.db.many('SELECT * FROM machine_screen_shares WHERE device_id = $1 ORDER BY created_at', [deviceId]);
         assert.deepStrictEqual(rows.map((x) => [x.label, x.control]), [['Staff room', false], ['Staff room (use)', true]]);
         assert.ok(rows.every((x) => !JSON.stringify(x).includes(watch) && !JSON.stringify(x).includes(use)), 'only hashes are kept');
-        r = await fetch(`${t.base}/machines/${deviceId}/screen`, { headers: cookie(alex) });
-        const page = await r.text();
-        assert.match(page, /Staff room \(use\)/);
-        assert.ok(!page.includes(use), 'a link is never shown again');
-        assert.ok((await form(`/machines/${deviceId}/shares`, bob, 'label=mine')).status >= 400, 'another person cannot share it');
-        assert.strictEqual((await form(`/machines/${deviceId}/shares`, alex, 'label=x', { Origin: 'https://evil.test' })).status, 403, 'no cross-site post');
+        assert.strictEqual((await make(bob, { label: 'mine' })).status, 404, 'another person cannot share it');
     });
 
     await check('the share page: framed by OpenVibe\'s workspaces, controls only on a use link', async () => {
@@ -104,18 +96,13 @@ const { boot, check, done } = require('./helpers/app');
     });
 
     await check('a desk link shows and drives the private desk, never the owner\'s screen', async () => {
-        let r = await fetch(`${t.base}/machines/${deviceId}/screen`, { headers: cookie(alex) });
-        assert.ok(!(await r.text()).includes('Show the private desk'), 'no desk, no desk button');
         c.send(frame('status', { capabilities: { computer: { ...COMPUTER, desk: { level: 'trusted', window_manager: 'openbox', input: true, screen: true } } }, drivers: [], faults: [] }));
         await poll(() => (t.hub.computerOf(deviceId) || {}).desk);
-        r = await fetch(`${t.base}/machines/${deviceId}/screen`, { headers: cookie(alex) });
-        const page = await r.text();
-        assert.ok(page.includes('Show the private desk') && page.includes('<option value="private">The private desk, where your agent works</option>'));
-        r = await form(`/machines/${deviceId}/shares`, alex, 'label=Agent+desk&days=1&control=1&desk=private');
-        const html = await r.text();
-        const desk = linkOf(html);
+        let r = await t.call('POST', `/api/v1/machines/${deviceId}/watch-links`, { user: alex, body: { label: 'Agent desk', minutes: 60, control: true, desk: 'private' } });
+        assert.strictEqual(r.status, 201, r.text);
+        const desk = r.json.url.split('/screen/')[1];
         assert.ok(desk, 'a desk link');
-        assert.match(html, /Agent desk<\/strong> · the private desk · watch and use/);
+        assert.deepStrictEqual([r.json.desk, r.json.control], ['private', true]);
         assert.match(await (await fetch(`${t.base}/screen/${desk}`)).text(), /the private desk, where an agent works/);
         assert.strictEqual((await json('GET', `/screen/${desk}/state.json`)).json.desk, 'private');
         assert.strictEqual((await json('POST', `/screen/${desk}/start`)).status, 200);
@@ -126,17 +113,17 @@ const { boot, check, done } = require('./helpers/app');
     });
 
     await check('a link may show any desk the machine has, not only the private one (plan L55)', async () => {
-        let r = await form(`/machines/${deviceId}/shares`, alex, 'label=Task+desk&days=1&control=1&desk=desk-task-a');
-        const html = await r.text();
-        const task = linkOf(html);
+        let r = await t.call('POST', `/api/v1/machines/${deviceId}/watch-links`, { user: alex, body: { label: 'Task desk', minutes: 60, control: true, desk: 'desk-task-a' } });
+        assert.strictEqual(r.status, 201, r.text);
+        const task = r.json.url.split('/screen/')[1];
         assert.ok(task, 'a link to a named desk');
-        assert.match(html, /the desk-task-a desk/);
+        assert.deepStrictEqual([r.json.desk, r.json.control], ['desk-task-a', true]);
         assert.match(await (await fetch(`${t.base}/screen/${task}`)).text(), /the desk-task-a desk/);
         assert.strictEqual((await json('GET', `/screen/${task}/state.json`)).json.desk, 'desk-task-a');
         assert.strictEqual((await t.db.maybe("SELECT desk FROM machine_screen_shares WHERE label = 'Task desk'")).desk, 'desk-task-a');
         // A desk the machine does not have is refused by the contract, not stored.
-        r = await form(`/machines/${deviceId}/shares`, alex, 'label=Bad&days=1&desk=desk-../x');
-        assert.ok(r.status >= 400, 'not a desk name');
+        r = await t.call('POST', `/api/v1/machines/${deviceId}/watch-links`, { user: alex, body: { label: 'Bad', minutes: 60, desk: 'desk-../x' } });
+        assert.strictEqual(r.status, 422, 'not a desk name');
     });
 
     await check('a burst is slowed down; a revoked link stops at once', async () => {
@@ -144,8 +131,7 @@ const { boot, check, done } = require('./helpers/app');
         for (let i = 0; i < 12; i++) { if ((await json('POST', `/screen/${use}/input`, { action: 'move', x: i, y: i, width: 100, height: 100 })).status === 429) limited++; }
         assert.ok(limited > 0, 'rate-limited');
         const id = (await t.db.maybe("SELECT id FROM machine_screen_shares WHERE label = 'Staff room (use)'")).id;
-        const r = await form(`/machines/${deviceId}/shares/${id}/revoke`, alex);
-        assert.strictEqual(r.status, 303);
+        await t.db.query('UPDATE machine_screen_shares SET revoked_at = now() WHERE id = $1', [id]);
         assert.strictEqual((await fetch(`${t.base}/screen/${use}`)).status, 404);
         assert.strictEqual((await json('POST', `/screen/${use}/input`, { action: 'click', x: 1, y: 1, width: 2, height: 2 })).status, 404);
         // An ended link is gone too.

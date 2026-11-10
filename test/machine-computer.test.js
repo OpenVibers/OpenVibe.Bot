@@ -325,80 +325,23 @@ const { boot, check, done } = require('./helpers/app');
         assert.strictEqual((await cmd(mine.deviceId, { kind: 'screen', value: {} }, asActor(token, alex.subject))).status, 403, 'off again');
     });
 
-    await check('the machines page shows the level and the agent switch; only the owner flips it, same-site only', async () => {
-        const cookie = (user) => ({ Cookie: `ov_token=${t.network.signUser(user)}` });
-        const form = (p, user, body, headers = {}) => fetch(t.base + p, { method: 'POST', redirect: 'manual', body, headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...cookie(user), ...headers } });
-        const html = await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text();
-        assert.match(html, /Computer: Trusted/);
-        assert.match(html, /terminal, files, screen, mouse and keyboard/);
-        assert.match(html, /Let my agent use this computer/);
-        assert.strictEqual((await form(`/machines/${mine.deviceId}/agent-computer`, alex, 'on=1', { Origin: 'https://evil.test' })).status, 403);
-        assert.strictEqual((await form(`/machines/${mine.deviceId}/agent-computer`, bob, 'on=1')).status, 404);
-        assert.strictEqual((await form(`/machines/${mine.deviceId}/agent-computer`, alex, 'on=1')).status, 303);
-        assert.strictEqual((await t.db.maybe('SELECT agent_computer FROM devices WHERE id = $1', [mine.deviceId])).agent_computer, true);
-        assert.match(await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text(), /Stop my agent using this computer/);
-        await form(`/machines/${mine.deviceId}/agent-computer`, alex, 'on=0');
-        assert.strictEqual((await t.db.maybe('SELECT agent_computer FROM devices WHERE id = $1', [mine.deviceId])).agent_computer, false);
+    await check('adding a machine is one API pairing with its install command', async () => {
+        const r = await t.call('POST', '/api/v1/machines/pairings', { user: alex, body: {} });
+        assert.strictEqual(r.status, 201, r.text);
+        assert.match(r.json.pairing.installer, /--pairing pair_/);
+        assert.match(r.json.pairing.installer, /--worker$/);
     });
 
-    await check('the machines page says what desks each machine runs, and offers to make a spare computer a desk host', async () => {
-        const cookie = (user) => ({ Cookie: `ov_token=${t.network.signUser(user)}` });
-        const desk = { level: 'trusted', window_manager: 'openbox', input: true, screen: true, named: true };
-        const host = await machine(alex, { files: COMPUTER.files, desk: { ...desk, max_desks: 4, kinds: ['desktop', 'browser'], profiles: true } });
-        const mac = await machine(alex, { ...COMPUTER, desk: { ...desk, window_manager: null, max_desks: 2, kinds: ['browser'] } });
-        // A machine's declared capabilities are saved as its status arrives: wait until both machines' are.
-        let html = '';
-        for (let i = 0; i < 20 && !(html.includes('sign-ins kept') && html.includes('browser desks at once')); i++) {
-            if (i) await t.wait(100);
-            html = await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text();
-        }
-        assert.ok(html.includes('Desks for your agents: 4 at once, or twice as many browser desks, sign-ins kept'), 'a desk host');
-        assert.ok(html.includes('Desks for your agents: 4 browser desks at once'), 'a Mac: browser desks only');
-        const add = await fetch(`${t.base}/machines`, { method: 'POST', redirect: 'manual', body: '', headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...cookie(alex) } });
-        assert.strictEqual(add.status, 201);
-        const page = await add.text();
-        assert.ok(page.includes('What should this computer do?') && page.includes('Make a spare computer a desk host'));
-        assert.strictEqual((page.match(/data-copy-source/g) || []).length, 4, 'every command has its own copy button');
-        const hostCmd = /<code[^>]*>(curl -fsSL [^<]+ --desk-host)<\/code>/.exec(page);
-        assert.ok(hostCmd, 'the desk host install command');
-        assert.ok(!hostCmd[1].includes('--worker'), 'a desk host never runs the job worker too');
-        assert.ok(page.includes('Use the models you run on it'), 'AI on your own machines (Link v0.28.0 --ai)');
-        const aiCmd = /<code[^>]*>(curl -fsSL [^<]+ --ai)<\/code>/.exec(page);
-        assert.ok(aiCmd && !aiCmd[1].includes('--worker'), 'the models install command');
-        host.c.close();
-        mac.c.close();
-    });
-
-    await check('a machine\'s desks page: its running desks to watch, take over or stop, for its owner only; stop is same-site only', async () => {
-        const cookie = (user) => ({ Cookie: `ov_token=${t.network.signUser(user)}` });
+    await check('a machine reports how many desks run, for placement', async () => {
         const host = await machine(alex, { ...COMPUTER, desk: { level: 'trusted', window_manager: 'openbox', input: true, screen: true, named: true, max_desks: 4, kinds: ['desktop', 'browser'] } });
-        // Telemetry samples are kept at most twice a second: this one comes after the machine's first.
         await t.wait(600);
         host.c.send(frame('telemetry', { sensors: { computer_level: 'trusted', computer_waiting: 0, computer_running: 0, computer_desks: 2 } }));
-        assert.ok(await poll(async () => (await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text()).includes('2 desks running')), 'the card says how many run');
-        const list = await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text();
-        assert.ok(list.includes(`href="/machines/${host.deviceId}/desks"`), 'the card links its desks');
-        const api = await t.call('GET', '/api/v1/machines', { user: alex });
-        assert.strictEqual(api.json.machines.find((m) => m.id === host.deviceId).computer.desks_running, 2, 'the API says how many run, for placement');
-        const page = await fetch(`${t.base}/machines/${host.deviceId}/desks`, { headers: cookie(alex) });
-        assert.strictEqual(page.status, 200);
-        const html = await page.text();
-        assert.deepStrictEqual(seen.at(-1).value, { action: 'list' }, 'asked of the machine when the page opens');
-        assert.ok(html.includes('<code>desk-task-a</code>') && html.includes('Browser desk') && html.includes('Whole desk'));
-        assert.ok(html.includes(`href="/machines/${host.deviceId}/screen?desk=desk-task-a"`), 'Watch and take over that desk');
-        assert.ok(html.includes('name="desk" value="desk-task-a"'), 'its Stop');
-        assert.ok(html.includes(`action="/machines/${host.deviceId}/desks/live"`) && html.includes('Show live on my channel') && html.includes('signed-in pages included') && html.includes('Your followers are told you are live'), 'and, a second step away, live on the owner\'s channel (Desks plan D8)');
-        assert.ok(html.includes('At most 4 whole desks at once here'));
-        assert.strictEqual((await fetch(`${t.base}/machines/${host.deviceId}/desks`, { headers: cookie(bob) })).status, 404, 'nobody else');
-        const stop = (body, headers = {}) => fetch(`${t.base}/machines/${host.deviceId}/desks/stop`, { method: 'POST', redirect: 'manual', body, headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...cookie(alex), ...headers } });
-        assert.strictEqual((await stop('desk=desk-task-a', { Origin: 'https://evil.test' })).status, 403);
-        assert.strictEqual((await stop('desk=main')).status, 422, 'never the person\'s own screen');
-        assert.strictEqual((await stop('desk=desk-../x')).status, 422);
-        const done = await stop('desk=desk-task-a');
-        assert.strictEqual(done.status, 303);
-        assert.match(done.headers.get('location'), /\/desks\?stopped=desk-task-a$/);
-        assert.deepStrictEqual(seen.at(-1).value, { action: 'stop', desk: 'desk-task-a' });
-        assert.ok((await (await fetch(`${t.base}${done.headers.get('location')}`, { headers: cookie(alex) })).text()).includes('Stopped <code>desk-task-a</code>'));
+        const api = await poll(async () => {
+            const out = await t.call('GET', '/api/v1/machines', { user: alex });
+            const m = out.json.machines.find((x) => x.id === host.deviceId);
+            return m && m.computer.desks_running === 2 ? m : null;
+        });
+        assert.ok(api, 'the API says how many run, for placement');
         host.c.close();
     });
 
@@ -462,27 +405,7 @@ const { boot, check, done } = require('./helpers/app');
         await t.wait(600);
         const fast = (await t.call('GET', '/api/v1/machines', { user: alex })).json.machines.find((m) => m.id === own.deviceId);
         assert.deepStrictEqual(fast.computer.ai_speed, { model: 'qwen2.5-1.5b-instruct', tokens_per_s: 14.6 }, 'its speed, in the API');
-        let ownCard = '';
-        for (let i = 0; i < 20 && !ownCard.includes('qwen2.5-1.5b-instruct'); i++) {
-            if (i) await t.wait(100);
-            ownCard = await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text();
-        }
-        assert.ok(ownCard.includes('qwen2.5-1.5b-instruct'), 'the card shows its models');
-        assert.ok(ownCard.includes('about 15 tokens a second'), 'and how fast they answer there');
-        // Two machines whose models the owner's AI may use (gpu, switched on below, and this one once on): any of them.
-        await t.call('POST', `/api/v1/machines/${own.deviceId}/ai-models`, { user: alex, body: { on: true } });
-        await t.call('POST', `/api/v1/machines/${gpu.deviceId}/ai-models`, { user: alex, body: { on: true } });
-        const both = await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text();
-        assert.ok(both.includes('settings?own=node&amp;machine=any&amp;model='), 'with two, the link chooses any of them');
-        await t.call('POST', `/api/v1/machines/${own.deviceId}/ai-models`, { user: alex, body: { on: false } });
         own.c.close();
-        // The machines page: its models and the switch.
-        const html = await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text();
-        assert.ok(html.includes('llama3.1:8b'), 'its models');
-        assert.ok(html.includes("Stop my AI using this computer's models"), 'and the switch, on');
-        assert.ok(html.includes(`href="https://openvibe.chat/settings?own=node&amp;machine=${gpu.deviceId}&amp;model=llama3.1%3A8b#oc-ai-key">Use these models in OpenVibe.Chat</a>`), 'and where to use them');
-        await t.call('POST', `/api/v1/machines/${gpu.deviceId}/ai-models`, { user: alex, body: { on: false } });
-        assert.ok(!(await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text()).includes('Use these models in OpenVibe.Chat'), 'only while it is on');
         gpu.c.close();
     });
 

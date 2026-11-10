@@ -77,11 +77,9 @@ const { boot, check, done } = require('./helpers/app');
         assert.strictEqual(rows.length, 4, 'ignored events added no rows and the resend added none');
     });
 
-    await check('the owner’s machines page shows what the first job found', async () => {
-        const page = await (await get('/machines', alex)).text();
-        assert.ok(page.includes('First run'), page.slice(0, 500));
-        assert.ok(page.includes('8 CPUs') && page.includes('free disk') && page.includes('linux/amd64'), 'the machine figures are shown');
-        assert.ok(!page.includes('/home/alice'));
+    await check('the machines hub moved to Link: /machines answers 301', async () => {
+        const page = await get('/machines', alex);
+        assert.deepStrictEqual([page.status, page.headers.get('location')], [301, 'https://openvibe.link/machines']);
     });
 
     await check('only a reviewer reads the funnel, and it counts machines and the time between steps', async () => {
