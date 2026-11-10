@@ -37,6 +37,10 @@
  * | POST   /pair                                    | — (one-time code)      | the agent (code is the credential)  |
  * | POST   /claims                                  | — (anyone)             | a device asking to be added: a code |
  * | POST   /machines/:id/watch-links               | bot.machine.watch_link | the owner, or their agent for them |
+ * | POST   /machines/:id/agent-computer, watch-probe| — (the owner or the network's hub) | as the person |
+ * | POST   /machines/:id/screen                    | — (the owner or the network's hub) | the owner only |
+ * | GET    /machines/:id/desks, /shares            | — (the owner or the network's hub) | the owner only |
+ * | POST   /machines/:id/desks/:desk/stop, /live   | — (the owner or the network's hub) | the owner only |
  * | GET    /claims/:id                              | — (X-OV-Claim-Secret)  | that device: pending, or its pairing|
  *
  * With BOT_PAIRING_AUTHORITY=network the pairing codes are Network's and POST /pair answers 410 bot.pairing_moved.
@@ -53,7 +57,7 @@ const machineRoles = require('../machine-roles');
 const kits = require('../kits');
 const resourceIndex = require('./resource-index');
 const resourceControl = require('./resource-control');
-const { aiOf } = require('../machine-ai');
+const { aiOf, computerCaps } = require('../machine-ai');
 const deskLeases = require('./desk-leases');
 const agentSteps = require('../agent-steps');
 
@@ -538,7 +542,9 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
     }
     const machineOut = (device) => {
         const st = hub.deviceState(device.id);
-        const offered = hub.computerOf(device.id);
+        // Live first; offline, what the machine last declared (so its owner still sees and can turn off
+        // what it was allowed to do while it is away).
+        const offered = hub.computerOf(device.id) || computerCaps(device.capabilities);
         const sensors = st.telemetry && st.telemetry.sensors && typeof st.telemetry.sensors === 'object' ? st.telemetry.sensors : {};
         const pick = (cap) => (offered && offered[cap] && typeof offered[cap] === 'object' ? offered[cap] : null);
         return {
@@ -566,6 +572,9 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
                 waiting: Number.isInteger(sensors.computer_waiting) ? sensors.computer_waiting : null,
                 // Desks running now (the Link's telemetry): where an agent's next desk has room (Desks plan D6, placement).
                 desks_running: Number.isInteger(sensors.computer_desks) ? sensors.computer_desks : null,
+                // Whether its screen is being shown right now (the Link's telemetry, as the deleted page read it): the
+                // hub offers Watch instead of Show when it is live.
+                screen_stream: sensors.computer_screen_stream === 'live' ? 'live' : 'off',
                 // How fast its last model answered there (Link v0.29.0's ai plugin): for choosing where a model runs.
                 ai_speed: typeof sensors.ai_tokens_per_s === 'number' && sensors.ai_tokens_per_s > 0 && typeof sensors.ai_model === 'string'
                     ? { model: sensors.ai_model.slice(0, 120), tokens_per_s: sensors.ai_tokens_per_s } : null,
@@ -578,7 +587,9 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
      */
     const machineRunning = async (device) => {
         const st = hub.deviceState(device.id);
-        const offered = hub.computerOf(device.id);
+        // Live first; offline, what the machine last declared (so its owner still sees and can turn off
+        // what it was allowed to do while it is away).
+        const offered = hub.computerOf(device.id) || computerCaps(device.capabilities);
         const sensors = st.telemetry && st.telemetry.sensors && typeof st.telemetry.sensors === 'object' ? st.telemetry.sensors : {};
         const ai = offered && offered.ai && typeof offered.ai === 'object' ? offered.ai : null;
         const out = [];
@@ -640,15 +651,17 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         res.set('Cache-Control', 'no-store');
         res.json({ machine_id: device.id, desk, ...hub.deskTurn(device.id, desk) });
     }));
-    // The live screen (plan T14): the machine's owner, signed in as themselves, watches it on their own private stream.
-    // Never an agent, a watch or another service: screen_stream is not a bot.command@1 kind, and only this route sends it.
+    // The live screen (plan T14): the machine's owner watches it on their own private stream, signed in as
+    // themselves, or the network's hub acting for them from their own session (plan L34). Never an agent, a watch
+    // or an app: screen_stream is not a bot.command@1 kind, and only these routes send it.
     const screenOwner = async (req) => {
-        if (req.principal.kind !== 'user') fail(403, 'bot.forbidden', 'only the machine\'s owner, signed in, shows its screen');
-        return computerMachine(req, { agentNeedsOptIn: false });
+        if (req.principal.kind === 'user') return { ...(await computerMachine(req, { agentNeedsOptIn: false })), principal: req.principal };
+        const { device, subject } = await hubMachine(req);
+        return { device, subject, principal: { kind: 'user', sub: subject } };
     };
     r.post('/machines/:id/screen', manage, wrap(async (req, res) => {
-        const { device, subject } = await screenOwner(req);
-        const out = await machineScreen.start(device, subject, req.principal, { seconds: req.body?.seconds, fps: req.body?.fps, desk: req.body?.desk, live: req.body?.live === true });
+        const { device, subject, principal } = await screenOwner(req);
+        const out = await machineScreen.start(device, subject, principal, { seconds: req.body?.seconds, fps: req.body?.fps, desk: req.body?.desk, live: req.body?.live === true });
         res.status(201).json({ machine_id: device.id, ...out });
     }));
     r.get('/machines/:id/screen', wrap(async (req, res) => {
@@ -657,13 +670,19 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         res.json({ machine_id: device.id, ...(await machineScreen.state(device, subject)) });
     }));
     r.delete('/machines/:id/screen', manage, wrap(async (req, res) => {
-        const { device, subject } = await screenOwner(req);
-        res.json({ machine_id: device.id, ...(await machineScreen.stop(device, subject, req.principal)) });
+        const { device, subject, principal } = await screenOwner(req);
+        res.json({ machine_id: device.id, ...(await machineScreen.stop(device, subject, principal)) });
     }));
-    // The owner lets their watches probe from the machine, or stops them (never Watch itself).
+    // The owner's own mouse or keyboard on the screen shown now ("Take over", Desks plan D4), as the deleted page
+    // did: sent as the owner, so Bot's person-first rule holds an agent off the screen while they use it.
+    r.post('/machines/:id/screen/input', manage, wrap(async (req, res) => {
+        const { device, subject } = await screenOwner(req);
+        res.json({ machine_id: device.id, ...(await machineScreen.input(device, subject, req.body || {})) });
+    }));
+    // The owner lets their watches probe from the machine, or stops them (never Watch itself). The network's hub
+    // does the same for the person from their own session (plan L34), never for an app acting for them.
     r.post('/machines/:id/watch-probe', manage, wrap(async (req, res) => {
-        if (req.principal.kind !== 'user') fail(403, 'bot.forbidden', 'only the machine\'s owner turns this on or off');
-        const { device } = await computerMachine(req, { agentNeedsOptIn: false });
+        const { device } = req.principal.kind === 'user' ? await computerMachine(req, { agentNeedsOptIn: false }) : await hubMachine(req);
         if (typeof req.body?.on !== 'boolean') fail(422, 'bot.invalid_input', 'on is true or false');
         const updated = await domain.machines.setWatchProbe(device.id, req.body.on);
         res.json({ machine: machineOut(updated) });
@@ -687,10 +706,10 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         const updated = await domain.machines.setAiModels(device.id, req.body.on);
         res.json({ machine: machineOut(updated) });
     }));
-    // The owner turns their agent's use of the machine on or off (never the agent itself).
+    // The owner turns their agent's use of the machine on or off (never the agent itself). The network's hub does
+    // the same for the person from their own session (plan L34), never for an app acting for them.
     r.post('/machines/:id/agent-computer', manage, wrap(async (req, res) => {
-        if (req.principal.kind !== 'user') fail(403, 'bot.forbidden', 'only the machine\'s owner turns this on or off');
-        const { device } = await computerMachine(req, { agentNeedsOptIn: false });
+        const { device } = req.principal.kind === 'user' ? await computerMachine(req, { agentNeedsOptIn: false }) : await hubMachine(req);
         if (typeof req.body?.on !== 'boolean') fail(422, 'bot.invalid_input', 'on is true or false');
         const updated = await domain.machines.setAgentComputer(device.id, req.body.on);
         res.json({ machine: machineOut(updated) });
@@ -810,6 +829,67 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         res.json({ machine: await machineView(revoked) });
     }));
 
+    // The desks running on the machine (the removed page's desk list): asked of the machine when the person
+    // opens them, never on a schedule, and only for named desks. Watching one is the screen route with its name;
+    // stopping one or putting it on the owner's Live channel is here.
+    const NAMED_DESK = (value) => {
+        const desk = String(value || '');
+        return machineScreen.DESK.test(desk) && desk !== 'main' ? desk : null;
+    };
+    r.get('/machines/:id/desks', wrap(async (req, res) => {
+        const { device, subject } = await hubMachine(req);
+        res.set('Cache-Control', 'private, no-store');
+        if (!hub || !hub.isOnline(device.id)) fail(409, 'bot.device_offline', 'the machine is offline: its desks stopped with it, or show here when it is back');
+        const offered = hub.computerOf(device.id);
+        if (!(offered && offered.desk)) fail(409, 'bot.computer_off', 'this machine runs no desks: it needs OpenVibe Link with the computer plugin');
+        const answer = await hub.machineCommand(device.id, { kind: 'user', sub: subject }, subject, { kind: 'desk', value: { action: 'list' }, ms: 8000 });
+        if (!answer || answer.result !== 'ack') {
+            fail(409, 'bot.device_refused', `the machine did not list its desks: ${(answer && (answer.reason || answer.result)) || 'no answer'}`.slice(0, 300));
+        }
+        const data = answer.data && typeof answer.data === 'object' ? answer.data : {};
+        const desks = (Array.isArray(data.desks) ? data.desks : [])
+            .filter((desk) => desk && NAMED_DESK(desk.desk)).slice(0, 50)
+            .map((desk) => ({
+                desk: String(desk.desk),
+                ...(typeof desk.kind === 'string' ? { kind: desk.kind.slice(0, 20) } : {}),
+                ...(Number.isInteger(desk.since) ? { since: desk.since } : {}),
+                ...(Number.isInteger(desk.width) ? { width: desk.width } : {}),
+                ...(Number.isInteger(desk.height) ? { height: desk.height } : {}),
+            }));
+        res.json({ machine_id: device.id, desks, max_desks: Number.isInteger(data.max_desks) ? data.max_desks : null });
+    }));
+    r.post('/machines/:id/desks/:desk/stop', manage, wrap(async (req, res) => {
+        const { device, subject } = await hubMachine(req);
+        const desk = NAMED_DESK(req.params.desk);
+        if (!desk) fail(422, 'bot.invalid_input', 'desk is private or desk-<name>');
+        if (!hub || !hub.isOnline(device.id)) fail(409, 'bot.device_offline', 'the machine is offline');
+        const answer = await hub.machineCommand(device.id, { kind: 'user', sub: subject }, subject, { kind: 'desk', value: { action: 'stop', desk }, ms: 15000 });
+        if (!answer || answer.result !== 'ack') {
+            fail(409, 'bot.device_refused', `the machine did not stop it: ${(answer && (answer.reason || answer.result)) || 'no answer'}`.slice(0, 300));
+        }
+        res.json({ machine_id: device.id, stopped: desk });
+    }));
+    // A desk on the owner's OpenVibe Live channel for up to 30 minutes (Desks plan D8): everyone can watch this
+    // one, so the hub says so before the person presses it, never on a page load.
+    r.post('/machines/:id/desks/:desk/live', manage, wrap(async (req, res) => {
+        const { device, subject } = await hubMachine(req);
+        const desk = NAMED_DESK(req.params.desk);
+        if (!desk) fail(422, 'bot.invalid_input', 'desk is private or desk-<name>');
+        const out = await machineScreen.start(device, subject, { kind: 'user', sub: subject }, { desk, live: true, seconds: machineScreen.limits.SECONDS.max });
+        res.status(201).json({ machine_id: device.id, ...out });
+    }));
+    // The screen links the owner made (the removed page listed them; an agent still makes them through
+    // POST /machines/:id/watch-links). Only what is live and unrevoked comes back, never the token itself.
+    r.get('/machines/:id/shares', wrap(async (req, res) => {
+        const { device, subject } = await hubMachine(req);
+        res.set('Cache-Control', 'private, no-store');
+        res.json({ machine_id: device.id, shares: await shares.list(device, subject) });
+    }));
+    r.delete('/machines/:id/shares/:share', manage, wrap(async (req, res) => {
+        const { device, subject } = await hubMachine(req);
+        const out = await shares.revoke(device, subject, req.params.share);
+        res.json({ machine_id: device.id, ...out });
+    }));
     // ── Steps (the owner's agent): plain step lines, run now as the owner and answered when they end ──
     // The owner themself, or an agent service (OpenVibe.Actor) acting for the owner of a robot with agent_control on.
     // Every step passes the same gate as a person's command (server/routines.js runSteps).
