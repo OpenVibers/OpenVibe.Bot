@@ -86,6 +86,26 @@ const buttonsOf = (profile, allowed = ['button']) => renderWidget(profile.widget
         assert.ok(branch.includes('now.has(1) && !pad.down.has(1)') && branch.includes('now.has(9) && !pad.down.has(9)'));
     });
 
+    await check('Q and E tilt the head where the robot has one: Q up, E down, through the head command, nothing on release', () => {
+        // Maticus, 2026-11-10: on LOOI they were bound to a `rotation` drive axis LOOI does not have, so they did nothing.
+        // The behaviour itself runs in a real browser in panel-head-keys-chrome.test.js (where Chrome and Playwright exist).
+        const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'panel.js'), 'utf8');
+        assert.ok(js.includes("const HEAD_KEYS = { KeyQ: 1, KeyE: -1 };"), 'Q is up, E is down');
+        assert.ok(js.includes("send('actuator', { name: el.dataset.actuator, value: next });"), 'the head slider\'s own command, with its identity, limits and deadline');
+        assert.ok(js.includes("el.value = String(next);"), 'the slider follows, so a drag starts where the keys left it');
+        assert.ok(js.includes("if (up === down) return headStop();") && js.includes("if (up === down) return;   // none, or both"), 'both held: nothing');
+        assert.ok(js.includes("head.timer = setInterval(headStep, Number(el && el.dataset.holdRepeat) || HOLD_MS);"), 'the slider\'s hold cadence (LOOI: 90 ms)');
+        assert.ok(js.includes("function headRelease(code) { if (!head.down.delete(code)) return; headRun(); }") && !/headRelease[\s\S]{0,200}send\('actuator'/.test(js), 'release sends nothing: head 0 is Center, not stop');
+        assert.ok(js.includes("window.addEventListener('ov-bot-release-all', headReleaseAll);") && js.includes("function stopDrive() {\n        headReleaseAll();"), 'blur, a hidden page, a lost socket, the e-stop and STOP stop it');
+        assert.ok(js.includes("if (textEntry(e.target)) return;"), 'never while typing');
+        assert.ok(js.includes("if (headSlider() && headEnabled()) { keys.add('KeyQ'); keys.add('KeyE'); keys.add('Space'); }"), 'the page around the frame is offered Q and E, also with no drive');
+        const looi = loadProfiles().get('looi');
+        const legend = renderWidget(looi.widgets.find((w) => w.type === 'drive'), { profile: looi, allowed_commands: ['drive', 'actuator'] });
+        assert.ok(legend.includes('<kbd>W A S D</kbd> or arrows to drive · <kbd>Q</kbd> / <kbd>E</kbd> to tilt · <kbd>Space</kbd> to stop.'), 'the legend on LOOI');
+        const sim = [...loadProfiles().values()].find((p) => p.commands && p.commands.drive && p.commands.drive.axes && p.commands.drive.axes.rotation && !((p.commands.actuator || {}).names || {}).head);
+        if (sim) assert.ok(renderWidget(sim.widgets.find((w) => w.type === 'drive'), { profile: sim, allowed_commands: ['drive'] }).includes('/ <kbd>E</kbd> to turn'), 'a drive with a rotation axis keeps Q / E to turn');
+    });
+
     await check('panel.js: the page around the frame gets the controls state and may send keys and its gamepad, nothing else', () => {
         const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'panel.js'), 'utf8');
         assert.ok(js.includes("const msg = { type: 'ov-bot-controls', robot_id: ROBOT_ID, active: keys.length > 0, keys, pad: keys.length > 0 };"));

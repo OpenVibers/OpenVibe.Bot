@@ -218,8 +218,12 @@ function renderWidget(w, { profile = {}, allowed_commands = [], signaling_url = 
     switch (w.type) {
         case 'drive': {
             const axes = (commands[kind] && commands[kind].axes) || {};
+            // What Q and E do on this robot (public/panel.js): tilt the head where it has one, else turn where the
+            // drive has a rotation axis, else nothing, and then the legend does not offer them.
+            const headName = ((commands.actuator && commands.actuator.names) || {}).head;
+            const qe = headName ? ' · <kbd>Q</kbd> / <kbd>E</kbd> to tilt' : axes.rotation ? ' · <kbd>Q</kbd> / <kbd>E</kbd> to turn' : '';
             inner = drivePad(axes, enabled)
-                + '<p class="hint"><kbd>W A S D</kbd> or arrows to drive, <kbd>Q</kbd> <kbd>E</kbd> to turn, <kbd>Space</kbd> to stop. '
+                + `<p class="hint"><kbd>W A S D</kbd> or arrows to drive${qe} · <kbd>Space</kbd> to stop. `
                 + `<span class="pad-hint" data-pad-hint>${icon('gamepad')} A gamepad works too: left stick drives, A sounds, B stops, Start is the e-stop.</span></p>`;
             break;
         }

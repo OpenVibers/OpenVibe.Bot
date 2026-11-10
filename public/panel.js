@@ -12,7 +12,7 @@
  * defence, never the way a panel stops a robot. Losing the socket, the window or the page releases everything.
  *
  *   joystick  pointer events with pointer capture, a deadzone; pointerup/cancel → a zero drive at once
- *   keyboard  arrows/WASD drive, Q/E rotate, Space stops (unchanged)
+ *   keyboard  arrows/WASD drive, Space stops; Q/E tilt the head where the robot has one (else they rotate)
  *   gamepad   polled on requestAnimationFrame only while a pad is connected and the page has focus: left stick
  *             (and d-pad) drive, right stick rotates when the drive has a rotation axis, A = the first tone,
  *             B = stop, Start = e-stop; gamepaddisconnected releases it all
@@ -634,6 +634,45 @@
         ArrowLeft: [['steer', 'x'], 0], KeyA: [['steer', 'x'], 0], ArrowRight: [['steer', 'x'], 1], KeyD: [['steer', 'x'], 1],
         KeyQ: [['rotation'], 0], KeyE: [['rotation'], 1],
     };
+    // Q and E tilt the head on a robot that has one (Maticus, 2026-11-10: on LOOI they were bound to a turn axis its
+    // drive does not have, so they did nothing). Q is up, E is down. They go through the head slider's own command
+    // (send('actuator', { name: 'head', value })): the same socket, identity, operator stamp, commissioned limits and
+    // per-command deadline as a drag. While a key is held a fresh command goes at the slider's hold cadence (LOOI: 90 ms),
+    // each one step on from the slider's own value, clamped to its range, and the slider moves with it, so a drag after the
+    // keys starts where the head is going (the slider sends absolute targets: no jump). Release sends nothing: head 0 is
+    // Center, not stop, and the last command's lease bounds what is left of the move. Q and E together: nothing. Blur, a
+    // hidden page, pagehide, STOP, the e-stop and a lost socket stop it (releaseAll and stopDrive).
+    const HEAD_KEYS = { KeyQ: 1, KeyE: -1 };
+    const headSlider = () => $('[data-actuator="head"]');
+    const head = { down: new Set(), timer: null };
+    const headEnabled = () => { const el = headSlider(); return !!el && !el.disabled && joined && allowed.includes('actuator'); };
+    function headStop() { if (head.timer) { clearInterval(head.timer); head.timer = null; } }
+    function headStep() {
+        const el = headSlider();
+        if (!el || !headEnabled()) { head.down.clear(); return headStop(); }
+        const up = head.down.has('KeyQ'), down = head.down.has('KeyE');
+        if (up === down) return headStop();
+        const lo = Number(el.min), hi = Number(el.max), step = Number(el.step) || (hi - lo) / 40;
+        const next = Math.round(Math.min(hi, Math.max(lo, Number(el.value) + (up ? step : -step))) * 1000) / 1000;
+        el.value = String(next);
+        send('actuator', { name: el.dataset.actuator, value: next });
+    }
+    function headRun() {
+        headStop();
+        const up = head.down.has('KeyQ'), down = head.down.has('KeyE');
+        if (up === down) return;   // none, or both: nothing moves and nothing is sent
+        headStep();
+        const el = headSlider();
+        head.timer = setInterval(headStep, Number(el && el.dataset.holdRepeat) || HOLD_MS);
+    }
+    function headPress(code) { if (!headEnabled()) return false; head.down.add(code); headRun(); return true; }
+    function headRelease(code) { if (!head.down.delete(code)) return; headRun(); }
+    function headReleaseAll() { head.down.clear(); headStop(); }
+    window.addEventListener('ov-bot-release-all', headReleaseAll);
+    /** A field the person types into (chat, a name): keys there are words, never controls. A slider or a button is not. */
+    const textEntry = (t) => !!t && (t.isContentEditable === true || /^(TEXTAREA|SELECT)$/.test(t.tagName || '')
+        || (t.tagName === 'INPUT' && !/^(range|checkbox|radio|button|submit|color)$/i.test(t.type || '')));
+
     /** A key → { axis: its end of the range } on the drive, or null when the drive has none of its axes. */
     function keyValue(code) {
         const k = KEYS[code];
@@ -661,6 +700,12 @@
     const profileKey = (e) => (e.remote || main.contains(document.activeElement)) &&
         $$('[data-button-key]').find((el) => !el.disabled && (el.dataset.buttonKey === e.code || el.dataset.buttonKey.toLowerCase() === e.key.toLowerCase()));
     function onKeyDown(e) {
+        if (HEAD_KEYS[e.code] && headSlider()) {
+            if (textEntry(e.target)) return;
+            e.preventDefault();
+            if (!e.repeat) headPress(e.code);
+            return;
+        }
         if (typing(e)) return;
         // Escape hands the keyboard back to the page (Live focuses its player), so the overlay never traps it.
         if (e.code === 'Escape' && BOT_VIEW !== 'panel') {
@@ -682,6 +727,7 @@
         if (button) { e.preventDefault(); if (!e.repeat) pressProfileButton(button, `key:${e.code}`); }
     }
     function onKeyUp(e) {
+        if (HEAD_KEYS[e.code]) headRelease(e.code);
         for (const [el, h] of buttonHolds) if (h.sources.has(`key:${e.code}`)) releaseProfileButton(el, `key:${e.code}`);
         if (KEYS[e.code]) keyRelease(e.code, `key:${e.code}`);
         if (KEY_DIR[e.code]) dirRelease(KEY_DIR[e.code], `key:${e.code}`);
@@ -690,6 +736,7 @@
     document.addEventListener('keyup', onKeyUp);
 
     function stopDrive() {
+        headReleaseAll();
         const h = holds.get(DRIVE);
         if (h) for (const source of [...h.src.keys()]) { if (source instanceof Element) releaseButton(source); else holdRelease(DRIVE, source); }
         for (const s of sticks) s.release();
@@ -896,6 +943,7 @@
     function controlKeys() {
         const keys = new Set();
         if (driveEnabled()) { for (const code of Object.keys(KEYS)) if (keyValue(code)) keys.add(code); keys.add('Space'); }
+        if (headSlider() && headEnabled()) { keys.add('KeyQ'); keys.add('KeyE'); keys.add('Space'); }
         if (buttonDrive && joined && allowed.includes('button')) for (const [code, dir] of Object.entries(KEY_DIR)) if (dirButton(dir)) keys.add(code);
         for (const el of $$('[data-button-key]')) if (!el.disabled) keys.add(el.dataset.buttonKey);
         return [...keys];
