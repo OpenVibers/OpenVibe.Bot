@@ -514,3 +514,37 @@ body.bot-mode-compact .bot-compact .bot-control { background: transparent; borde
 .bot-compact .bot-slider { position: static; flex: none; width: 108px; height: 44px; border-radius: 22px; padding: 0 8px; }
 .bot-compact .bot-slider input[type="range"] { writing-mode: initial; direction: ltr; width: 92px; height: 28px; }
 .bot-compact .bot-estop, .bot-compact .bot-more { position: static; flex: none; width: 44px; height: 44px; }
+
+/* ── The overlay over a short picture, and a stick you can see (Maticus, 2026-11-10: the joystick and head slider over
+   the stream "would be great for phone"). Live gives the framed page the picture less the player's bar: about 170 px
+   tall on a phone held upright, 220 px on its side. The controls take their size from the frame's own height, and the
+   e-stop and the way to the panel stand beside the slider instead of over it, so nothing overlaps at any size. ───── */
+.bot-overlay { --bot-sz: 132px; --bot-gap: 16px; }
+.bot-stick, .bot-slider { width: var(--bot-sz); height: var(--bot-sz); }
+.bot-slider { width: 44px; }
+.bot-slider input[type="range"] { height: calc(var(--bot-sz) - 20px); }
+@media (max-height: 300px) {
+  .bot-overlay { --bot-sz: clamp(84px, calc(100vh - 78px), 132px); --bot-gap: 10px; }
+  .bot-pill { top: calc(var(--bot-gap) + env(safe-area-inset-top)); left: calc(12px + env(safe-area-inset-left)); height: 32px; max-width: calc(100% - 132px); }
+  .bot-stick { left: calc(12px + env(safe-area-inset-left)); bottom: calc(var(--bot-gap) + env(safe-area-inset-bottom)); }
+  .bot-slider { right: calc(12px + env(safe-area-inset-right)); bottom: calc(var(--bot-gap) + env(safe-area-inset-bottom)); }
+  .bot-estop, .bot-more { right: calc(12px + 44px + 8px + env(safe-area-inset-right)); }
+  .bot-estop { top: calc(var(--bot-gap) + env(safe-area-inset-top)); }
+  .bot-more { top: calc(var(--bot-gap) + 52px + env(safe-area-inset-top)); }
+}
+/* The stick: a frosted base, a light thumb that reads on any picture, four soft direction marks; pressed, the thumb
+   takes the accent and a halo. */
+.bot-stick .stick-ring { inset: 14%; border: 1px solid rgba(255, 255, 255, 0.16); }
+.bot-stick .stick-cross { inset: 6%; opacity: 1; background:
+  radial-gradient(circle, rgba(255, 255, 255, 0.55) 0 2px, transparent 2.5px) 50% 0 / 8px 8px no-repeat,
+  radial-gradient(circle, rgba(255, 255, 255, 0.55) 0 2px, transparent 2.5px) 50% 100% / 8px 8px no-repeat,
+  radial-gradient(circle, rgba(255, 255, 255, 0.55) 0 2px, transparent 2.5px) 0 50% / 8px 8px no-repeat,
+  radial-gradient(circle, rgba(255, 255, 255, 0.55) 0 2px, transparent 2.5px) 100% 50% / 8px 8px no-repeat; }
+.bot-stick .stick-knob { width: 40%; background: radial-gradient(circle at 38% 32%, #ffffff, rgba(214, 222, 236, 0.86) 62%, rgba(170, 182, 204, 0.82));
+  border: 1px solid rgba(255, 255, 255, 0.85); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45), inset 0 -2px 4px rgba(0, 0, 0, 0.12); }
+.bot-stick .stick.active .stick-knob { background: radial-gradient(circle at 38% 32%, #dce8ff, var(--accent) 72%); border-color: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 28%, transparent), 0 6px 16px rgba(0, 0, 0, 0.5); }
+.bot-stick:has(.stick.active) { border-color: color-mix(in srgb, var(--accent) 55%, rgba(255, 255, 255, 0.14)); }
+/* The e-stop reads as one: a red ring and glyph on the same scrim. */
+.bot-estop { border-color: color-mix(in srgb, var(--danger) 70%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 18%, transparent); }
+.bot-pill[data-state="estop"] { border-color: color-mix(in srgb, var(--danger) 55%, rgba(255, 255, 255, 0.14)); }
