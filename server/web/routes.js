@@ -22,7 +22,8 @@
  *   POST /robots/:id/operators            the owner only: add a person by @username with a role → 303 to its panel
  *   POST /robots/:id/operators/:subject/remove   the owner only: remove a person (never the owner row) → 303
  *   POST /robots/:id/queue/leave          any signed-in person: leave the robot's turn queue → 303
- *   GET  /panel/panel.js, /panel/panel.css   the panel client and its sheet (public/, no build step)
+ *   GET  /panel/panel.js, /panel/embed-frame.js, /panel/panel.css   the panel client, the framed panel's theme and
+ *                          height adapter, and its sheet (public/, no build step)
  *
  * The panel and embed pages carry their own CSP (PANEL_CSP / embedCsp): the live camera plays the robot's
  * OpenRestream WebRTC session with the pinned mediasoup-client ESM build from esm.sh, so those two pages alone
@@ -228,6 +229,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     const asset = (file, type) => (req, res) => { res.setHeader('Cache-Control', cache.assetHeaders(req.path, { hashed: false })); res.type(type).sendFile(path.join(PUBLIC, file)); };
     r.get('/panel/panel.js', asset('panel.js', 'application/javascript'));
     r.get('/panel/panel.css', asset('panel.css', 'text/css'));
+    r.get('/panel/embed-frame.js', asset('embed-frame.js', 'application/javascript'));
     r.get('/panel/screen-share.js', asset('screen-share.js', 'application/javascript'));
     r.get('/panel/drive.js', asset('drive.js', 'application/javascript'));
     r.get('/panel/refused.js', asset('refused.js', 'application/javascript'));

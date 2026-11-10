@@ -1,18 +1,48 @@
 /* The signed-in pages' one sheet (no build step). A dark control-room look, mobile-first: every control at
    least 44 px, the e-stop always in view, and the panel laid out for a phone held either way. */
+/* The embeddable panel takes the page's tokens (public/embed-frame.js): --bg-primary, --bg-card, --text-primary,
+   --text-secondary, --accent, --accent-strong, --on-accent-strong, --border and --color-scheme. Without a message it
+   follows prefers-color-scheme with the network's default pair (Vibe dark, cloud light) below. */
 :root {
-  --bg: #0d1117; --surface: #161b22; --raised: #1f2630; --line: #2d3540; --text: #e6edf3; --muted: #8b96a3;
-  --accent: #3d8bfd; --accent-ink: #fff; --ok: #3fb950; --warn: #d29922; --danger: #e5484d; --danger-deep: #a3191e;
+  --bg: var(--bg-primary, #0d1117); --surface: var(--bg-card, #161b22); --raised: color-mix(in srgb, var(--surface) 84%, var(--text) 16%);
+  --line: var(--border, #2d3540); --text: var(--text-primary, #e6edf3); --muted: var(--text-secondary, #8b96a3);
+  --accent: #3d8bfd; --accent-ink: var(--on-accent, #fff); --ok: var(--success, #3fb950);
+  --warn: var(--warning, #d29922); --danger: var(--danger, #e5484d); --danger-deep: #a3191e;
   /* Filled controls with white text use the strong shades: white on --accent is 3.3:1 and on --danger 3.9:1, under
      WCAG AA's 4.5:1; these are 5.2:1 and 5.0:1 (the network's readable accent fills). */
   --fill-accent: var(--accent-strong, #2563eb); --on-fill-accent: var(--on-accent-strong, #fff); --fill-danger: #d0343a;
   --radius: 12px; --tap: 44px;
+  color-scheme: var(--color-scheme, dark);
+}
+/* The network's default theme (Vibe), followed until the page around the frame sends its own tokens. */
+html.embed-page {
+  --bg: var(--bg-primary, #0a0f1c); --surface: var(--bg-card, #131c2e);
+  --line: var(--border, #1f2d47); --text: var(--text-primary, #e6edf7); --muted: var(--text-secondary, #96a7c2);
+  --accent: #3b82f6;
+}
+@media (prefers-color-scheme: light) {
+  html.embed-page {
+    --bg: var(--bg-primary, #f0f5ff); --surface: var(--bg-card, #f5f8ff);
+    --line: var(--border, #d0d8ea); --text: var(--text-primary, #1a2040); --muted: var(--text-secondary, #4a5070);
+    --accent: #245dd5; --ok: var(--success-text, #157a3a); --warn: var(--warning-text, #935f07);
+    --danger: var(--danger-text, #c43838); --danger-deep: #9b1c1c; --fill-danger: #c43838;
+    color-scheme: light;
+  }
+}
+html[data-theme-mode="dark"] {
+  --ok: #3fb950; --warn: #d29922; --danger: #e5484d; --danger-deep: #a3191e; --fill-danger: #d0343a;
   color-scheme: dark;
+}
+html[data-theme-mode="light"] {
+  --ok: var(--success-text, #157a3a); --warn: var(--warning-text, #935f07);
+  --danger: var(--danger-text, #c43838); --danger-deep: #9b1c1c; --fill-danger: #c43838;
+  color-scheme: light;
 }
 *, *::before, *::after { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }
 body { margin: 0; min-height: 100vh; font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--text); background: var(--bg); }
+body.embed-page { min-height: 0; }
 a { color: var(--accent); }
 h1 { font-size: 1.5rem; line-height: 1.2; margin: 0 0 0.25rem; letter-spacing: -0.01em; }
 h2 { font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 0.75rem; }
@@ -28,7 +58,7 @@ button, .button {
   text-align: center;   /* a link styled as a button wraps its text like a button does */
   touch-action: manipulation; -webkit-tap-highlight-color: transparent; transition: background 0.12s, border-color 0.12s, transform 0.06s;
 }
-button:hover:not(:disabled), .button:hover { border-color: #46505d; }
+button:hover:not(:disabled), .button:hover { border-color: color-mix(in srgb, var(--line) 65%, var(--text) 35%); }
 button:active:not(:disabled) { transform: scale(0.97); }
 button.primary, .button.primary { background: var(--fill-accent); border-color: var(--fill-accent); color: var(--on-fill-accent); font-weight: 600; }
 button.quiet, .button.quiet { background: transparent; }
@@ -43,7 +73,7 @@ input[type="checkbox"] { width: 1.4rem; height: 1.4rem; min-height: 0; min-width
 .pill.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); }
 .dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--muted); flex: none; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 1rem; }
-.notice, .error { padding: 0.65rem 0.9rem; border-radius: 10px; background: rgba(210, 153, 34, 0.12); border: 1px solid rgba(210, 153, 34, 0.5); color: #f0d48a; }
+.notice, .error { padding: 0.65rem 0.9rem; border-radius: 10px; background: color-mix(in srgb, var(--warn) 12%, var(--bg)); border: 1px solid color-mix(in srgb, var(--warn) 50%, var(--line)); color: var(--warn); }
 
 /* Top bar */
 .topbar { display: flex; align-items: center; gap: 0.75rem; min-height: 3rem; padding: 0 max(1rem, env(safe-area-inset-left)); }
@@ -53,7 +83,7 @@ input[type="checkbox"] { width: 1.4rem; height: 1.4rem; min-height: 0; min-width
 .crumb::before { content: "/"; margin-right: 0.75rem; opacity: 0.5; }
 
 /* ── The e-stop: always in view; clear is calm, latched is unmistakable ──────────────────────────────── */
-.estop-banner { position: sticky; top: 0; z-index: 10; background: rgba(13, 17, 23, 0.94); border-bottom: 1px solid var(--line); backdrop-filter: blur(8px); }
+.estop-banner { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--bg) 94%, transparent); border-bottom: 1px solid var(--line); backdrop-filter: blur(8px); }
 .estop-bar { display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem max(1rem, env(safe-area-inset-right)) 0.6rem max(1rem, env(safe-area-inset-left)); }
 .estop-state { flex: 1; display: flex; align-items: center; gap: 0.5rem; margin: 0; font-weight: 600; min-width: 0; }
 .estop-note { font-weight: 400; color: inherit; opacity: 0.85; }
