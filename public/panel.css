@@ -437,3 +437,80 @@ main { padding: 1rem max(1rem, env(safe-area-inset-right)) calc(1.5rem + env(saf
 .share-screen.share-using { outline: 2px solid var(--accent); outline-offset: 2px; cursor: crosshair; }
 .share-controls { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
 .share-use { display: inline-flex; gap: 8px; align-items: center; }
+
+/* ── The controls on their own: over a picture (mode=overlay) or in one row (mode=compact) ───────────
+   The framed page is transparent and never takes a press outside a control: a page that puts it over a
+   stream clips the frame to the controls (the rectangles in ov-bot-size.hit) so everything else reaches the
+   picture. Each control carries its own soft dark scrim so it reads on any picture, and uses the panel's
+   existing tokens (the scrim, line and blur are the one shared recipe; no new palette). */
+html.bot-mode-overlay, html.bot-mode-overlay body,
+html.bot-mode-compact, html.bot-mode-compact body { background: transparent; }
+body.bot-mode-overlay, body.bot-mode-compact { margin: 0; min-height: 0; overflow: hidden; pointer-events: none; }
+body.bot-mode-overlay main#panel.bot-surface { position: fixed; inset: 0; margin: 0; padding: 0; max-width: none; background: transparent; }
+body.bot-mode-compact main#panel.bot-surface { margin: 0; padding: 0; max-width: none; background: transparent; display: grid; align-items: center; }
+.bot-surface:focus { outline: none; }
+.bot-overlay, .bot-compact { pointer-events: none; }
+.bot-control {
+  pointer-events: auto; color: #fff; background: rgba(8, 12, 22, 0.42);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+.bot-overlay { position: absolute; inset: 0; transition: opacity 0.25s ease; }
+.bot-overlay.is-idle { opacity: 0.45; }
+@media (prefers-reduced-motion: reduce) { .bot-overlay { transition: none; } }
+
+/* The robot's name and state, one small pill at the top left. */
+.bot-pill {
+  position: absolute; top: calc(16px + env(safe-area-inset-top)); left: calc(16px + env(safe-area-inset-left));
+  display: inline-flex; align-items: center; gap: 8px; max-width: calc(100% - 152px); height: 36px; padding: 0 12px;
+  border-radius: 999px; font-size: 12px; line-height: 1; white-space: nowrap;
+}
+.bot-pill .dot { width: 8px; height: 8px; }
+.bot-pill-name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; }
+.bot-pill-state { color: rgba(255, 255, 255, 0.78); overflow: hidden; text-overflow: ellipsis; }
+.bot-pill[data-state="online"] .dot { background: var(--ok); }
+.bot-pill[data-state="turn"] .dot { background: var(--accent); }
+.bot-pill[data-state="busy"] .dot { background: var(--warn); }
+.bot-pill[data-state="offline"] .dot, .bot-pill[data-state="estop"] .dot { background: var(--danger); }
+
+/* The first stick, 132 px at the bottom left. The scrim is the circle; the stick itself is transparent. */
+.bot-stick {
+  position: absolute; left: calc(16px + env(safe-area-inset-left)); bottom: calc(16px + env(safe-area-inset-bottom));
+  width: 132px; height: 132px; border-radius: 50%; display: grid; place-items: center;
+}
+.bot-stick .bot-widget { width: 100%; height: 100%; margin: 0; padding: 0; border: 0; background: transparent; display: grid; place-items: center; min-width: 0; }
+.bot-stick .stick { width: 100%; height: 100%; background: transparent; border: 0; box-shadow: none; }
+.bot-stick .stick-ring { inset: 12%; border-color: rgba(255, 255, 255, 0.18); }
+
+/* The first slider, a 44 × 132 vertical track at the bottom right. */
+.bot-slider {
+  position: absolute; right: calc(16px + env(safe-area-inset-right)); bottom: calc(16px + env(safe-area-inset-bottom));
+  width: 44px; height: 132px; border-radius: 22px; display: grid; place-items: center; padding: 8px 0;
+}
+.bot-slider .bot-widget { width: 100%; height: 100%; margin: 0; padding: 0; border: 0; background: transparent; display: grid; place-items: center; min-width: 0; }
+.bot-slider input[type="range"] {
+  writing-mode: vertical-lr; direction: rtl; width: 28px; height: 112px; min-width: 0; min-height: 0;
+  margin: 0; padding: 0; accent-color: var(--accent);
+}
+
+/* The e-stop, 44 px at the top right, and the way to the full panel under it. */
+.bot-estop, .bot-more {
+  position: absolute; right: calc(16px + env(safe-area-inset-right)); width: 44px; height: 44px; min-width: 44px; min-height: 44px;
+  padding: 0; border-radius: 50%; justify-content: center; font-size: 15px; font-weight: 700; letter-spacing: 0.04em;
+}
+.bot-estop { top: calc(16px + env(safe-area-inset-top)); color: var(--danger); }
+.bot-estop .icon { width: 22px; height: 22px; stroke-width: 2.4; }
+.bot-more { top: calc(68px + env(safe-area-inset-top)); font-size: 16px; line-height: 1; }
+
+/* One row for a narrow card: the pill, a 96 px stick, the slider across, the e-stop and more. */
+.bot-compact {
+  display: flex; align-items: center; gap: 8px; min-height: 64px; padding: 8px 10px; border-radius: 16px;
+  background: rgba(8, 12, 22, 0.42); border: 1px solid rgba(255, 255, 255, 0.14);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+body.bot-mode-compact .bot-compact .bot-control { background: transparent; border-color: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; }
+.bot-compact .bot-pill { position: static; flex: 1 1 auto; min-width: 0; max-width: none; height: 36px; padding: 0 6px; }
+.bot-compact .bot-stick { position: static; flex: none; width: 96px; height: 96px; border-radius: 50%; }
+.bot-compact .bot-slider { position: static; flex: none; width: 108px; height: 44px; border-radius: 22px; padding: 0 8px; }
+.bot-compact .bot-slider input[type="range"] { writing-mode: initial; direction: ltr; width: 92px; height: 28px; }
+.bot-compact .bot-estop, .bot-compact .bot-more { position: static; flex: none; width: 44px; height: 44px; }

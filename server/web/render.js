@@ -63,9 +63,9 @@ const icon = (name, cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24" ar
 const AXIS_ICONS = { throttle: ['down', 'up'], y: ['down', 'up'], steer: ['left', 'right'], x: ['left', 'right'], rotation: ['ccw', 'cw'], pan: ['left', 'right'], tilt: ['down', 'up'], zoom: ['minus', 'plus'] };
 const AXIS_NAME = { throttle: 'Forward / back', y: 'Forward / back', steer: 'Steer', x: 'Sideways', rotation: 'Turn on the spot', pan: 'Pan', tilt: 'Tilt', zoom: 'Zoom' };
 
-function page(title, body, { scripts = [], bodyClass = '', description = null, canonical = null, robots = null, htmlClass = '', colorScheme = 'dark' } = {}) {
+function page(title, body, { scripts = [], bodyClass = '', description = null, canonical = null, robots = null, htmlClass = '', htmlAttrs = '', colorScheme = 'dark' } = {}) {
     return `<!doctype html>
-<html lang="en"${htmlClass ? ` class="${esc(htmlClass)}"` : ''}>
+<html lang="en"${htmlClass ? ` class="${esc(htmlClass)}"` : ''}${htmlAttrs}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -145,14 +145,18 @@ const humanName = (name) => { const s = String(name).replace(/_/g, ' '); return 
 const HOLD_REPEAT_MS = { looi: { head: 90 } };
 const holdRepeatOf = (profileId, name) => { const v = (HOLD_REPEAT_MS[profileId] || {})[name]; return v ? Math.min(250, Math.max(75, v)) : 0; };
 
-function actuatorControl(name, a, enabled, profileId = '') {
+function numberRange(name, a, enabled, profileId = '') {
     const repeat = a.type === 'number' ? holdRepeatOf(profileId, name) : 0;
+    const [lo, hi] = a.range;
+    const start = Math.min(hi, Math.max(lo, 0));
+    return `<input type="range" min="${esc(lo)}" max="${esc(hi)}" step="${esc((hi - lo) / 40)}" value="${esc(start)}" data-actuator="${esc(name)}"${repeat ? ` data-hold-repeat="${esc(repeat)}"` : ''}${disabledUnless(enabled)}>`;
+}
+
+function actuatorControl(name, a, enabled, profileId = '') {
     const off = disabledUnless(enabled);
     const label = humanName(name);
     if (a.type === 'number') {
-        const [lo, hi] = a.range;
-        const start = Math.min(hi, Math.max(lo, 0));
-        return `<label class="control slider"><span class="control-name">${esc(label)}</span> <input type="range" min="${esc(lo)}" max="${esc(hi)}" step="${esc((hi - lo) / 40)}" value="${esc(start)}" data-actuator="${esc(name)}"${repeat ? ` data-hold-repeat="${esc(repeat)}"` : ''}${off}></label>`;
+        return `<label class="control slider"><span class="control-name">${esc(label)}</span> ${numberRange(name, a, enabled, profileId)}</label>`;
     }
     if (a.type === 'rgb') {
         return `<div class="control colour"><label><span class="control-name">${esc(label)}</span> <input type="color" value="#ffffff" data-rgb="${esc(name)}"${off}></label>`
@@ -555,8 +559,104 @@ ${field('max_turn', 'Top turn', own.max_turn != null ? own.max_turn : limits.max
 <button type="submit" class="primary">Commission this robot</button></form></section>`;
 }
 
-function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs = 150, mode = 'page', signedIn = true, streaming = null, people = null, signaling_url = null, profileForm = {}, tryIt = false, automation = null, parentOrigins = [], liveUrl = null, limitsInfo = null }) {
+
+// ── The same controls over a picture ({mode=overlay}) or in a narrow card ({mode=compact}) ───────────────
+// The embeddable panel normally draws the whole page. Over a stream it must draw only the live controls:
+// the first stick, the first slider, the e-stop and a way to the full panel. Which ones exist comes from the
+// robot's profile (commands + widgets), exactly as the full panel does; nothing here is robot-specific.
+const BOT_VIEWS = new Set(['panel', 'overlay', 'compact']);
+const botViewOf = (v) => (BOT_VIEWS.has(v) ? v : 'panel');
+const BOT_VIEW_MIN = { panel: [320, 480], overlay: [280, 196], compact: [320, 112] };
+
+/** The first stick the robot has: a drive joystick, a pan-tilt camera's, or a direction-button robot's. */
+function overlayStickMarkup(profile, allowed) {
+    const commands = profile.commands || {};
+    for (const w of profile.widgets || []) {
+        const kind = w.command ? w.command.kind : null;
+        const enabled = !!kind && allowed.includes(kind);
+        if (w.type === 'drive') {
+            const axes = (commands[kind] && commands[kind].axes) || {};
+            const x = STICK_X.find((a) => axes[a]);
+            const y = STICK_Y.find((a) => axes[a]);
+            if (!x && !y) continue;
+            const stick = {};
+            if (x) stick.x = x;
+            if (y) stick.y = y;
+            const label = [y && AXIS_NAME[y], x && AXIS_NAME[x]].filter(Boolean).join(' and ');
+            return `<section class="widget widget-drive bot-widget" data-widget="drive" data-command="${data(w.command)}">`
+                + `<div class="drive-pad" data-axes="${data(axes)}"><div class="stick" data-joystick="${data(stick)}" role="img" aria-label="${esc(`Joystick: ${label}. Drag and hold to drive.`)}"${enabled ? '' : ' aria-disabled="true"'}>`
+                + '<span class="stick-ring"></span><span class="stick-cross"></span><span class="stick-knob" data-knob></span></div></div></section>';
+        }
+        if (w.type === 'ptz') {
+            const axes = (commands[kind] && commands[kind].axes) || {};
+            if (!axes.pan || !axes.tilt) continue;
+            return `<section class="widget widget-ptz bot-widget" data-widget="ptz" data-command="${data(w.command)}">`
+                + `<div class="ptz-pad"><div class="stick stick--ptz" data-ptz-stick="${data({ x: 'pan', y: 'tilt' })}" data-axes="${data(axes)}" role="img" aria-label="Joystick: pan and tilt. Drag and hold to move the camera."${enabled ? '' : ' aria-disabled="true"'}>`
+                + '<span class="stick-ring"></span><span class="stick-cross"></span><span class="stick-knob" data-knob></span></div></div></section>';
+        }
+        if (w.type === 'buttons') {
+            const names = (commands.button && commands.button.names) || {};
+            const dirs = DIRECTION_BUTTONS.filter((d) => d.names.some((n) => names[n]));
+            if (dirs.length < 2) continue;
+            return `<section class="widget widget-buttons bot-widget" data-widget="buttons" data-command="${data(w.command || { kind: 'button' })}">`
+                + `<div class="stick stick--buttons" data-button-stick role="img" aria-label="${esc(`Joystick: presses ${dirs.map((d) => d.label).join(', ')}. Drag and hold to drive.`)}"${enabled ? '' : ' aria-disabled="true"'}>`
+                + '<span class="stick-ring"></span><span class="stick-cross"></span><span class="stick-knob" data-knob></span></div></section>';
+        }
+    }
+    return '';
+}
+
+/** The first actuator slider (a number range) any widget drives, e.g. the LOOI's head. */
+function overlaySlider(profile, allowed) {
+    const commands = profile.commands || {};
+    const names = (commands.actuator && commands.actuator.names) || {};
+    for (const w of profile.widgets || []) {
+        if (!['pan-tilt', 'servo', 'head', 'lift', 'lights', 'horn'].includes(w.type)) continue;
+        const kind = w.command ? w.command.kind : null;
+        for (const name of (w.command && w.command.names) || []) {
+            const a = names[name];
+            if (a && a.type === 'number') return { widget: w, name, actuator: a, enabled: !!kind && allowed.includes(kind) };
+        }
+    }
+    return null;
+}
+
+const botPill = (robot) => `<span class="bot-pill bot-control" data-bot-pill data-online-pill data-state="connecting" data-bot-hit><span class="dot"></span><b class="bot-pill-name">${esc(robot.name)}</b><span class="bot-pill-state" data-bot-state>Connecting…</span></span>`;
+const botEstop = (role) => (ESTOP_ROLES.has(role)
+    ? `<button type="button" class="bot-estop bot-control" data-estop data-bot-hit aria-label="E-stop" title="E-stop">${icon('stop')}</button>` : '');
+const botMore = '<button type="button" class="bot-more bot-control" data-bot-more data-bot-hit aria-label="More controls" title="Open the full panel"><span aria-hidden="true">•••</span></button>';
+
+/** The overlay/compact page: a transparent surface with only the controls, no topbar, header or widgets. */
+function renderBotSurface({ robot, profile, role, allowed_commands = [], holdResendMs = 150, view = 'overlay', parentOrigins = [] }) {
+    const stick = overlayStickMarkup(profile, allowed_commands);
+    const slider = overlaySlider(profile, allowed_commands);
+    const stop = botEstop(role);
+    const sliderLabel = slider ? esc(humanName(slider.name)) : '';
+    const sliderMarkup = slider
+        ? `<div class="bot-slider bot-control" data-bot-hit><section class="widget bot-widget" data-command="${data(slider.widget.command)}"><label class="control bot-range-label"><span class="sr-only">${sliderLabel}</span>${numberRange(slider.name, slider.actuator, slider.enabled, profile.id)}</label></section></div>`
+        : '';
+    const stickMarkup = stick ? `<div class="bot-stick bot-control" data-bot-hit>${stick}</div>` : '';
+    const body = view === 'compact'
+        ? `<div class="bot-compact" data-bot-compact>${botPill(robot)}${stickMarkup}${sliderMarkup}${stop}${botMore}</div>`
+        : `<div class="bot-overlay" data-bot-overlay>${botPill(robot)}${stickMarkup}${sliderMarkup}${stop}${botMore}</div>`;
+    return `<main id="panel" class="bot-surface" tabindex="0" data-robot-id="${esc(robot.id)}" data-role="${esc(role)}" data-hold-ms="${esc(holdResendMs)}" data-allowed="${data(allowed_commands)}" data-bot-view="${esc(view)}"${parentOrigins.length ? ` data-parent-origins="${esc(parentOrigins.join(' '))}"` : ''}>${body}</main>`;
+}
+
+function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs = 150, mode = 'page', view = 'panel', signedIn = true, streaming = null, people = null, signaling_url = null, profileForm = {}, tryIt = false, automation = null, parentOrigins = [], liveUrl = null, limitsInfo = null }) {
     const embed = mode === 'embed';
+    const botView = embed ? botViewOf(view) : 'panel';
+    if (embed && botView !== 'panel') {
+        const [minWidth, minHeight] = BOT_VIEW_MIN[botView];
+        return page(robot.name, renderBotSurface({ robot, profile, role, allowed_commands, holdResendMs, view: botView, parentOrigins }), {
+            scripts: panelScripts(profile, false, true),
+            bodyClass: `embed-page bot-mode-${botView}`,
+            htmlClass: `embed-page bot-mode-${botView}`,
+            htmlAttrs: ` data-bot-view="${botView}" data-bot-min-width="${minWidth}" data-bot-min-height="${minHeight}"`,
+            colorScheme: 'dark light',
+        });
+    }
+    const minSize = BOT_VIEW_MIN.panel;
+    const htmlAttrs = embed ? ` data-bot-view="panel" data-bot-min-width="${minSize[0]}" data-bot-min-height="${minSize[1]}"` : '';
     const latched = !!(robot.estop && robot.estop.latched);
     const widgets = (profile.widgets || []).map((w, i) => ({ w, i }))
         .sort((a, b) => (a.w.order != null ? a.w.order : 1e9 + a.i) - (b.w.order != null ? b.w.order : 1e9 + b.i))
@@ -569,7 +669,7 @@ function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs
 ${embed ? '' : tryIt ? topbar('<span class="crumb">Try the panel</span>', '/') : topbar(`<span class="crumb">${esc(robot.name)}</span>`)}
 <div class="estop-bar"><p class="estop-state" role="status" aria-live="assertive"><span class="estop-dot"></span><span data-estop-state>${latched ? 'E-stop latched' : 'E-stop clear'}</span><span class="estop-note">${latched ? ' — the robot stays still until the owner clears it.' : ''}</span></p>${clear}${estop}</div>
 </header>
-<main id="panel" tabindex="0" data-robot-id="${esc(robot.id)}" data-role="${esc(role)}" data-hold-ms="${esc(holdResendMs)}" data-allowed="${data(allowed_commands)}"${tryIt ? ' data-transport="local"' : ''}${embed && parentOrigins.length ? ` data-parent-origins="${esc(parentOrigins.join(' '))}"` : ''}>
+<main id="panel" tabindex="0" data-robot-id="${esc(robot.id)}" data-role="${esc(role)}" data-hold-ms="${esc(holdResendMs)}" data-allowed="${data(allowed_commands)}"${tryIt ? ' data-transport="local"' : ''} data-bot-view="${esc(botView)}"${embed && parentOrigins.length ? ` data-parent-origins="${esc(parentOrigins.join(' '))}"` : ''}>
 <div class="panel-head">
 ${kit.pageHead({ title: `${robot.name}`, icon: 'gear', back: embed ? null : { href: '/', label: 'Home' } })}
 <p class="meta"><span class="pill online" data-online-pill data-state="connecting"><span class="dot"></span><span data-online-label>Connecting…</span></span> <span class="pill">${esc(profile.name || robot.profile_id)}</span> <span class="pill role" data-role-label>${esc(ROLE_LABEL[role] || role)}</span></p>
@@ -586,7 +686,7 @@ ${tryIt ? tryOutro(profile) : ''}${role === 'owner' && !embed && !tryIt ? `<div 
 </main>`;
     return page(tryIt ? 'Try the panel with a simulated rover' : robot.name, body, {
         scripts: panelScripts(profile, tryIt, embed), bodyClass: embed ? 'embed-page' : 'panel-page',
-        htmlClass: embed ? 'embed-page' : '', colorScheme: embed ? 'dark light' : 'dark',
+        htmlClass: embed ? 'embed-page' : '', htmlAttrs, colorScheme: embed ? 'dark light' : 'dark',
         description: tryIt ? TRY_DESCRIPTION : null, canonical: tryIt ? '/try' : null,
     });
 }

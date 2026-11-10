@@ -8,8 +8,12 @@
  *   ov-bot-theme  { tokens: { '--bg-primary', '--bg-card', '--text-primary', '--text-secondary', '--accent',
  *                             '--accent-strong', '--on-accent-strong', '--border', '--color-scheme' } }
  *                 → set each valid plain colour on <html>; --color-scheme must be 'dark' or 'light'.
- *   ov-bot-size   { height } ← the embed's own content height, sent on load and when it changes, at most five
- *                 times a second (a trailing edge, so the last size always goes).
+ *   ov-bot-size   { height, mode, minWidth, minHeight, hit? } ← the embed's own content height, its view, the size
+ *                 it needs, and for an overlay the rectangles the controls occupy (so the page can let presses
+ *                 through everywhere else), sent on load and when it changes, at most five times a second (a
+ *                 trailing edge, so the last size always goes).
+ *   ov-bot-mode   { mode: 'panel' | 'overlay' | 'compact' } → the frame reloads itself in that view, so a host can
+ *                 offer the same switch the query (?mode=) does without rebuilding the frame itself.
  *
  * Only the origins already trusted for the panel's other messages (the page's data-parent-origins, from
  * BOT_EMBED_ORIGINS) and only the window that frames it are accepted; a message from anywhere else is ignored.
@@ -28,6 +32,9 @@
     // url(), color-mix(), named colours or anything that could carry a second declaration.
     const COLOR_RE = /^(?:#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})|(?:rgb|rgba|hsl|hsla|hwb|lab|lch|oklab|oklch)\(\s*[0-9a-z.%+\-\s,/]+\))$/i;
     const SIZE_GAP_MS = 200;   // five a second
+    const MODES = ['panel', 'overlay', 'compact'];
+    // The smallest frame each view stays usable in; the server also writes these to <html> (data-bot-min-*).
+    const MIN_SIZE = { panel: { minWidth: 320, minHeight: 480 }, overlay: { minWidth: 280, minHeight: 196 }, compact: { minWidth: 320, minHeight: 112 } };
 
     function validColor(value) {
         return typeof value === 'string' && value.length <= MAX_LEN && COLOR_RE.test(value.trim());
@@ -36,6 +43,11 @@
     /** 'dark' | 'light' | null. */
     function validScheme(value) {
         return value === 'dark' || value === 'light' ? value : null;
+    }
+
+    /** 'panel' | 'overlay' | 'compact', or null. */
+    function validMode(value) {
+        return MODES.includes(value) ? value : null;
     }
 
     /** The tokens worth applying: only the known names, only plain colours, never inherited keys. */
@@ -70,6 +82,8 @@
         let stopAt = 0;
         let timer = 0;
         let lastHeight = -1;
+        let lastMode = null;
+        let lastHit = '';
 
         const measure = () => {
             const body = doc.body;
@@ -79,6 +93,30 @@
                 height = Math.max(height, body.scrollHeight || 0, Math.ceil(body.getBoundingClientRect().height));
             } catch { /* a document going away */ }
             return Math.max(0, Math.ceil(height));
+        };
+        const attr = (name) => {
+            try { return html.getAttribute ? html.getAttribute(name) : null; } catch { return null; }
+        };
+        const view = () => validMode(attr('data-bot-view')) || 'panel';
+        const sizes = (mode) => {
+            const fallback = MIN_SIZE[mode] || MIN_SIZE.panel;
+            const w = Number(attr('data-bot-min-width'));
+            const h = Number(attr('data-bot-min-height'));
+            return { minWidth: Number.isFinite(w) && w > 0 ? w : fallback.minWidth, minHeight: Number.isFinite(h) && h > 0 ? h : fallback.minHeight };
+        };
+        // The controls' own boxes, so a page can clip the transparent frame to them and let every other press
+        // reach the picture underneath. Only the overlay has anything worth reporting.
+        const hitAreas = (mode) => {
+            if (mode !== 'overlay' || !doc.querySelectorAll) return [];
+            const out = [];
+            for (const el of doc.querySelectorAll('[data-bot-hit]')) {
+                let r;
+                try { r = el.getBoundingClientRect(); } catch { continue; }
+                if (!r || !(r.width > 0) || !(r.height > 0)) continue;
+                out.push({ x: Math.max(0, Math.floor(r.left)), y: Math.max(0, Math.floor(r.top)), w: Math.ceil(r.width), h: Math.ceil(r.height) });
+                if (out.length >= 12) break;
+            }
+            return out;
         };
         const post = (message) => {
             for (const origin of targets) {
@@ -94,10 +132,17 @@
             }
             if (timer) { win.clearTimeout(timer); timer = 0; }
             const height = measure();
-            if (!force && height === lastHeight) return;
+            const mode = view();
+            const { minWidth, minHeight } = sizes(mode);
+            const hit = hitAreas(mode);
+            const hitKey = JSON.stringify(hit);
+            if (!force && height === lastHeight && mode === lastMode && hitKey === lastHit) return;
             stopAt = now;
             lastHeight = height;
-            post(robot ? { type: 'ov-bot-size', robot_id: robot, height } : { type: 'ov-bot-size', height });
+            lastMode = mode;
+            lastHit = hitKey;
+            const message = { ...(robot ? { robot_id: robot } : {}), type: 'ov-bot-size', height, mode, minWidth, minHeight, ...(hit.length ? { hit } : {}) };
+            post(message);
         };
 
         const onLoad = () => send(true);
@@ -105,8 +150,23 @@
         const onMessage = (e) => {
             if (!e || e.source !== win.parent || !targets.includes(e.origin)) return;
             const d = e.data;
-            if (!d || typeof d !== 'object' || d.type !== 'ov-bot-theme') return;
+            if (!d || typeof d !== 'object') return;
             if (robot && typeof d.robot_id === 'string' && d.robot_id !== robot) return;
+            if (d.type === 'ov-bot-mode') {
+                const mode = validMode(d.mode);
+                if (!mode || mode === view()) return;
+                // A view is server-rendered (its controls come from the profile), so the frame reloads itself in it:
+                // the page around it does not have to rebuild the iframe to switch modes.
+                try {
+                    const loc = win.location;
+                    if (!loc || typeof loc.href !== 'string') return;
+                    const u = new win.URL(loc.href);
+                    u.searchParams.set('mode', mode);
+                    loc.replace(u.href);
+                } catch { /* no location (a test's fake window) */ }
+                return;
+            }
+            if (d.type !== 'ov-bot-theme') return;
             const tokens = sanitizeTokens(d.tokens);
             for (const [name, value] of Object.entries(tokens)) html.style.setProperty(name, value);
             const scheme = validScheme(d.tokens && d.tokens['--color-scheme']);
@@ -137,5 +197,5 @@
         };
     }
 
-    return { TOKENS, validColor, validScheme, sanitizeTokens, validOrigin, start };
+    return { TOKENS, MODES, MIN_SIZE, validColor, validScheme, validMode, sanitizeTokens, validOrigin, start };
 });

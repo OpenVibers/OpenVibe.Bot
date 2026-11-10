@@ -910,7 +910,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         const role = await domain.members.roleOf(robot.id, me.subject);
         return role || (robot.access_policy === 'queue' ? 'queue' : null);
     }
-    async function sendPanel(res, robot, profile, role, mode = 'page', signedIn = true, profileForm = {}) {
+    async function sendPanel(res, robot, profile, role, mode = 'page', signedIn = true, profileForm = {}, view = 'panel') {
         await attachInProcess(robot, profile);
         const effective = domain.control.effectiveLimits(robot, profile);
         const { maxCommandMs } = effective;
@@ -943,7 +943,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         }
         const liveOrigin = (config.embed && config.embed.origins && config.embed.origins[0]) || null;
         res.type('html').send(renderPanel({
-            robot: presentForPage(robot), profile, role, mode, signedIn, streaming, people, signaling_url,
+            robot: presentForPage(robot), profile, role, mode, view, signedIn, streaming, people, signaling_url,
             profileForm, automation, limitsInfo,
             // The page that frames the embed may hand it a Drive ticket (public/panel.js); the owner's page offers to put
             // the panel under their Live stream.
@@ -1079,7 +1079,11 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         if (!role) return res.status(403).type('html').send(renderEmbedRefused({ robotId: robot.id, parentOrigins: (config.embed && config.embed.origins) || [] }));
         const profile = await profileOf(robot);
         if (!profile) throw new BotError(404, 'bot.profile_not_found', 'this robot has no profile');
-        return sendPanel(res, robot, profile, role, 'embed', !!req.viewer);
+        // ?mode=overlay|compact draws just the controls (a transparent surface for a page that puts it over a
+        // picture, or one row for a narrow card); panel is the full embed and the default. Anything else is panel.
+        const asked = String(req.query.mode || '').toLowerCase();
+        const view = ['overlay', 'compact'].includes(asked) ? asked : 'panel';
+        return sendPanel(res, robot, profile, role, 'embed', !!req.viewer, {}, view);
     }));
 
     return r;
