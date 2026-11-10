@@ -28,6 +28,7 @@ function fakeWin({ height = 300 } = {}) {
     const win = {
         document: { documentElement: html, body },
         parent,
+        URL,
         addEventListener(type, fn) { if (!listeners.has(type)) listeners.set(type, new Set()); listeners.get(type).add(fn); },
         removeEventListener(type, fn) { if (listeners.has(type)) listeners.get(type).delete(fn); },
         setTimeout(fn, ms) { const id = ++nextTimer; timers.set(id, { fn, at: Date.now() + ms }); return id; },
@@ -79,7 +80,7 @@ const themeMessage = (tokens, extra = {}) => ({ type: 'ov-bot-theme', robot_id: 
         const robot = { id: 'rob_x1', name: 'Rover', profile_id: 'sim.rover', estop: { latched: false } };
         const embed = renderPanel({ robot, profile, role: 'watcher', allowed_commands: [], mode: 'embed', signedIn: false, parentOrigins: [PARENT, 'https://www.openvibe.live'] });
         const at = (s) => embed.indexOf(s);
-        assert.ok(embed.includes('<html lang="en" class="embed-page">'), 'the embed follows prefers-color-scheme before the first token message');
+        assert.ok(embed.includes('<html lang="en" class="embed-page" data-bot-view="panel" data-bot-min-width="320" data-bot-min-height="480">'), 'the embed follows prefers-color-scheme before the first token message, and names its view');
         assert.ok(embed.includes('<meta name="color-scheme" content="dark light">'));
         assert.ok(at('/panel/embed-frame.js') > 0 && at('/panel/embed-frame.js') < at('/panel/panel.js'), 'the adapter loads before the panel client');
         assert.ok(embed.includes('data-parent-origins="https://openvibe.live https://www.openvibe.live"'));
@@ -94,7 +95,7 @@ const themeMessage = (tokens, extra = {}) => ({ type: 'ov-bot-theme', robot_id: 
     await check('start(): the height goes on load, and only a trusted, framing origin can set the colours', () => {
         const win = fakeWin({ height: 321 });
         const stop = EmbedFrame.start({ win, parents: [PARENT], robotId: 'rob_x' });
-        assert.deepStrictEqual(win.__posted, [[{ type: 'ov-bot-size', robot_id: 'rob_x', height: 321 }, PARENT]], 'one size on start, to the trusted origin');
+        assert.deepStrictEqual(win.__posted, [[{ robot_id: 'rob_x', type: 'ov-bot-size', height: 321, mode: 'panel', minWidth: 320, minHeight: 480 }, PARENT]], 'one size and view on start, to the trusted origin');
 
         // A stranger's message (another origin, another window, another robot) changes nothing.
         win.__fire('message', { origin: 'https://evil.example', source: win.parent, data: themeMessage({ '--bg-primary': '#111111' }) });
@@ -125,7 +126,7 @@ const themeMessage = (tokens, extra = {}) => ({ type: 'ov-bot-theme', robot_id: 
         assert.strictEqual(win.__posted.length, 1, 'nothing sooner than 200 ms');
         await new Promise((r) => setTimeout(r, 220));
         win.__tick();
-        assert.deepStrictEqual(win.__posted.at(-1)[0], { type: 'ov-bot-size', robot_id: 'rob_x', height: 420 });
+        assert.deepStrictEqual(win.__posted.at(-1)[0], { type: 'ov-bot-size', robot_id: 'rob_x', height: 420, mode: 'panel', minWidth: 320, minHeight: 480 });
         assert.ok(win.__posted.length <= 3, `at most about five a second, got ${win.__posted.length}`);
         win.__setHeight(300);
         win.__fire('resize', {});
@@ -135,6 +136,28 @@ const themeMessage = (tokens, extra = {}) => ({ type: 'ov-bot-theme', robot_id: 
         stop();
         assert.strictEqual(win.__observer().gone, true, 'stop() disconnects the observer');
         assert.strictEqual(win.__listeners.get('resize').size, 0);
+    });
+
+    await check('start(): the view and its minimum size come from the page; a host message changes the view by reload', () => {
+        const win = fakeWin({ height: 220 });
+        win.__attrs['data-bot-view'] = 'overlay';
+        win.__attrs['data-bot-min-width'] = '280';
+        win.__attrs['data-bot-min-height'] = '196';
+        win.location = { href: 'https://openvibe.bot/panel/rob_x/embed?mode=overlay', replaced: [], replace(u) { this.replaced.push(u); } };
+        const stop = EmbedFrame.start({ win, parents: [PARENT], robotId: 'rob_x' });
+        assert.deepStrictEqual(win.__posted[0][0], { robot_id: 'rob_x', type: 'ov-bot-size', height: 220, mode: 'overlay', minWidth: 280, minHeight: 196 }, 'the overlay names its view and wanted size');
+        // A stranger cannot reload it, another robot cannot, and an unknown mode is ignored.
+        win.__fire('message', { origin: 'https://evil.example', source: win.parent, data: { type: 'ov-bot-mode', mode: 'panel', robot_id: 'rob_x' } });
+        win.__fire('message', { origin: PARENT, source: {}, data: { type: 'ov-bot-mode', mode: 'panel', robot_id: 'rob_x' } });
+        win.__fire('message', { origin: PARENT, source: win.parent, data: { type: 'ov-bot-mode', mode: 'panel', robot_id: 'rob_other' } });
+        win.__fire('message', { origin: PARENT, source: win.parent, data: { type: 'ov-bot-mode', mode: 'huge', robot_id: 'rob_x' } });
+        assert.deepStrictEqual(win.location.replaced, []);
+        // The page that frames it switches to the full panel: the frame reloads itself in that view (no host rebuild).
+        win.__fire('message', { origin: PARENT, source: win.parent, data: { type: 'ov-bot-mode', mode: 'panel', robot_id: 'rob_x' } });
+        assert.deepStrictEqual(win.location.replaced, ['https://openvibe.bot/panel/rob_x/embed?mode=panel']);
+        win.__fire('message', { origin: PARENT, source: win.parent, data: { type: 'ov-bot-mode', mode: 'overlay', robot_id: 'rob_x' } });
+        assert.strictEqual(win.location.replaced.length, 1, 'the current view is not reloaded');
+        stop();
     });
 
     await check('start(): an unframed page or one with no trusted parents does nothing', () => {

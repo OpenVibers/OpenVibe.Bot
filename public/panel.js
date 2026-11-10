@@ -277,6 +277,22 @@
     let myRole = null;   // the role the joined frame gave this panel (owner, operator, viewer, queue)
     let retry = 0;
     let gone = false;          // refused for good (no access): no reconnect
+    // The embeddable panel's two compact views (?mode=overlay|compact): only the live controls, over a picture or
+    // in one row. The controls fade after four seconds without a touch, and come back on the first one.
+    const BOT_VIEW = main.dataset.botView || 'panel';
+    const botSurface = $('[data-bot-overlay], [data-bot-compact]');
+    let botIdle = 0;
+    function botWake() {
+        if (BOT_VIEW !== 'overlay' || !botSurface) return;
+        botSurface.classList.remove('is-idle');
+        clearTimeout(botIdle);
+        botIdle = setTimeout(() => botSurface.classList.add('is-idle'), 4000);
+    }
+    if (BOT_VIEW === 'overlay' && botSurface) {
+        for (const ev of ['pointermove', 'pointerdown', 'touchstart', 'keydown']) document.addEventListener(ev, botWake, { passive: true });
+        botWake();
+    }
+    if (BOT_VIEW !== 'panel') main.addEventListener('pointerdown', () => { try { main.focus({ preventScroll: true }); } catch { /* older browser */ } });
 
     const commandOf = (el) => { const s = el.closest('[data-command]'); return s ? JSON.parse(s.dataset.command) : null; };
     const kindOf = (el) => { const c = commandOf(el); return c ? c.kind : null; };
@@ -646,6 +662,13 @@
         $$('[data-button-key]').find((el) => !el.disabled && (el.dataset.buttonKey === e.code || el.dataset.buttonKey.toLowerCase() === e.key.toLowerCase()));
     function onKeyDown(e) {
         if (typing(e)) return;
+        // Escape hands the keyboard back to the page (Live focuses its player), so the overlay never traps it.
+        if (e.code === 'Escape' && BOT_VIEW !== 'panel') {
+            releaseAll();
+            try { main.blur(); if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch { /* */ }
+            for (const origin of PARENTS) { try { window.parent.postMessage({ type: 'ov-bot-blur-controls', robot_id: ROBOT_ID }, origin); } catch { /* not that origin */ } }
+            return;
+        }
         const focusedButton = e.target.closest && e.target.closest('[data-button-name]');
         if (focusedButton && (e.code === 'Enter' || e.code === 'Space')) {
             e.preventDefault(); if (!e.repeat) pressProfileButton(focusedButton, `key:${e.code}`); return;
@@ -939,6 +962,22 @@
         const online = $('[data-online-label]');
         if (online) online.textContent = label;
     }
+    /** The overlay's one-line state: e-stop, offline, your turn, someone else's turn, or just online. */
+    function paintBotPill(state) {
+        const pill = $('[data-bot-pill]');
+        if (!pill) return;
+        const latched = !!(state.estop && state.estop.latched);
+        const held = !!(state.device_estop && state.device_estop.latched && state.device_estop.local);
+        const queue = state.queue;
+        let label = 'Online'; let dataState = 'online';
+        if (latched || held) { label = 'E-stop on'; dataState = 'estop'; }
+        else if (!state.online) { label = 'Offline'; dataState = 'offline'; }
+        else if (queue && queue.active) { label = 'Your turn'; dataState = 'turn'; }
+        else if (queue && queue.turn_ends_at) { label = 'Someone else driving'; dataState = 'busy'; }
+        const text = $('[data-bot-state]');
+        if (text) text.textContent = label;
+        pill.dataset.state = dataState;
+    }
     function paint(state) {
         if (!state) return;
         const latched = !!(state.estop && state.estop.latched);
@@ -964,6 +1003,7 @@
         if (latched || held) releaseAll();
         paintFaults(state);
         setOnline(state.online ? 'online' : 'offline', state.online ? 'Online' : 'Device offline');
+        paintBotPill(state);
         main.dataset.deviceOnline = String(!!state.online);
         if (state.telemetry) lastTelemetryAt = performance.now();
         else if (!state.online) lastTelemetryAt = 0;
@@ -1111,6 +1151,14 @@
     const framed = window.parent !== window && PARENTS.length > 0;
     // The page around the frame (OpenVibe.Live) sets the panel's colours and gets its height: public/embed-frame.js.
     if (framed && window.EmbedFrame) window.EmbedFrame.start({ parents: PARENTS, robotId: ROBOT_ID });
+    // The overlay's "more" asks the page for the full panel (Live switches the card to under the video).
+    for (const el of $$('[data-bot-more]')) {
+        el.addEventListener('click', () => {
+            for (const origin of PARENTS) {
+                try { window.parent.postMessage({ type: 'ov-bot-open-panel', robot_id: ROBOT_ID }, origin); } catch { /* not that origin */ }
+            }
+        });
+    }
     let parentSilent = false;
     let asked = null;
     let popup = null;
@@ -1135,6 +1183,8 @@
         const fromParent = framed && e.source === window.parent && PARENTS.includes(e.origin);
         if (!fromPopup && !fromParent) return;
         const d = e.data || {};
+        // The page says the pointer moved on it (the empty parts of the overlay are click-through there): wake.
+        if (fromParent && d.type === 'ov-bot-activity') { botWake(); return; }
         // The page's keys and gamepad while this panel drives (announceControls): the same handlers as this frame's own.
         // A key's release always goes through, so nothing stays held when driving ends between press and release.
         if (fromParent && d.robot_id === ROBOT_ID && d.type === 'ov-bot-key' && typeof d.code === 'string') {
