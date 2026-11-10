@@ -1131,9 +1131,12 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             }
             pendingCmds.clear();
             inflight.clear();
-            for (const conn of [...deviceConns.values()]) { try { conn.ws.close(1001, 'server closing'); } catch { /* gone */ } }
-            for (const set of subsByRobot.values()) for (const conn of set) { try { conn.ws.close(1001, 'server closing'); } catch { /* gone */ } }
-            for (const conn of watchConns) { try { conn.ws.close(1001, 'server closing'); } catch { /* gone */ } }
+            // 1012 Service Restart (RFC 6455's registry), not 1001 Going Away: Bot stops only to start again (a deploy takes
+            // about a second), so every client should reconnect at once and then back off. LOOI's node read the old 1001
+            // as link_lost and stayed down after a deploy on 2026-11-10 at 12:24:05 UTC.
+            for (const conn of [...deviceConns.values()]) { try { conn.ws.close(1012, 'restarting: reconnect now'); } catch { /* gone */ } }
+            for (const set of subsByRobot.values()) for (const conn of set) { try { conn.ws.close(1012, 'restarting: reconnect now'); } catch { /* gone */ } }
+            for (const conn of watchConns) { try { conn.ws.close(1012, 'restarting: reconnect now'); } catch { /* gone */ } }
             deviceConns.clear(); subsByRobot.clear(); watchConns.clear(); watchersByAddr.clear();
             await Promise.all([
                 new Promise((r) => deviceWss.close(r)), new Promise((r) => controlWss.close(r)), new Promise((r) => watchWss.close(r)),

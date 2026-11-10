@@ -29,7 +29,10 @@ credential in `?credential=` is ignored and the socket stays unpaired). A bad or
 closes the socket with code **4002**. A device that has no credential yet connects **without** the
 header; such a socket may only send `pair` until it is answered (anything else → `error`
 `bot.not_paired`). One socket per device: a second connection replaces the first (close code **4000**),
-so a reconnecting agent cannot be shadowed by a stale socket.
+so a reconnecting agent cannot be shadowed by a stale socket. When Bot restarts (a deploy: it is back within about a
+second) it closes every socket with **1012** (Service Restart, reason `restarting: reconnect now`). A device or panel
+reconnects at once on 1012, 1001, 1006 and any other close it did not ask for, then backs off (0.5 s, 1 s, 2 s … at most
+30 s) and keeps trying for as long as it runs; only **4000** (replaced by a newer socket) and an auth refusal stop it.
 
 **Pairing authority** (`BOT_PAIRING_AUTHORITY`, `bot` by default, or `network`). With `network` the
 pairing code is minted by OpenVibe.Network (Bot calls `POST /internal/link-pairings` with its own service
