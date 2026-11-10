@@ -63,13 +63,13 @@ const icon = (name, cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24" ar
 const AXIS_ICONS = { throttle: ['down', 'up'], y: ['down', 'up'], steer: ['left', 'right'], x: ['left', 'right'], rotation: ['ccw', 'cw'], pan: ['left', 'right'], tilt: ['down', 'up'], zoom: ['minus', 'plus'] };
 const AXIS_NAME = { throttle: 'Forward / back', y: 'Forward / back', steer: 'Steer', x: 'Sideways', rotation: 'Turn on the spot', pan: 'Pan', tilt: 'Tilt', zoom: 'Zoom' };
 
-function page(title, body, { scripts = [], bodyClass = '', description = null, canonical = null, robots = null } = {}) {
+function page(title, body, { scripts = [], bodyClass = '', description = null, canonical = null, robots = null, htmlClass = '', colorScheme = 'dark' } = {}) {
     return `<!doctype html>
-<html lang="en">
+<html lang="en"${htmlClass ? ` class="${esc(htmlClass)}"` : ''}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="${esc(colorScheme)}">
 <meta name="theme-color" content="#11151c">
 <title>${esc(title)} — OpenVibe.Bot</title>${robots ? `
 <meta name="robots" content="${esc(robots)}">` : ''}${description ? `
@@ -169,9 +169,10 @@ function actuatorControl(name, a, enabled, profileId = '') {
 const isSim = (profile) => !!(profile && profile.mapping && profile.mapping.driver === 'sim');
 
 /** The panel's scripts: the client, plus the shared arena and its camera for a simulated robot (and /try's local rover). */
-function panelScripts(profile, local = false) {
-    if (!isSim(profile)) return ['/panel/panel.js'];
-    return ['/panel/sim-world.js', ...(local ? ['/panel/try-device.js'] : []), '/panel/panel.js', '/panel/sim-view.js'];
+function panelScripts(profile, local = false, embed = false) {
+    const frame = embed ? ['/panel/embed-frame.js'] : [];
+    if (!isSim(profile)) return [...frame, '/panel/panel.js'];
+    return [...frame, '/panel/sim-world.js', ...(local ? ['/panel/try-device.js'] : []), '/panel/panel.js', '/panel/sim-view.js'];
 }
 
 function camerasOf(profile = {}) {
@@ -584,7 +585,8 @@ ${widgets.join('\n')}
 ${tryIt ? tryOutro(profile) : ''}${role === 'owner' && !embed && !tryIt ? `<div class="owner-settings">${limitsCard(robot, limitsInfo, profile)}${onStreamCard(robot, { liveUrl })}${localProfileForm(robot, profile, profileForm)}${commissionForm(robot, profile)}${automation ? routinesCard(robot, profile, automation) + webhooksCard(robot, automation) : ''}${agentForm(robot)}${listingForm(robot)}${embedForm(robot)}${streamingForm(robot, streaming)}${people ? peopleCard(robot, people) : ''}</div>` : ''}
 </main>`;
     return page(tryIt ? 'Try the panel with a simulated rover' : robot.name, body, {
-        scripts: panelScripts(profile, tryIt), bodyClass: embed ? 'embed-page' : 'panel-page',
+        scripts: panelScripts(profile, tryIt, embed), bodyClass: embed ? 'embed-page' : 'panel-page',
+        htmlClass: embed ? 'embed-page' : '', colorScheme: embed ? 'dark light' : 'dark',
         description: tryIt ? TRY_DESCRIPTION : null, canonical: tryIt ? '/try' : null,
     });
 }
@@ -632,7 +634,7 @@ function renderEmbedRefused({ robotId, parentOrigins = [] }) {
 <p>${outLink(`/panel/${robotId}#on-stream`, 'Open on openvibe.bot', 'button primary')}</p></div>
 </main>`;
     // refused.js tells the page around the frame, so a stream page can hide the box or point its owner to the switch.
-    return page('Not shown here yet', body, { bodyClass: 'embed-page', scripts: ['/panel/refused.js'] });
+    return page('Not shown here yet', body, { bodyClass: 'embed-page', htmlClass: 'embed-page', colorScheme: 'dark light', scripts: ['/panel/refused.js'] });
 }
 
 /**

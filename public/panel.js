@@ -1109,6 +1109,8 @@
     // and the next Drive opens the popup as before.
     const PARENTS = String(main.dataset.parentOrigins || '').split(' ').filter(Boolean);
     const framed = window.parent !== window && PARENTS.length > 0;
+    // The page around the frame (OpenVibe.Live) sets the panel's colours and gets its height: public/embed-frame.js.
+    if (framed && window.EmbedFrame) window.EmbedFrame.start({ parents: PARENTS, robotId: ROBOT_ID });
     let parentSilent = false;
     let asked = null;
     let popup = null;
