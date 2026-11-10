@@ -92,7 +92,6 @@
 .hm .sc-code { grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); }
 @media (max-width: 520px) { .hm .sc-code pre { white-space: pre-wrap; overflow-wrap: anywhere; } .hm-term pre { font-size: 13px; } }
 @media (max-width: 420px) { .sc-hero, .sc-sec, .sc-cta { padding-left: 16px; padding-right: 16px; } }
-@media (prefers-reduced-motion: reduce) { .hm-card, .hm-stats a, .hm-rows a { transition: none; } }
 
 /* ── The short home (2026-10-29): rails, one list of ways to connect, folds for what is read once ── */
 .hm .ovk-rail { margin-top: 0; }
