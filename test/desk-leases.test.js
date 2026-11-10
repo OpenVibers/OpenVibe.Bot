@@ -134,27 +134,6 @@ const { boot, check, done } = require('./helpers/app');
         assert.ok(!offers.some((o) => o.offer_id === `desk:${own.deviceId}`), 'a person\'s own machine is not offered to others');
     });
 
-    await check('the machines page: a sandboxed host offers its desks with one button; another cannot', async () => {
-        const cookie = { Cookie: `ov_token=${t.network.signUser(alex)}` };
-        const form = (id, on) => fetch(`${t.base}/machines/${id}/shared-desks`, { method: 'POST', redirect: 'manual', body: `on=${on}`, headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: t.base, ...cookie } });
-        let html = '';
-        let tries = 0;
-        while (tries < 20 && !html.includes('Serving other people')) {
-            if (tries) await t.wait(100);
-            html = await (await fetch(`${t.base}/machines`, { headers: cookie })).text();
-            tries += 1;
-        }
-        assert.ok(html.includes('Serving other people') && html.includes('desks in use'), 'the host says it serves other people, and how many desks are in use');
-        assert.ok(html.includes('Stop offering my desks'));
-        assert.strictEqual((await form(host.deviceId, 0)).status, 303);
-        assert.strictEqual((await t.db.maybe('SELECT shared_desks FROM devices WHERE id = $1', [host.deviceId])).shared_desks, false);
-        assert.strictEqual((await form(host.deviceId, 1)).status, 303);
-        assert.strictEqual((await t.db.maybe('SELECT shared_desks FROM devices WHERE id = $1', [host.deviceId])).shared_desks, true);
-        const carolsCookie = { Cookie: `ov_token=${t.network.signUser(carol)}` };
-        const notSandboxed = await fetch(`${t.base}/machines/${plain.deviceId}/shared-desks`, { method: 'POST', redirect: 'manual', body: 'on=1', headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: t.base, ...carolsCookie } });
-        assert.strictEqual(notSandboxed.status, 409, 'a host that does not sandbox its desks is never offered');
-    });
-
     await check('the owner stops offering: no new lease there', async () => {
         await t.domain.machines.setSharedDesks(host.deviceId, false);
         const r = await t.call('POST', `/api/v1/machines/${host.deviceId}/desk-leases`, { ...asRun(bob.subject), body: { session: SES(7), desk: 'desk-s07', kind: 'browser' } });

@@ -1,5 +1,5 @@
 'use strict';
-// public/panel.js on a page with no robot panel (a machine's live screen, /machines/:id/screen): the tile polls the
+// public/panel.js on a page with no robot panel (a shared screen, /screen/:token): the tile polls the
 // machine's screen.json until the machine publishes, then opens the session's viewer signaling socket; once the
 // machine stops, it says so and stops reconnecting. The live video must not wait for #panel, which only a robot's
 // panel has (2026-10-15: it did, and the screen page stayed on "Waiting for the machine…").

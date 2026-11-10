@@ -56,9 +56,8 @@ const { boot, check, done } = require('./helpers/app');
             assert.strictEqual(cfg.call_word, 'hey desk');
             const bad = await t.call('POST', `/api/v1/machines/${deviceId}/voice`, { user: alex, body: { on: true, call_word: 'a' } });
             assert.deepStrictEqual([bad.status, bad.json.code], [422, 'bot.invalid_input']);
-            const page = await fetch(`${t.base}/machines`, { headers: { Cookie: `ov_token=${t.network.signUser(alex)}` } }).then((x) => x.text());
-            assert.match(page, /Voice: &quot;hey desk&quot;|Voice: "hey desk"/);
-            assert.match(page, /Stop Vibe answering my voice here/);
+            const page = await fetch(`${t.base}/machines`, { redirect: 'manual' });
+            assert.deepStrictEqual([page.status, page.headers.get('location')], [301, 'https://openvibe.link/machines'], 'the machines hub is Link\'s');
         });
 
         await check('a voice_ask: working at once, then Vibe\'s answer, asked of Chat as the owner with one source per machine', async () => {

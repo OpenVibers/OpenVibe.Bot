@@ -19,7 +19,6 @@ const { boot, check, done } = require('./helpers/app');
     const { dispatch } = require('../server/jobs/dispatch');
     const poll = async (fn, ms = 8000) => { const end = Date.now() + ms; while (Date.now() < end) { const v = await fn(); if (v) return v; await t.wait(50); } return null; };
     const cookie = (user) => ({ Cookie: `ov_token=${t.network.signUser(user)}` });
-    const form = (p, user, headers = {}) => fetch(t.base + p, { method: 'POST', redirect: 'manual', body: '', headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...(user ? cookie(user) : {}), ...headers } });
     let seq = 0;
     const frame = (type, fields) => ({ v: 1, seq: ++seq, ts: Date.now(), type, ...fields });
     const offers = t.app.locals.offers;
@@ -83,24 +82,20 @@ const { boot, check, done } = require('./helpers/app');
         }
     });
 
-    await check('/machines lists them, adds one with a one-time --worker command, and removes one', async () => {
-        const anon = await fetch(`${t.base}/machines`, { redirect: 'manual' });
-        assert.strictEqual(anon.status, 401, 'signed out: a gate page here, noindex (SEO-7)');
-        const page = await (await fetch(`${t.base}/machines`, { headers: cookie(alex) })).text();
-        for (const text of ['Your machines', 'desk-pc', 'Online', 'code jobs']) {
-            assert.ok(page.includes(text), `machine list is missing ${text}`);
+    await check('/machines answers 301 to Link signed in or not; the machine stays in the API and revokes through the hub', async () => {
+        for (const headers of [{}, cookie(alex)]) {
+            const r = await fetch(`${t.base}/machines`, { redirect: 'manual', headers });
+            assert.strictEqual(r.status, 301, 'Link owns the hub now');
+            assert.strictEqual(r.headers.get('location'), 'https://openvibe.link/machines');
         }
-        assert.ok(!page.includes(bob.subject));
-        const added = await form('/machines', alex);
-        assert.strictEqual(added.status, 201);
-        const html = await added.text();
-        const pairing = t.network.pairings.at(-1);
-        assert.strictEqual(pairing.body.ref, `worker:${alex.subject}`);
-        assert.ok(html.includes('--worker') && html.includes('--pairing pair_'), html);
-        assert.strictEqual((await form('/machines', alex, { Origin: 'https://evil.test' })).status, 403, 'no cross-site post');
-        assert.strictEqual((await form(`/machines/${mine.deviceId}/remove`, bob)).status, 404, 'not bob’s');
-        const removed = await form(`/machines/${mine.deviceId}/remove`, alex);
-        assert.strictEqual(removed.status, 303);
+        const sub = await fetch(`${t.base}/machines/${mine.deviceId}/screen`, { redirect: 'manual', headers: cookie(alex) });
+        assert.deepStrictEqual([sub.status, sub.headers.get('location')], [301, 'https://openvibe.link/machines'], 'every sub-path too');
+        const list = await t.call('GET', '/api/v1/machines', { user: alex });
+        assert.deepStrictEqual(list.json.machines.map((m) => m.id), [mine.deviceId]);
+        const removed = await t.call('POST', `/api/v1/machines/${mine.deviceId}/revoke`, {
+            sub: 'svc:network', cap: ['bot.machine.manage'], headers: { 'X-OV-Subject': alex.subject }, body: {},
+        });
+        assert.strictEqual(removed.status, 200, removed.text);
         assert.ok((await t.db.maybe('SELECT revoked_at FROM devices WHERE id = $1', [mine.deviceId])).revoked_at);
         assert.ok(t.network.revokes.includes(mine.principal));
         assert.strictEqual((await offers.build()).find((o) => o.node_id === mine.deviceId), undefined, 'a removed machine offers nothing');

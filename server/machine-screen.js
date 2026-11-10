@@ -1,7 +1,7 @@
 'use strict';
 /**
  * The live screen (plan T14, contracts 0.182.0): a machine's owner watches its screen on their own private OpenRestream
- * stream. Used by the API (POST/GET/DELETE /api/v1/machines/:id/screen) and the web page (/machines/:id/screen), for
+ * stream. Used by the API (POST/GET/DELETE /api/v1/machines/:id/screen) and the screen share page (/screen/:token), for
  * the owner signed in as themselves only — never an agent, a watch or another service.
  *
  *   start(device, subject, principal, { seconds, fps, desk })  a new key for the machine's stream (domain.machines.screen),

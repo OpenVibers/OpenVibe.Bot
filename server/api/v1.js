@@ -797,10 +797,13 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
     }));
     // The machine is no longer the person's: its credential dies here, and its node principal on Network dies with it.
     r.post('/machines/:id/revoke', machineManage, wrap(async (req, res) => {
-        const { device } = await hubMachine(req);
+        const { device, subject } = await hubMachine(req);
         const revoked = await domain.devices.revoke(device.id);
         let networkError = null;
         if (device.node_principal) await domain.devices.revokeNode(device.node_principal).catch((e) => { networkError = e; });
+        // The machine's screen stream goes with it (the page that removed a machine used to do this; the hub is the
+        // only removal path now). OpenRestream refuses a live stream, so a refusal is best effort, as it was there.
+        await domain.machines.screen.archive(device, subject).catch(() => {});
         await domain.devices.revokeVideo(device.id).catch((e) => { networkError = networkError || e; });
         hub.closeDevice(device.id, 'revoked');
         if (networkError) throw networkError;

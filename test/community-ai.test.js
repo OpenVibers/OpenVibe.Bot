@@ -57,9 +57,8 @@ const { boot, check, done } = require('./helpers/app');
         await t.app.locals.offers.publish();
         assert.ok(aiReports.at(-1).some((o) => o.offer_id === `ai:${mine.deviceId}`), 'the AI offers are reported to Network');
         assert.ok(reports.at(-1).some((o) => o.offer_id === `link:${mine.deviceId}`) === false, 'the worker report is separate');
-        const page = await (await fetch(`${t.base}/machines`, { headers: { Cookie: `ov_token=${t.network.signUser(alex)}` } })).text();
-        assert.ok(page.includes('A community machine sees the prompt'), 'the machine page says the privacy cost plainly');
-        assert.ok(page.includes('Offering its models to the network'));
+        const page = await fetch(`${t.base}/machines`, { redirect: 'manual' });
+        assert.deepStrictEqual([page.status, page.headers.get('location')], [301, 'https://openvibe.link/machines'], 'the machines hub is Link\'s');
     });
 
     await check('AI sends a community run to the offered machine, even with the own-AI switch off', async () => {

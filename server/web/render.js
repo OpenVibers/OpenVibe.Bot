@@ -23,7 +23,6 @@ const kit = require('openvibe-shared/kit');
  */
 const { qrSvg } = require('./qr');
 const { stepHelp } = require('../routines');
-const { aiOf } = require('../machine-ai');
 const social = require('openvibe-shared/social');
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ESC[c]);
@@ -750,7 +749,7 @@ function renderPhoneLinkPage({ pairing = null, apkUrl = null } = {}) {
 ${kit.pageHead({ title: `Link on your phone`, icon: 'gear', back: { href: '/', label: 'Home' } })}
 <p>OpenVibe Link for Android puts your agents' approvals in your pocket and adds <b>Send to OpenVibe</b> to every app's
 share sheet. It is in testing and not published yet: when it is, you install it from here and pair it with a code.</p>
-<p class="muted"><a href="/machines">Your machines</a> · <a href="/robots">Your robots</a></p>
+<p class="muted"><a href="https://openvibe.link/machines" rel="noopener">Your machines</a> · <a href="/robots">Your robots</a></p>
 </main>`;
         return page('Link on your phone', body, { description: 'OpenVibe Link for Android: in testing, not published yet.' });
     }
@@ -771,7 +770,7 @@ the code pairs the device, and the app asks you to sign in separately.</p></li>
 <p class="muted">It works once, for the next ${minutes} ${minutes === 1 ? 'minute' : 'minutes'} (until <time datetime="${esc(pairing.expires_at)}">${esc(String(pairing.expires_at).slice(11, 16))} UTC</time>).</p></li>
 </ol>
 <p class="muted">The phone shows up on your account as a device of kind <b>phone</b>. It has no camera or screen access, and
-nothing on the phone is automated. <a href="/machines">Your machines</a> · <a href="/robots">Your robots</a></p>
+nothing on the phone is automated. <a href="https://openvibe.link/machines" rel="noopener">Your machines</a> · <a href="/robots">Your robots</a></p>
 </main>`;
     return page('Link on your phone', body, { description: 'Pair the OpenVibe Link Android app with a one-time code or its QR code.' });
 }
@@ -825,189 +824,6 @@ ${chatUrl ? `<li class="card"><h2>Drive it from your chat</h2><p class="muted">L
     return page(`${robot.name} is yours`, body, { scripts: ['/panel/panel.js'] });
 }
 
-/**
- * /machines (plan T14/T16): a person's own machines that run jobs for them, and the command that adds one. A machine
- * here runs its owner's jobs only (Bot refuses anyone else's), connects out, and keeps its local limits and kill switch.
- */
-function renderMachinesPage({ machines = [], pairing = null, phoneReady = false }) {
-    const classesOf = (m) => {
-        const w = (m.capabilities && typeof m.capabilities === 'object' ? m.capabilities : {}).worker || {};
-        return Array.isArray(w.runtime_classes) ? w.runtime_classes : [];
-    };
-    // The computer plugin (Link docs/computer.md): the level its owner set on the machine, and whether their agent may use it.
-    const LEVELS = { observe: 'Observe', ask: 'Ask first', trusted: 'Trusted', full: 'Full control' };
-    const computerOf = (m) => {
-        const caps = m.capabilities && typeof m.capabilities === 'object' ? m.capabilities : {};
-        // Its own models (OpenVibe Link's ai plugin, server/machine-ai.js): what it offers, and whether a model server answers.
-        const models = aiOf(caps);
-        const ai = models ? { models: Array.isArray(models.models) ? models.models.slice(0, 20).map(String) : [], ready: models.ready === true,
-            offer: models.offer && typeof models.offer === 'object' ? models.offer : null,
-            speed: models.speed && typeof models.speed === 'object' ? models.speed : null } : null;
-        const c = caps.computer;
-        if (!c || typeof c !== 'object') return ai ? { on: false, ai } : null;
-        const level = m.computer_level || ((c.files || c.terminal || c.screen || {}).level) || null;
-        const d = c.desk && typeof c.desk === 'object' ? c.desk : null;
-        return { on: true, level: LEVELS[level] ? level : null, terminal: !!c.terminal, files: !!c.files, screen: !!c.screen, probe: !!c.probe, input: !!c.input,
-            screenStream: !!(c.screen && c.screen.stream === true),
-            // Desks for its agents (Desks plan): how many at once, which kinds, and whether sign-ins carry over.
-            desks: d ? { max: Number.isInteger(d.max_desks) ? d.max_desks : 1, kinds: Array.isArray(d.kinds) ? d.kinds : ['desktop'], keeps: d.profiles === true,
-                // Each desk in its own sandbox (Link v0.32.0, --desk-host --shared): it may serve other people's sessions.
-                sandboxed: d.isolation === 'sandbox' } : null,
-            ai };
-    };
-    // Vibe by voice: shown for a machine whose Link runs the voice plugin (capabilities.voice).
-    const voiceRow = (m) => {
-        const v = (m.capabilities && typeof m.capabilities === 'object' ? m.capabilities : {}).voice;
-        if (!v || typeof v !== 'object') return '';
-        const word = m.call_word || 'hey vibe';
-        return `<div class="machine-voice"><span class="pill">${m.voice_on ? `Voice: "${esc(word)}"` : 'Voice: off'}</span>`
-            + (m.voice_on
-                ? `<form method="post" action="/machines/${esc(m.id)}/voice"><input type="hidden" name="on" value="0"><button type="submit" class="button quiet" aria-pressed="true">Stop Vibe answering my voice here</button></form>`
-                : `<form method="post" action="/machines/${esc(m.id)}/voice" class="inline-form"><input type="hidden" name="on" value="1"><label class="sr-only" for="cw-${esc(m.id)}">Call word</label><input id="cw-${esc(m.id)}" name="call_word" maxlength="40" value="${esc(word)}" aria-label="Call word"><button type="submit" class="button quiet" aria-pressed="false">Let Vibe answer my voice here</button></form>`)
-            + '<span class="muted">The machine listens for its call word on its own; only what you say after it goes to Vibe, and the answer is spoken here and kept in your Vibe chats.</span></div>';
-    };
-    // "Desks for your agents: 4 at once (browser desks count as half), sign-ins kept"
-    const deskWords = (d) => {
-        const browser = d.kinds.includes('browser');
-        const whole = d.kinds.includes('desktop');
-        const kinds = browser && whole ? `${d.max} at once, or twice as many browser desks` : browser ? `${d.max * 2} browser desks at once` : `${d.max} at once`;
-        return `Desks for your agents: ${kinds}${d.keeps ? ', sign-ins kept' : ''}`;
-    };
-    // The person's machines whose models their AI may use: with two or more, Chat's link chooses any of them.
-    const modelMachines = machines.filter((x) => { const c = x.ai_models && computerOf(x); return !!(c && c.ai && c.ai.models.length); }).length;
-    // A desk host that sandboxes every desk (Desks plan D6): its owner may offer its desks to other people's sessions on
-    // OpenVibe.Run, and sees how many are in use. Nothing of the machine itself is reachable from a desk there.
-    const shareRow = (m, c) => {
-        if (!c.desks || !c.desks.sandboxed) return '';
-        const inUse = Number.isInteger(m.desk_leases) && m.desk_leases > 0 ? ` <span class="pill">${m.desk_leases === 1 ? '1 desk in use' : `${m.desk_leases} desks in use`}</span>` : '';
-        return `<div class="machine-share"><span class="pill">${m.shared_desks ? 'Serving other people' : 'Desks: yours only'}</span>${inUse}`
-            + '<span class="muted">Each desk runs in its own sandbox here (its own memory, CPU and network, the public internet only): nobody reaches this machine\'s files, screen or network from one.</span>'
-            + `<form method="post" action="/machines/${esc(m.id)}/shared-desks"><input type="hidden" name="on" value="${m.shared_desks ? '0' : '1'}">`
-            + `<button type="submit" class="button quiet" aria-pressed="${m.shared_desks ? 'true' : 'false'}">${m.shared_desks ? 'Stop offering my desks' : 'Offer my desks to other people'}</button></form></div>`;
-    };
-    const computerRow = (m) => {
-        const c = computerOf(m);
-        if (!c) return '';
-        // "about 15 tokens a second" (with which model, when it offers several), measured there by the ai plugin.
-        const speed = m.ai_speed ? `about ${m.ai_speed.tokens_per_s >= 10 ? Math.round(m.ai_speed.tokens_per_s) : m.ai_speed.tokens_per_s} tokens a second${c.ai.models.length > 1 ? ` with ${m.ai_speed.model}` : ''}` : '';
-        const aiRow = c.ai ? `<div class="machine-ai"><span class="pill">${c.ai.ready ? 'Models' : 'Models: no server answers'}</span>${c.ai.models.length ? `<span class="muted">${esc(c.ai.models.join(', '))}</span>` : ''}`
-            + (m.ai_busy ? ' <span class="pill">Answering now</span>' : '') + (speed ? `<span class="muted">${esc(speed)}</span>` : '')
-            + `<form method="post" action="/machines/${esc(m.id)}/ai-models"><input type="hidden" name="on" value="${m.ai_models ? '0' : '1'}">`
-            + `<button type="submit" class="button quiet" aria-pressed="${m.ai_models ? 'true' : 'false'}">${m.ai_models ? 'Stop my AI using this computer\'s models' : 'Let my AI use this computer\'s models'}</button></form>`
-            // Turned on: OpenVibe.Chat's "Your AI key" comes filled in with this computer and its first model (saved only there).
-            // With several such machines, any of them (contracts 0.221.0): the fastest that is on answers.
-            + (m.ai_models && c.ai.models.length ? `<a class="button quiet" href="https://openvibe.chat/settings?own=node&amp;machine=${modelMachines > 1 ? 'any' : encodeURIComponent(m.id)}&amp;model=${encodeURIComponent(c.ai.models[0])}#oc-ai-key">Use these models in OpenVibe.Chat</a>` : '')
-            + (() => {
-                const o = c.ai.offer;
-                if (!o || o.enabled !== true) return '';
-                const speed = c.ai.speed && typeof c.ai.speed === 'object' ? Object.entries(c.ai.speed).slice(0, 3).map(([model, rate]) => `${model} ${rate} tok/s`).join(', ') : '';
-                return `<div class="machine-share"><span class="pill">${o.paused ? 'Offer paused: this machine is in use' : 'Offering its models to the network'}</span>`
-                    + `<span class="muted">${esc(o.privacy || 'A community machine sees the prompt. Only requests that allow community capacity are sent here, and every answer is labelled Community.')}</span>`
-                    + `${speed ? `<span class="muted">${esc(speed)}</span>` : ''}</div>`;
-            })()
-            + '</div>' : '';
-        // A machine that offers only its models (the ai plugin, no computer plugin): just them.
-        if (!c.on) return `<div class="machine-computer">${aiRow}</div>`;
-        const can = [c.terminal && 'terminal', c.files && 'files', c.screen && 'screen', c.input && 'mouse and keyboard'].filter(Boolean).join(', ');
-        const desks = c.desks ? `<span class="muted">${esc(deskWords(c.desks))}</span>` : '';
-        // The desks running now (the Link's telemetry), and the page that lists them, to watch or stop one.
-        const running = Number.isInteger(m.computer_desks) && m.computer_desks > 0
-            ? ` <span class="pill">${m.computer_desks === 1 ? '1 desk running' : `${m.computer_desks} desks running`}</span>` : '';
-        const deskLink = c.desks && m.online ? `<a class="button quiet" href="/machines/${esc(m.id)}/desks">See its desks</a>` : '';
-        const waiting = Number.isInteger(m.computer_waiting) && m.computer_waiting > 0
-            ? ` <span class="pill warn">${m.computer_waiting} waiting for you on the machine</span>` : '';
-        return `<div class="machine-computer"><span class="pill">Computer: ${esc(c.level ? LEVELS[c.level] : 'on')}</span><span class="muted">${esc(can)}</span>${desks}${running}${waiting}${deskLink}`
-            + `<form method="post" action="/machines/${esc(m.id)}/agent-computer"><input type="hidden" name="on" value="${m.agent_computer ? '0' : '1'}">`
-            + `<button type="submit" class="button quiet" aria-pressed="${m.agent_computer ? 'true' : 'false'}">${m.agent_computer ? 'Stop my agent using this computer' : 'Let my agent use this computer'}</button></form>`
-            + shareRow(m, c)
-            + (c.screenStream && m.online ? `<form method="post" action="/machines/${esc(m.id)}/screen"><button type="submit" class="button quiet">${m.computer_screen_stream === 'live' ? 'Watch my screen' : 'Show my screen'}</button></form>` : '')
-            + aiRow
-            + (c.probe ? `<form method="post" action="/machines/${esc(m.id)}/watch-probe"><input type="hidden" name="on" value="${m.watch_probe ? '0' : '1'}">`
-                + `<button type="submit" class="button quiet" aria-pressed="${m.watch_probe ? 'true' : 'false'}">${m.watch_probe ? 'Stop my watches checking from here' : 'Let my watches check things from this computer'}</button></form>` : '')
-            + '</div>';
-    };
-    // The guided first run's one job (Link v0.39.0): what this machine is, from the first_job step Bot stored.
-    const bytesText = (n) => {
-        if (!Number.isFinite(n) || n < 0) return '';
-        const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-        let v = n, i = 0;
-        while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
-        return `${v >= 10 ? Math.round(v) : v.toFixed(1)} ${units[i]}`;
-    };
-    const firstRunRow = (m) => {
-        const f = m.first_run;
-        if (!f) return '';
-        const i = f.info && typeof f.info === 'object' ? f.info : {};
-        const bits = [];
-        if (Number.isInteger(i.cpus) && i.cpus > 0) bits.push(`${i.cpus} CPUs`);
-        if (Number.isFinite(i.memory_total_bytes) && i.memory_total_bytes > 0) bits.push(`${bytesText(i.memory_free_bytes)} free of ${bytesText(i.memory_total_bytes)} memory`);
-        if (Number.isFinite(i.disk_total_bytes) && i.disk_total_bytes > 0) bits.push(`${bytesText(i.disk_free_bytes)} free disk`);
-        bits.push(`${f.os || 'this machine'}${i.arch ? '/' + i.arch : ''}`);
-        return `<div class="machine-first-run"><span class="pill">First run</span><span class="muted">${esc(bits.join(' · '))}</span>`
-            + '<span class="muted small">What its first job found: OS, CPUs, memory and free disk. No file, account or address leaves the machine.</span></div>';
-    };
-    const list = machines.length
-        ? `<ul class="robots">${machines.map((m) => `<li class="robot-card"><span class="robot-name">${icon('plug')}<span>${esc(m.name || m.id)}</span></span>`
-            + `<span class="robot-meta"><span class="pill">${m.online ? 'Online' : 'Offline'}</span>${classesOf(m).map((c) => ` <span class="pill">${esc(c)} jobs</span>`).join('')}`
-            + `${m.agent_version ? ` <span class="pill">Link ${esc(m.agent_version)}</span>` : ''}${m.robot ? ` <span class="pill">Serves ${esc(m.robot)}</span>` : ''}</span>`
-            + firstRunRow(m) + computerRow(m) + voiceRow(m)
-            + `<span class="robot-actions"><form method="post" action="/machines/${esc(m.id)}/remove"><button type="submit" class="button quiet">Remove</button></form></span></li>`).join('')}</ul>`
-        : `<div class="empty">${icon('plug', 'icon empty-icon')}<p class="empty-title">No machines yet.</p><p>Add your computer or a server you own. It runs the jobs you start, such as a coding task on openvibe.codes, and nobody else's.</p></div>`;
-    // Adding a machine is a choice of what it does, each with its own command (one copy button each), not steps.
-    const choice = (title, flag, text) => `<li class="card"><h2>${title}</h2>
-<pre tabindex="0" class="installer"><code data-copy-source>${esc(pairing.installer.replace(/ --worker$/, flag))}</code></pre>
-<button type="button" class="copy" data-copy>${icon('copy')}<span data-copy-label>Copy the command</span></button>
-<p class="muted">${text}</p></li>`;
-    const add = pairing
-        ? `<h2 id="add-h">What should this computer do?</h2>
-<p class="muted">Pick one and run its command on the computer: it installs OpenVibe Link and pairs the computer with your account. Add <code>--ai</code> to any of them to use its models too.</p>
-<ul class="choices" aria-labelledby="add-h">
-${choice('Run your coding jobs', ' --worker', 'Linux with systemd. It turns Link\'s job worker on: jobs run as a separate user, in a sandbox, with the limits you set. For coding jobs the computer also needs Node.js 22 or newer and git, and a coding agent: Claude Code, Codex, OpenCode, or a DeepSeek key.')}
-${choice('Let your agents use it', ' --computer ask', 'The computer\'s terminal, files and screen become usable by your agents, at the level you set on the computer: <code>ask</code> waits for <code>openvibe-link approve</code> there before anything runs or changes. The Link runs as your own account, never root. <a href="https://github.com/OpenVibers/OpenVibe.Link/blob/main/docs/computer.md">How it works</a>.')}
-${choice('Make a spare computer a desk host', ' --desk-host', 'An old laptop, a mini PC or a spare workstation becomes a place where your agents work: each task gets a desk of its own, with its own browser, and you can watch any desk and take it over. No screen, keyboard or sign-in needed on it. It runs as its own account and only for your agents; the installer adds what desks need and sizes them to its memory. Linux. <a href="https://github.com/OpenVibers/OpenVibe.Link/blob/main/docs/computer.md#desk-hosts---desk-host-node-v0200">How it works</a>.')}
-${choice('Use the models you run on it', ' --ai', 'If this computer runs Ollama, LM Studio or llama.cpp\'s server, your Vibe and your AI members can think with its models: free, and no port is opened. The installer says which server it finds. Once it is paired, turn on "Let my AI use this computer\'s models" for it here. Link v0.28.0 or newer. <a href="https://github.com/OpenVibers/OpenVibe.Link/blob/main/docs/ai.md">How it works</a>.')}
-<li class="card"><h2>Or enter the pairing code</h2><p><strong class="code">${esc(pairing.code)}</strong></p>
-<p class="muted">Valid until <time datetime="${esc(pairing.expires_at)}" data-local-time>${esc(String(pairing.expires_at).slice(11, 16))} UTC</time>. It works once.</p></li></ul>
-<p class="muted">Reload this page once the installer says it is paired: the machine shows up above.</p>`
-        : `<form class="add-robot card" method="post" action="/machines"><h2>Add a machine</h2>
-<p class="muted">You get a one-line install command with a one-time code.</p><button type="submit" class="primary">Add a machine</button></form>`;
-    const body = `${topbar('<span class="crumb">Machines</span>')}
-<main class="page">
-${kit.pageHead({ title: `Your machines`, icon: 'gear', back: { href: '/', label: 'Home' } , lede: `A machine here runs jobs for you and only you. It connects out to OpenVibe and needs no open ports. The limits in its own config and its local kill switch (openvibe-link stop) always win.` })}
-<p class="muted"><a href="https://openvibe.link/machines">All your machines are on openvibe.link/machines</a></p>
-${list}
-${add}
-${phoneReady ? '<p class="muted">In your pocket: <a href="/link/phone">Link on your phone</a> adds the Android app, which shows your agents\' approvals and takes files from any share sheet.</p>' : ''}
-</main>`;
-    return page('Your machines', body, { scripts: pairing ? ['/panel/panel.js'] : [], description: 'Your own machines that run your jobs on OpenVibe.', canonical: '/machines' });
-}
-
-/**
- * /machines/:id/screen: the machine's screen, live, for its owner only (plan T14). The tile waits for the machine's
- * session (public/panel.js polls `stateUrl`) and plays it like a robot's camera; Stop ends it at once.
- */
-/** The owner's links to this screen (server/screen-shares.js): make one to watch or use it, see and stop the others. */
-function sharesBlock(machine, shares, madeLink, madeShare, hasDesk = false, hasScreen = true) {
-    // Only screens the machine has: a desk host has none of its own (its private desk is what a link shares), and a
-    // machine with neither has nothing to share.
-    if (!hasScreen && !hasDesk) return '';
-    const which = !hasScreen
-        ? '<input type="hidden" name="desk" value="private"><p class="muted small">A link here shares the private desk: this computer has no screen of its own.</p>'
-        : hasDesk ? '<label class="field"><span class="field-label">Which screen</span><select name="desk"><option value="main">Your own screen</option><option value="private">The private desk, where your agent works</option></select></label>' : '';
-    const rows = (shares || []).map((x) => `<li><strong>${esc(x.label || 'A link')}</strong> · ${x.desk && x.desk !== 'main' ? `the ${esc(x.desk)} desk · ` : ''}${x.control ? 'watch and use' : 'watch only'} · until <time datetime="${esc(x.expires_at || '')}" data-local-time>${esc(String(x.expires_at || '').slice(0, 10))}</time>${x.last_used_at ? ` · last opened <time datetime="${esc(x.last_used_at)}" data-local-time>${esc(String(x.last_used_at).slice(0, 16).replace('T', ' '))}</time>` : ''}
-<form method="post" action="/machines/${esc(machine.id)}/shares/${esc(x.id)}/revoke" class="inline-form"><button type="submit" class="button quiet">Stop this link</button></form></li>`).join('');
-    return `<section class="machine-shares" aria-labelledby="shares-h"><h2 id="shares-h">Share this screen</h2>
-<p class="muted">Make a link for a group: put it in a workspace room on OpenVibe.Chat (the staff room's Screen) or anywhere people work together. <strong>Watch</strong> shows the screen live. <strong>Watch and use</strong> also lets them start it and use the mouse and keyboard, at the level you set on this computer: at <code>ask</code> each action waits for your approval there, and at <code>observe</code> nothing happens. Nobody can run programs or read files through a link.</p>
-${madeLink ? `<p class="notice" role="status">Your new link${madeShare && madeShare.control ? ' (watch and use)' : ''}. Copy it now: it is not shown again.<br><input class="share-link" type="text" readonly value="${esc(madeLink)}" aria-label="The new screen link"></p>` : ''}
-<form method="post" action="/machines/${esc(machine.id)}/shares" class="share-form">
-<label class="field"><span class="field-label">Where it goes</span><input name="label" maxlength="80" placeholder="Staff room"></label>
-<label class="field"><span class="field-label">Lasts (days)</span><input name="days" type="number" min="1" max="365" value="30"></label>
-${which}
-<label class="check"><input type="checkbox" name="control" value="1"> They may use the mouse and keyboard too</label>
-<button type="submit" class="primary">Make a link</button></form>
-${rows ? `<ul class="share-list">${rows}</ul>` : ''}</section>`;
-}
-
 /** A screen link that does not work (stopped, ended, never existed): one answer for every reason. */
 function renderShareGone() {
     return page('Screen link', `<main class="page share-page">${kit.pageHead({ title: `This screen link does not work`, icon: 'gear', back: { href: '/', label: 'Home' } , lede: `It was stopped, it ended, or it never existed. Ask whoever shared it for a new one.` })}</main>`, { description: 'A shared computer screen on OpenVibe.Bot.' });
@@ -1030,92 +846,6 @@ ${control ? `<div class="share-controls">
 <span class="muted small" data-share-note role="status"></span></div>` : ''}
 </main>`;
     return page(`${name}: shared screen`, body, { scripts: ['/panel/panel.js', ...(control ? ['/panel/screen-share.js'] : [])], bodyClass: 'share-body', description: 'A shared computer screen on OpenVibe.Bot.' });
-}
-
-/**
- * /machines/:id/desks: the desks running on the owner's machine (Desks plan), each a computer of its own for an agent:
- * its kind, size and start, Watch and take over (the screen page on that desk), and Stop.
- */
-function renderMachineDesksPage({ machine, desks = [], maxDesks = null, error = null, stopped = null, live = null }) {
-    const name = machine.name || machine.id;
-    const id = esc(machine.id);
-    const KIND = { browser: 'Browser desk', desktop: 'Whole desk' };
-    const since = (d) => {
-        const t = Number(d.since);
-        if (!Number.isFinite(t) || t <= 0) return '';
-        const iso = new Date(t * 1000).toISOString();
-        return ` <span class="muted">since <time datetime="${esc(iso)}" data-local-time>${esc(iso.slice(11, 16))} UTC</time></span>`;
-    };
-    const rows = desks.map((d) => `<li class="robot-card"><span class="robot-name">${icon('plug')}<span><code>${esc(d.desk)}</code></span></span>`
-        + `<span class="robot-meta"><span class="pill">${esc(KIND[d.kind] || 'Desk')}</span>${Number.isInteger(d.width) ? ` <span class="muted">${d.width}×${d.height}</span>` : ''}${since(d)}</span>`
-        + `<span class="robot-actions"><a class="button" href="/machines/${id}/screen?desk=${encodeURIComponent(d.desk)}">Watch and take over</a>`
-        + `<form method="post" action="/machines/${id}/desks/stop"><input type="hidden" name="desk" value="${esc(d.desk)}"><button type="submit" class="button quiet">Stop</button></form></span>`
-        // On the owner's OpenVibe Live channel, when they choose (the Desks plan's D8): a second step says what goes public.
-        + `<details class="desk-live"><summary class="button quiet">Show live on my channel</summary>`
-        + `<form method="post" action="/machines/${id}/desks/live"><input type="hidden" name="desk" value="${esc(d.desk)}">`
-        + `<p class="muted">Everyone can watch this desk on your OpenVibe Live channel for up to 30 minutes: what your agent does and every page it opens, signed-in pages included. Your followers are told you are live, as for any stream. Stop showing it on its screen page, or stop the desk.</p>`
-        + `<button type="submit" class="button primary">Go live with this desk</button></form></details></li>`).join('');
-    const list = error ? `<p class="error" role="alert">${esc(error)}</p>`
-        : rows ? `<ul class="robots">${rows}</ul>`
-            : `<div class="empty">${icon('plug', 'icon empty-icon')}<p class="empty-title">No desks are running.</p><p>An agent's task starts a desk of its own here when it needs one, and stops it when it is done.</p></div>`;
-    const body = `${topbar(`<a class="crumb" href="/machines">Machines</a><span class="crumb">${esc(name)}</span>`)}
-<main class="page">
-${kit.pageHead({ title: `${name}: desks`, icon: 'gear', back: { href: '/', label: 'Home' } , lede: `Each desk is a computer of its own on this machine, where one of your agents works: its own screen or browser, files and sign-ins. Watch one live and take it over, or stop it; a task whose desk you stop goes on without it.` })}
-${stopped ? `<p class="setting-ok" role="status">${icon('check')}<span>Stopped <code>${esc(stopped)}</code>.</span></p>` : ''}
-${live ? `<p class="setting-ok" role="status">${icon('check')}<span><code>${esc(live.desk)}</code> is live${live.channel ? ` on <a href="${esc(live.channel)}">${esc(live.channel.replace(/^https:\/\//, ''))}</a>` : ' on your OpenVibe Live channel'} for up to 30 minutes. <a href="/machines/${id}/screen?desk=${encodeURIComponent(live.desk)}">Its screen page</a> stops it.</span></p>` : ''}
-${list}
-${Number.isInteger(maxDesks) ? `<p class="muted small">At most ${maxDesks} whole ${maxDesks === 1 ? 'desk' : 'desks'} at once here; a browser desk counts as half.</p>` : ''}
-</main>`;
-    return page(`${name}: desks`, body, { description: 'The desks your agents work on, on your machine.', canonical: '/machines' });
-}
-
-function renderMachineScreenPage({ machine, until = null, error = null, idle = false, shares = [], madeLink = null, madeShare = null, hasDesk = false, hasScreen = true, desk = 'main' }) {
-    const name = machine.name || machine.id;
-    const stateUrl = `/machines/${encodeURIComponent(machine.id)}/screen.json`;
-    const base = `/machines/${encodeURIComponent(machine.id)}/screen`;
-    // An agent task's own desk (desk-<name>, Desks plan D1) is what a task's Watch link opens.
-    const agentDesk = /^desk-/.test(desk);
-    const deskWords = desk === 'main' ? 'your own screen' : desk === 'private' ? 'the private desk' : 'your agent\'s desk';
-    // Idle (nothing is shown, as from a link): a start button instead of waiting for a stream nobody started.
-    if (idle && !error) {
-        const body = `${topbar(`<a class="crumb" href="/machines">Machines</a><span class="crumb">${esc(name)}</span>`)}
-<main class="page">
-${kit.pageHead({ title: `${name}: screen`, icon: 'gear', back: { href: '/', label: 'Home' } })}
-${agentDesk ? `<p>Your agent works on a desk of its own on this computer. Watch it live, and take it over whenever you like: while you use the mouse and keyboard, the agent waits; when you stop, it goes on.</p>
-<form method="post" action="/machines/${esc(machine.id)}/screen" class="inline-form"><input type="hidden" name="desk" value="${esc(desk)}"><button type="submit" class="primary">Watch your agent's desk</button></form>` : ''}
-${hasScreen ? `<p class="muted">Show this computer's screen here, live, to you only, for 10 minutes. Nothing is recorded, and the computer says on its desktop that its screen is live.</p>
-<form method="post" action="/machines/${esc(machine.id)}/screen" class="inline-form"><button type="submit" class="${agentDesk ? 'button' : 'primary'}">Show my screen</button></form>` : '<p class="muted">This computer has no screen of its own to show (a desk host): only its desks, where your agents work. A task\'s Watch link opens its desk.</p>'}
-${hasDesk ? `<form method="post" action="/machines/${esc(machine.id)}/screen" class="inline-form"><input type="hidden" name="desk" value="private"><button type="submit" class="button">Show the private desk</button></form>
-<p class="muted">The private desk is a screen of its own on this computer, where your agent works without touching yours.</p>` : ''}
-${sharesBlock(machine, shares, madeLink, madeShare, hasDesk, hasScreen)}
-</main>`;
-        return page(`${name}: screen`, body, { description: 'Your machine\'s screen, live, for you only.', canonical: '/machines' });
-    }
-    const ends = until ? `<p class="muted">Shown until <time datetime="${esc(until)}" data-local-time>${esc(until)}</time>, to you only. Nothing is recorded.</p>` : '';
-    // Take over (Desks plan D4): the share page's own controls (public/screen-share.js) in owner mode, on what is shown.
-    const takeOver = error ? '' : `<div class="share-controls">
-<button type="button" class="primary" data-share-start hidden>Start the screen</button>
-<label class="check share-use"><input type="checkbox" data-share-use> ${desk === 'main' ? 'Use the mouse and keyboard' : 'Take over: use the mouse and keyboard'}</label>
-<span class="muted small" data-share-note role="status"></span></div>
-${desk !== 'main' ? '<p class="muted small">While you use it, the agent waits on this desk; uncheck to give it back, and it goes on a moment later.</p>' : ''}`;
-    const body = `${topbar(`<a class="crumb" href="/machines">Machines</a><span class="crumb">${esc(name)}</span>`)}
-<main class="page" data-share="${esc(base)}" data-control="${error ? '0' : '1'}" data-owner="1">
-<p class="muted small">Showing ${esc(deskWords)}${agentDesk ? ` (<code>${esc(desk)}</code>)` : ''}.</p>
-${kit.pageHead({ title: `${name}: screen`, icon: 'gear', back: { href: '/', label: 'Home' } })}
-${error ? `<p class="error" role="alert">${esc(error)}</p>` : ends}
-<figure class="camera machine-screen" data-screen-state="${esc(stateUrl)}" tabindex="0" aria-label="The screen: turn on the mouse and keyboard to click and type on it">
-<div class="camera-screen" data-camera-screen>${icon('plug', 'icon camera-icon')}<p class="camera-title" data-screen-status role="status">${error ? 'The screen is not shown.' : 'Waiting for the machine…'}</p>
-<p class="camera-sub">The picture comes from the machine itself, a few frames a second.</p></div>
-</figure>
-${takeOver}
-<div class="machine-screen-actions">
-<form method="post" action="/machines/${esc(machine.id)}/screen/stop"><button type="submit" class="primary">Stop showing it</button></form>
-<form method="post" action="/machines/${esc(machine.id)}/screen">${desk !== 'main' ? `<input type="hidden" name="desk" value="${esc(desk)}">` : ''}<button type="submit" class="button quiet">${error ? 'Try again' : 'Start again (10 more minutes)'}</button></form>
-</div>
-<p class="muted small">${desk === 'main' ? 'The machine says on its desktop that its screen is live. ' : 'Nothing of your own screen is shown: this is the desk\'s own. '}<code>openvibe-link stop</code> on the machine ends it at once, and it ends on its own after its time.</p>
-${sharesBlock(machine, shares, madeLink, madeShare, hasDesk, hasScreen)}
-</main>`;
-    return page(`${name}: screen`, body, { scripts: ['/panel/panel.js', '/panel/screen-share.js'], description: 'Your machine\'s screen, live, for you only.', canonical: '/machines' });
 }
 
 /**
@@ -1215,4 +945,4 @@ function renderFirstRunPage({ rows = [] }) {
     return page('First run', body, { description: 'The guided first run of OpenVibe Link, measured step by step.', canonical: '/admin/first-run' });
 }
 
-module.exports = { page, renderPanel, renderPhonePage, renderMachinesPage, renderMachineDesksPage, renderMachineScreenPage, renderSharePage, renderShareGone, panelScripts, isSim, TRY_DESCRIPTION, renderEmbedRefused, renderDrivePage, renderWidget, renderRobotsPage, renderPairingPage, renderPhoneLinkPage, renderLinkPage, renderSignInPage, renderClaimPage, renderClaimApproved, renderFirstRunPage, camerasOf, esc };
+module.exports = { page, renderPanel, renderPhonePage, renderSharePage, renderShareGone, panelScripts, isSim, TRY_DESCRIPTION, renderEmbedRefused, renderDrivePage, renderWidget, renderRobotsPage, renderPairingPage, renderPhoneLinkPage, renderLinkPage, renderSignInPage, renderClaimPage, renderClaimApproved, renderFirstRunPage, camerasOf, esc };

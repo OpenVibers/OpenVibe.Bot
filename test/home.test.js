@@ -54,7 +54,7 @@ const { boot, check, done } = require('./helpers/app');
         // Your own computers: desks for your agents, desk hosts, your own models, a desk live (the Desks plan, AI on your
         // own machines), with the questions people ask about them.
         assert.match(html, /<details class="ovk-fold" id="computers"><summary><span>Your computers, for your agents and your AI/);
-        for (const card of ['A desk for each task', 'A spare computer as a desk host', 'Your own AI models', 'A desk live on your channel']) assert.ok(html.includes(`<strong>${card}</strong>`), card);
+        for (const card of ['A desk for each task', 'Your own AI models', 'A desk live on your channel']) assert.ok(html.includes(`<strong>${card}</strong>`), card);
         assert.ok(questions.includes('Can my agents use my computer?') && questions.includes('Can my AI use the models on my computer?'));
         const home = await get('/home.css');
         assert.strictEqual(home.status, 200);
