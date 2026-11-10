@@ -136,6 +136,8 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     const pendingCmds = new Map();     // device-facing command id (server-minted) → pending
     const results = new Map();         // operator key (who + their id) → { result, reason, at }
     const inflight = new Map();        // operator key → device-facing id, while the command is pending
+    const lastRobotCommandAt = new Map();
+    const movementLeaseUntil = new Map();
     // The person always wins a screen (machines): `${device}|${main|private}` → until when a person's input holds it.
     const personTurns = new Map();
     const personLast = new Map();   // the same key → when a person last used that screen (ms), for desk turns
@@ -664,6 +666,8 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             await domain.audit.record({ robotId, deviceId: device.device.id, subject: conn.subject, operatorKind: conn.principal.kind, role: decision.role, kind: decision.kind, value: decision.value, result: 'refused', reason: 'bot.device_offline' });
             return sendFrame(conn, 'command_result', { id, result: 'refused', code: 'bot.device_offline', reason: 'the device is offline' });
         }
+        lastRobotCommandAt.set(robotId, now());
+        if (decision.deadlineMs != null) movementLeaseUntil.set(robotId, Math.max(movementLeaseUntil.get(robotId) || 0, decision.deadlineMs));
         const p = { id: deviceCmdId, opId: id, key, deviceId: device.device.id, conn, robotId, subject: conn.subject, operatorKind: conn.principal.kind, role: decision.role, kind: decision.kind, value: decision.value, at: now(), timer: null };
         pendingCmds.set(deviceCmdId, p);
         inflight.set(key, deviceCmdId);
@@ -1117,6 +1121,16 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         machineCommand, machineScreen, computerOf, machineChanged,
         // Real devices only: a simulator is not a machine anyone runs.
         onlineCount() { let n = 0; for (const c of deviceConns.values()) if (c.online && !c.sim) n++; return n; },
+        protectedSessions() {
+            const at = now();
+            const protectedRobots = new Set();
+            for (const [robotId, set] of subsByRobot) {
+                const hasOperator = [...set].some((c) => !c.watcher && c.robotId === robotId && c.ws.readyState === OPEN);
+                if ((hasOperator && at - (lastRobotCommandAt.get(robotId) || 0) < 120_000) || (movementLeaseUntil.get(robotId) || 0) > at) protectedRobots.add(robotId);
+            }
+            for (const [robotId, until] of movementLeaseUntil) if (until > at) protectedRobots.add(robotId);
+            return protectedRobots.size;
+        },
         devices() { return [...deviceConns.values()].filter((c) => !c.sim).map((c) => ({ device_id: c.device.id, online: c.online })); },
         async close() {
             closed = true;
