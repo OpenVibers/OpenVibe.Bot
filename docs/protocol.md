@@ -72,7 +72,7 @@ At most 64 frames wait; any more are answered `error` `bot.not_ready`.
 | `paired` | `device_id, credential, publish_key, whip_url, robot_ids, profile_id, profile` | the answer to `pair`; `credential`/`publish_key`/`whip_url` are shown **once**; without OpenRestream configured `video: "not_configured"` instead of `publish_key`/`whip_url` |
 | `hello` | `session_id, device_id, robot_ids, server_time` | on every authenticated connection |
 | `config` | `heartbeat_ms, limits, allowed_commands, estop_latched` | right after `hello`, and again whenever the owner changes the robot's limits (or `allow` lists) and whenever Bot's latch is set or cleared (after the `estop` frame) |
-| `command` | `id, kind, value, deadline_ms, operator{subject,role}, robot_id` | an operator's command passed the gate |
+| `command` | `id, kind, value, deadline_ms, operator{subject,role}, robot_id, provenance?` | an operator's command passed the gate; `provenance` is present on `headlight` |
 | `estop` | `latched, by, at` | the e-stop latched or the owner cleared it |
 | `heartbeat_ack` | `echo, t, server_time` | the answer to `heartbeat`; `echo` is the heartbeat's `t` (or `null`), so the device computes RTT, and `t` repeats a finite `t` (device ms) unchanged — the field OpenVibe Link reads. The envelope `seq` is Bot's own counter and never echoes the device's |
 | `rotate` | — | the owner forced a rotation of a Network-paired machine (`POST /devices/:id/rotate`); the machine rotates its credential with Network itself |
@@ -87,16 +87,31 @@ At most 64 frames wait; any more are answered `error` `bot.not_ready`.
 | `telemetry` | `battery, voltage, sensors{}, events[]?, …` | at most 2 Hz; extra frames are dropped — except a frame with a non-empty `events` array (a fault, a bump, low battery), which is always delivered and does not count against the samples' window. `battery` is either a 0..1 fraction or an object `{volts, percent}` with `percent` 0..100 (as OpenVibe Link sends it); `robot_state.battery` is always the fraction 0..1 (or `null`), while `robot_state.telemetry` keeps the raw frame |
 | `status` | `firmware, capabilities, faults[], estop_latched, device_kind?, drivers[]?, agent_version?` | on connect and on change. See below |
 | `reauth` | `token` | a Network-paired machine only: a fresh node token for the same principal, before the last one expires (300 s); a refused one is answered `error` `bot.reauth_refused` and moves nothing |
-| `ack` | `id` | a command ran (or, keyed by a job id, a job was accepted: §1.2) |
+| `ack` | `id, data?` | a command ran (or, keyed by a job id, a job was accepted: §1.2); `data` is a computer command's answer or a headlight's `{stage, admitted}` |
 | `nack` | `id, fault_code` | a command (or a job, §1.2) was refused on the device |
 | `estop_state` | `latched, by, at, robot_id?, local_stop?, reason?` | the device's own latch, a **report**; `robot_id` omitted = every robot the device serves; `local_stop: true` = held on the machine itself. See below |
 
-`kind` is one of `drive`, `actuator`, `ptz`, `say`, `display`, `halt`, and a device only ever gets the
-kinds its robot's profile declares (§1.1), with values in the shapes and ranges declared there.
-`deadline_ms` is an absolute epoch-ms instant and is present on the motion kinds only (`drive`,
-`actuator`, `ptz`): the device **must** stop the motors at that instant if no newer command arrived, and
-on every disconnect or crash path, without asking the network. `halt` (value `{}`, no deadline) stops
-everything at once and passes the gate even while the e-stop is latched.
+`kind` is one of `drive`, `actuator`, `ptz`, `say`, `display`, `button`, `point`, `headlight` and `halt`, and a
+device only ever gets the kinds its robot's profile declares (§1.1) or a custom action it declares in
+`mapping.actions`, with values in the shapes and ranges declared there.
+`deadline_ms` is an absolute epoch-ms instant and is present on the motion kinds (`drive`, `actuator`, `ptz`), on a
+held `button`, and on `headlight` (which is not motion and never renews a motion deadline): the device **must** stop
+the motors at that instant if no newer command arrived, and on every disconnect or crash path, without asking the
+network. `halt` (value `{}`, no deadline) stops everything at once and passes the gate even while the e-stop is
+latched.
+
+**Headlights** (`headlight`, LOOI; `{ "on": true|false }`, explicit and never a toggle) are the owner's and People
+Operators' only, never an anonymous viewer, a plain watcher or the queue. Bot mints the trusted fields itself, never
+from the browser: `operator {subject, role}`, `turn_epoch`, an original lifetime of 300 ms, a `deadline_ms` of at most
+250 ms, and `provenance { session, seq, issued_at_ms, expires_at_ms, clock_uncertainty_ms }` (the hello's session id,
+this frame's seq and ts, the 300 ms expiry, and Bot's last measured device round trip). OpenVibe Link checks them
+against the frame, keeps at least 200 ms of the original lifetime on receipt, and gives the driver the note's
+envelope with `expires_at_mono_ns` on its shared clock. An `ack` with `data {stage:"headlight_pending", admitted:true}`
+means accepted, **not confirmed**; `{stage:"headlight_refused", admitted:false}` means busy or rate-limited and the
+panel keeps its displayed state; a `nack` is a rejection. `sensors.p7_headlight` telemetry carries
+`{ commanded: true|false|null, pending, physical_state_verified: false }`: the panel's On/Off/Unknown is commanded
+state only. At most two are accepted per rolling second, shared with the owner's local controls; nothing retries
+automatically.
 
 Bot sends a `halt` of its own when a `queue` robot's turn ends — the turn ran out, or its holder left —
 before the next person's first command can pass the gate, so a held button, a drive still inside its
@@ -191,6 +206,7 @@ refused here (`bot.invalid_input`, `bot.unknown_actuator`) and never sent.
 | `say` | `max_chars` | `{ "text": "…" }` |
 | `display` | `modes` of `text`, `face`, `image_png_b64`; `faces`; `max_chars` | exactly one of `{ "text" }`, `{ "face": "happy" }`, `{ "image_png_b64": "…" }` (base64, ≤ 48 KiB) |
 | `halt` | — (every profile) | `{}` |
+| `headlight` | `mapping.actions: ["headlight"]` (a custom action; `commands` stays closed) | `{ "on": true }` or `{ "on": false }`, exactly; no toggle, no other key |
 
 The shipped profiles and the plugin each one matches (`test/profiles.test.js` checks every panel control
 against these):
@@ -201,6 +217,7 @@ against these):
 | `adeept.adr036.mecanum` | Link plugin `adeept_adr036`, mecanum wheels | `drive {x, y, rotation}`; the same actuators |
 | `cozmo` | Link plugin `cozmo` | `drive {throttle, steer}`; `actuator` `head` −1..1, `lift` 0..1, `backpack_lights`/`cube_lights` rgb; `say`; `display` text, face (`neutral happy sad surprised sleepy angry`) or image |
 | `camera.onvif` | server driver `onvif` | `ptz {pan, tilt, zoom}` −1..1 |
+| `looi` | Link plugin `looi` | `drive {throttle, steer}`; `actuator head` −1..1; custom action `headlight {on}` |
 | `sim.rover` | server driver `sim` | `drive {throttle, steer}` |
 
 The two server drivers are not machines that connect: Bot attaches them in-process (`server/sim`,
