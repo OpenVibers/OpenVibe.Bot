@@ -27,7 +27,7 @@ const { loadProfiles } = require('../server/profiles');
         assert.doesNotMatch(csp, /esm\.sh|unsafe-inline/);
         assert.match(r.headers.get('permissions-policy'), /camera=\(self\)/);
         const html = await r.text();
-        assert.ok(html.includes('<script src="/panel/phone-device.js" defer></script>') && html.includes('data-pair-form') && html.includes('data-local-stop'));
+        assert.ok(/<script src="\/panel\/phone-device\.js\?v=[0-9a-f]{10}" defer><\/script>/.test(html) && html.includes('data-pair-form') && html.includes('data-local-stop'));
         assert.doesNotMatch(html, /<script>|style="/, 'nothing inline');
         assert.strictEqual((await get('/panel/phone-device.js')).status, 200);
     });
