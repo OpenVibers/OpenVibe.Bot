@@ -26,10 +26,19 @@ function originOf(url) {
 }
 
 function boundPage(data) {
-    if (!data || typeof data !== 'object' || Array.isArray(data) || typeof data.text !== 'string') return data;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return data;
     const nonce = randomBytes(16).toString('hex');
     const origin = originOf(data.url);
     const fence = (value) => `<<<ov-text nonce:${nonce} origin:${origin}>>>\n${value}\n<<<ov-text-end nonce:${nonce}>>>`;
+    if (typeof data.text !== 'string') {
+        if (!data.receipt || typeof data.receipt !== 'object') return data;
+        const appeared = Array.isArray(data.receipt.appeared) ? data.receipt.appeared : [];
+        return { done: data.done === true, truncated: appeared.length > 8,
+            receipt: { url_changed: data.receipt.url_changed === true,
+                appeared: appeared.slice(0, 8).map((line) => fence(cap(plain(line), 160)[0])),
+                gone: Number.isInteger(data.receipt.gone) ? Math.max(0, data.receipt.gone) : 0,
+                ...(typeof data.receipt.page === 'string' ? { page: cap(data.receipt.page, 32)[0] } : {}) } };
+    }
     const [body, bodyCut] = cap(plain(data.text), MAX_TEXT);
     const [title, titleCut] = cap(data.title, 512);
     const [url, urlCut] = cap(data.url, 2048);
@@ -51,11 +60,11 @@ function boundPage(data) {
     }
     if (data.receipt && typeof data.receipt === 'object' && !Array.isArray(data.receipt)) {
         const appeared = Array.isArray(data.receipt.appeared) ? data.receipt.appeared : [];
-        const gone = Array.isArray(data.receipt.gone) ? data.receipt.gone : [];
         out.receipt = { url_changed: data.receipt.url_changed === true,
             appeared: appeared.slice(0, 8).map((line) => fence(cap(plain(line), 160)[0])),
-            gone: gone.slice(0, 8).map((line) => cap(line, 160)[0]) };
-        out.truncated ||= appeared.length > 8 || gone.length > 8;
+            gone: Number.isInteger(data.receipt.gone) ? Math.max(0, data.receipt.gone) : 0,
+            ...(typeof data.receipt.page === 'string' ? { page: cap(data.receipt.page, 32)[0] } : {}) };
+        out.truncated ||= appeared.length > 8;
     }
     // Body text is the last adjustable field; preserve both markers if a verbose old Link exceeded the cap.
     while (Buffer.byteLength(JSON.stringify(out)) > MAX_PAGE && out.elements.length) { out.elements.pop(); out.truncated = true; }

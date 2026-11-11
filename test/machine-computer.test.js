@@ -124,6 +124,11 @@ const { boundPage, MAX_PAGE } = require('../server/browser-content');
         assert.equal(out.untrusted_extra, undefined);
         assert.equal(out.receipt.extra, undefined);
         assert.match(out.text, /<<<ov-text-end nonce:[0-9a-f]{32}>>>$/);
+        const receiptOnly = boundPage({ done: true, receipt: { appeared: ['a'.repeat(200000)], gone: 1, extra: 'x'.repeat(200000) } });
+        assert.ok(Buffer.byteLength(JSON.stringify(receiptOnly)) <= MAX_PAGE);
+        assert.equal(receiptOnly.receipt.gone, 1);
+        assert.equal(receiptOnly.receipt.extra, undefined);
+        assert.match(receiptOnly.receipt.appeared[0], /<<<ov-text-end nonce:[0-9a-f]{32}>>>$/);
     });
 
     await check('the private desk (contracts 0.214.0): start, stop and status reach a machine that has one, and desk: private acts there; one without says so', async () => {
