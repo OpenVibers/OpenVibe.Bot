@@ -718,13 +718,16 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         if (p.timer) clearTimeout(p.timer);
         const result = msg.type === 'ack' ? 'ack' : 'nack';
         const latency = now() - p.at;
+        // A headlight's ack data is the driver's stage/admitted answer (accepted is not confirmed); only those two
+        // fields are passed on, so a driver can never put arbitrary data on a panel.
+        const rawData = result === 'ack' && msg.data && typeof msg.data === 'object' && !Array.isArray(msg.data) && (p.computer || p.kind === 'headlight') ? msg.data : null;
+        const data = p.kind === 'headlight' ? headlightData(rawData) : rawData && p.kind === 'browser' ? boundPage(rawData) : rawData;
         // A computer command's answer goes to its caller once; the cache keeps the result only (a repeated id gets
-        // no data back), so 4096 cached results never hold 4096 screens.
-        cacheResult(p.key, { result, reason: msg.fault_code || null });
+        // no data back), so 4096 cached results never hold 4096 screens. A headlight's tiny answer is kept so a
+        // repeated id still says accepted/refused.
+        cacheResult(p.key, { result, reason: msg.fault_code || null, ...(p.kind === 'headlight' && data ? { data } : {}) });
         await domain.audit.record({ robotId: p.robotId, deviceId: p.deviceId, subject: p.subject, operatorKind: p.operatorKind, role: p.role, kind: p.kind, value: p.value, result, reason: msg.fault_code || null, latencyMs: latency });
-        const rawData = p.computer && result === 'ack' && msg.data && typeof msg.data === 'object' && !Array.isArray(msg.data) ? msg.data : null;
-        const data = rawData && p.kind === 'browser' ? boundPage(rawData) : rawData;
-        const message = p.computer && result === 'nack' && typeof msg.message === 'string' ? msg.message.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 300) : null;
+        const message = (p.computer || p.kind === 'headlight') && result === 'nack' && typeof msg.message === 'string' ? msg.message.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 300) : null;
         sendFrame(p.conn, 'command_result', { id: p.opId, result, reason: message || msg.fault_code || null, latency_ms: latency, ...(data ? { data } : {}) });
     }
 
@@ -866,13 +869,22 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         // turn_epoch (contracts 0.213.0): the robot's epoch now, which a queue command's check above proved is the one it
         // was decided under; an owner's command that just took a turn over carries the epoch its own halt moved to.
         const epoch = domain.queue.epoch(robotId);
-        const frame = { v: 1, type: 'command', seq: nextSeq(device), ts: now(), id: deviceCmdId, ref: id, kind: decision.kind, value: decision.value, deadline_ms: decision.deadlineMs, operator: { subject: conn.subject, role: decision.role }, robot_id: robotId, ...(epoch ? { turn_epoch: epoch } : {}) };
+        // A headlight carries Bot's own provenance: the hello session, this frame's seq and ts, and Bot's original
+        // expiry 300 ms out (the gate's 250 ms deadline is the frame's deadline_ms). Nothing here comes from a browser.
+        const issuedAt = decision.issuedAtMs != null ? decision.issuedAtMs : now();
+        const seq = nextSeq(device);
+        const provenance = decision.expiresAtMs != null ? {
+            session: device.sessionId, seq, issued_at_ms: issuedAt, expires_at_ms: decision.expiresAtMs,
+            clock_uncertainty_ms: Number.isFinite(device.rttMs) ? Math.max(0, Math.ceil(device.rttMs)) : 0,
+        } : null;
+        const frame = { v: 1, type: 'command', seq, ts: issuedAt, id: deviceCmdId, ref: id, kind: decision.kind, value: decision.value, deadline_ms: decision.deadlineMs, operator: { subject: conn.subject, role: decision.role }, robot_id: robotId, ...(provenance ? { provenance } : {}), ...(epoch ? { turn_epoch: epoch } : {}) };
         if (!send(device.ws, frame)) {
             await domain.audit.record({ robotId, deviceId: device.device.id, subject: conn.subject, operatorKind: conn.principal.kind, role: decision.role, kind: decision.kind, value: decision.value, result: 'refused', reason: 'bot.device_offline' });
             return sendFrame(conn, 'command_result', { id, result: 'refused', code: 'bot.device_offline', reason: 'the device is offline' });
         }
         lastRobotCommandAt.set(robotId, now());
-        if (decision.deadlineMs != null) movementLeaseUntil.set(robotId, Math.max(movementLeaseUntil.get(robotId) || 0, decision.deadlineMs));
+        // A headlight is not motion: its short deadline must not renew a drive/head movement lease.
+        if (decision.deadlineMs != null && decision.kind !== 'headlight') movementLeaseUntil.set(robotId, Math.max(movementLeaseUntil.get(robotId) || 0, decision.deadlineMs));
         const p = { id: deviceCmdId, opId: id, key, deviceId: device.device.id, conn, robotId, subject: conn.subject, operatorKind: conn.principal.kind, role: decision.role, kind: decision.kind, value: decision.value, at: now(), timer: null };
         pendingCmds.set(deviceCmdId, p);
         inflight.set(key, deviceCmdId);
@@ -909,6 +921,14 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         if (p.timer.unref) p.timer.unref();
     }
 
+    /** The only fields of a driver's headlight ack data that reach a panel: stage and admitted. */
+    function headlightData(raw) {
+        if (!raw) return null;
+        const out = {};
+        if (raw.stage === 'headlight_pending' || raw.stage === 'headlight_refused') out.stage = raw.stage;
+        if (typeof raw.admitted === 'boolean') out.admitted = raw.admitted;
+        return Object.keys(out).length ? out : null;
+    }
     function cacheResult(key, r) { results.set(key, { ...r, at: now() }); if (results.size > 4096) results.delete(results.keys().next().value); }
 
     /**

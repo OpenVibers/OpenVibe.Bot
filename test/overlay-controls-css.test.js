@@ -35,4 +35,9 @@ const routes = fs.readFileSync(path.join(__dirname, '..', 'server', 'web', 'rout
 assert.ok(routes.includes("r.get('/panel/lock.svg', asset('lock.svg', 'image/svg+xml'))"), 'and the panel serves it');
 assert.ok(fs.existsSync(path.join(__dirname, '..', 'public', 'lock.svg')), 'the file exists');
 
+// 4. No custom property is defined from itself (`--danger: var(--danger, …)` is a cycle: the value is dropped, and every
+//    red in the overlay drew transparent, the robot pill's offline dot included).
+const cyclic = [...css.matchAll(/(--[a-z0-9-]+)\s*:\s*var\(\s*(--[a-z0-9-]+)/g)].filter((m) => m[1] === m[2]).map((m) => m[1]);
+assert.deepStrictEqual(cyclic, [], 'no custom property is defined from itself');
+
 console.log('overlay controls css: all checks passed');

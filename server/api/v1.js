@@ -22,6 +22,7 @@
  * | DELETE /robots/:id                             | bot.robot.manage       | owner                               |
  * | POST   /robots/:id/pairing-code                | bot.robot.manage       | owner                               |
  * | GET|POST /robots/:id/operators                 | bot.robot.read/manage  | owner (write) / member (read)       |
+ * | GET    /robots/:id/role                       | bot.robot.control      | a service asking about a subject, or a person asking about themself |
  * | DELETE /robots/:id/operators/:subject          | bot.robot.manage       | owner                               |
  * | GET    /robots/:id/devices                     | bot.robot.read         | a member                            |
  * | POST   /devices/:id/rotate, /revoke            | bot.device.connect     | the robot's owner                   |
@@ -385,6 +386,22 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
     r.get('/robots/:id/operators', wrap(async (req, res) => {
         await member(req, req.params.id, ['owner', 'operator']);
         res.json({ operators: await domain.members.list(req.params.id) });
+    }));
+    // Elements stage 1: the service that may control a robot (Live, sending a deck press as the viewer)
+    // asks which role that viewer holds on it. It is the same capability that lets it send the command, and
+    // the answer only says what Bot's own gate would already tell it. A person may ask about themself only.
+    r.get('/robots/:id/role', wrap(async (req, res) => {
+        const robot = await domain.robots.get(req.params.id);
+        if (!robot) fail(404, 'bot.robot_not_found', 'no such robot');
+        if (req.principal.kind === 'service') {
+            if (!apiAuth.granted(req.principal, CAP.control)) fail(403, 'capability.denied', `${CAP.control} not granted`);
+            const subject = userSubject(req.query.subject, 'subject');
+            return res.json({ subject, role: await domain.members.roleOf(robot.id, subject) });
+        }
+        fence(req);
+        const mine = me(req);
+        if (req.query.subject && req.query.subject !== mine) fail(403, 'bot.forbidden', 'you may only ask for yourself');
+        return res.json({ subject: mine, role: await domain.members.roleOf(robot.id, mine) });
     }));
     r.post('/robots/:id/operators', manage, wrap(async (req, res) => {
         await owner(req, req.params.id);
