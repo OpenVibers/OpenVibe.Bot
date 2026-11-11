@@ -52,6 +52,7 @@ const { renderPanel, renderEmbedRefused, renderDrivePage, renderPairingPage, ren
 const sharedServe = require('openvibe-shared/serve');
 const layoutStore = require('./layouts');
 const surface = require('./surface');
+const uiLayout = require('openvibe-sdk/ui-layout');
 const { createMachineScreen } = require('../machine-screen');
 const { createScreenShares } = require('../screen-shares');
 const { renderDocsIndex, renderDriversPage, renderProfilesPage, renderAutomationPage, renderComputersPage } = require('./docs');
@@ -949,6 +950,17 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         // flash of the default for a signed-in person). A Network that does not answer leaves the default.
         const device = surface.deviceClass(req);
         const token = req.cookies && req.cookies.ov_token;
+        // A layout made on another robot may name parts this one does not have: keep the parts this catalog knows,
+        // add the defaults of any it is missing, and use it only when the SDK accepts the result. Otherwise the
+        // panel draws its default (a stored layout is never a broken page).
+        const usable = (catalog, storedRaw, defaults) => {
+            if (!storedRaw || !Array.isArray(storedRaw.parts)) return null;
+            const known = new Set((catalog.parts || []).map((p) => p.id));
+            const parts = storedRaw.parts.filter((p) => p && known.has(p.id));
+            for (const d of defaults.parts || []) if (!parts.some((p) => p.id === d.id)) parts.push(d);
+            const candidate = { ...storedRaw, parts };
+            return uiLayout.validate(catalog, candidate).ok ? candidate : null;
+        };
         const overlayView = mode === 'embed' && view !== 'panel';
         let arrange;
         if (overlayView) {
@@ -959,20 +971,24 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
                 hasStick: !!overlayStickMarkup(profile, role === 'watcher' ? [] : domain.control.allowedFor(robot, role, profile)),
                 canDrive,
             });
-            const stored = signedIn && token ? await layoutStore.activeLayout({ config, token, surface: catalog.id, device }) : null;
+            const storedRaw = signedIn && token ? await layoutStore.activeLayout({ config, token, surface: catalog.id, device }) : null;
+            const fallbackLayout = surface.overlayDefaultLayout(catalog, device);
+            const stored = usable(catalog, storedRaw, fallbackLayout);
             arrange = {
-                catalog, layout: stored || surface.overlayDefaultLayout(catalog, device), device,
+                catalog, layout: stored || fallbackLayout, device,
                 signedIn: !!signedIn, layoutSource: stored ? 'account' : 'default',
                 save: `/panel/${robot.id}/arrange`, suggest: `/panel/${robot.id}/arrange/suggest`, share: `/panel/${robot.id}/arrange/share`,
                 author: req.viewer ? { name: req.viewer.username || req.viewer.name || 'Me' } : null,
             };
         } else {
             const catalog = surface.controlsCatalog(profile);
-            const stored = signedIn && token ? await layoutStore.activeLayout({ config, token, surface: catalog.id, device }) : null;
+            const storedRaw = signedIn && token ? await layoutStore.activeLayout({ config, token, surface: catalog.id, device }) : null;
+            const fallbackLayout = surface.defaultLayout(catalog, device);
+            const stored = usable(catalog, storedRaw, fallbackLayout);
             let src = null;
             try { src = sharedServe.url('ov-arrange.js'); } catch { /* an older openvibe-shared pin: no editor */ }
             arrange = {
-                catalog, parts: surface.partsOf(profile), layout: stored || surface.defaultLayout(catalog, device), device,
+                catalog, parts: surface.partsOf(profile), layout: stored || fallbackLayout, device,
                 signedIn: !!signedIn, layoutSource: stored ? 'account' : 'default', src,
                 save: `/panel/${robot.id}/arrange`, suggest: `/panel/${robot.id}/arrange/suggest`, share: `/panel/${robot.id}/arrange/share`,
                 author: req.viewer ? { name: req.viewer.username || req.viewer.name || 'Me' } : null,

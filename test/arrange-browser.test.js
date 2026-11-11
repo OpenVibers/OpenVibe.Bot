@@ -94,7 +94,23 @@ const server = http.createServer((req, res) => {
         await evalv(`document.querySelector('.ov-arrange-preview [data-keep]').click()`);
         assert.equal(await evalv(`window.ovArrange.layout().parts.find((p) => p.id === 'stop').place.x`), 0, 'Keep applied the suggestion');
         assert.ok(calls.suggest && calls.suggest.words === 'put Stop first', 'the words reached the panel route');
-        console.log('arrange-browser: Arrange on the panel, grid move, Save to the panel route, AI preview and Keep');
+        // The Controls v2 store becomes the person's first layout once, then is gone.
+        const ctx2 = await browser.newContext();
+        const p2 = await h.openPage(browser, ctx2, { width: 390, height: 800 });
+        const p2until = async (expr) => { const end = Date.now() + 8000; while (Date.now() < end) { const v = await p2.evaluate(expr); if (v) return v; await wait(50); } return false; };
+        await p2.goto(base + '/panel/r1', { maxMs: 8000 });
+        await p2.evaluate(`localStorage.setItem('ov-bot-pad-prefs', JSON.stringify({ hand: 'left', size: 'l', readouts: 'off' }))`);
+        await p2.goto(base + '/panel/r1', { maxMs: 8000 });
+        assert.ok(await p2until(`localStorage.getItem('ov-bot-pad-prefs') === null`), 'the old store is retired after one migration');
+        const migrated = JSON.parse(await p2.evaluate(`document.getElementById('ov-arrange-data').textContent`));
+        assert.deepEqual(migrated.layout.parts.find((p) => p.id === 'stop').place, { x: 0, y: 0, w: 2, h: 2 }, 'Stop takes the left hand');
+        assert.deepEqual(migrated.layout.parts.find((p) => p.id === 'stick').place, { x: 2, y: 0, w: 3, h: 3 }, 'the pad takes its larger size');
+        assert.equal(migrated.layout.parts.find((p) => p.id === 'battery').visible, false, 'the readouts are folded');
+        assert.ok(await p2until(`!!document.querySelector('.widgets[data-ov-arranged]')`), 'the migrated layout is drawn on the parts');
+        assert.equal(JSON.parse(await p2.evaluate(`document.getElementById('ov-arrange-data').textContent`)).layoutSource, 'default', 'the page was drawn from the default before the migration');
+        await p2.close();
+
+        console.log('arrange-browser: Arrange on the panel, grid move, Save to the panel route, AI preview and Keep, and the pad store migrated once');
     } finally {
         await browser.close();
         server.close();

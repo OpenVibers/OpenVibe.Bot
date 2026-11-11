@@ -973,7 +973,11 @@
                     return out;
                 },
                 onAsk: async (words, request) => post(data.suggest, { surface: data.surface, device: data.device, words, layout: request.layout, catalog: data.catalog }),
-                onShare: async (layout) => post(data.share, { surface: data.surface, device: data.device, catalog: data.catalog, layout }),
+                onShare: async (layout) => {
+                    const out = await post(data.share, { surface: data.surface, device: data.device, catalog: data.catalog, layout });
+                    data.layout = layout; got.el.textContent = JSON.stringify(data); saved = true;
+                    return out;
+                },
                 onClose: () => { opening = false; if (saved) setTimeout(() => location.reload(), 60); },
                 confirm: () => true,
             });

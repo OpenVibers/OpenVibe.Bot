@@ -43,8 +43,9 @@ function basePart(id, name, kind, extra = {}) {
 }
 
 /** The parts one widget contributes: the drive is split into its stick, Stop and direction buttons. */
-function driveParts(profile) {
-    const command = (profile.commands || {}).drive;
+function driveParts(profile, widget) {
+    const kind = widget && widget.command ? widget.command.kind : 'drive';
+    const command = (profile.commands || {})[kind];
     const axes = (command && command.axes) || {};
     const x = STICK_X.find((a) => axes[a]);
     const y = STICK_Y.find((a) => axes[a]);
@@ -74,6 +75,7 @@ const SIMPLE_WIDGETS = { battery: 'readout', latency: 'readout', telemetry: 'rea
 /** Every part this profile's full panel offers, in the order the page draws its widgets. */
 function partsOf(profile) {
     const widgets = (profile && profile.widgets) || [];
+    const hasCamera = widgets.some((w) => w.type === 'camera');
     const out = [];
     const seen = new Set();
     const add = (part, meta = {}) => {
@@ -85,7 +87,7 @@ function partsOf(profile) {
     let drive = false;
     widgets.forEach((w, i) => {
         if (w.type === 'drive') {
-            for (const [part, meta] of driveParts(profile)) add(part, { ...meta, widgetIndex: i });
+            for (const [part, meta] of driveParts(profile, w)) add(part, { ...meta, widgetIndex: i });
             drive = true;
             return;
         }
@@ -107,6 +109,7 @@ function partsOf(profile) {
             return;
         }
         if (SIMPLE_WIDGETS[w.type]) {
+            if (w.type === 'video_click' && hasCamera) return;
             const kind = SIMPLE_WIDGETS[w.type];
             add(basePart(w.type === 'video_click' ? 'camera' : w.type, w.label || (w.type === 'battery' ? 'Battery' : w.type === 'latency' ? 'Latency' : w.type === 'camera' || w.type === 'video_click' ? 'Camera' : w.type), kind, {
                 pressed: kind === 'button' || kind === 'stick',

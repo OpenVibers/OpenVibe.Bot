@@ -697,24 +697,25 @@ body.bot-mode-compact .bot-compact .bot-notice { color: var(--warn); background:
 /* A person's docked overlay: the four edges and their order. The default overlay keeps the rules above; this
    only takes over when the layout is the person's own (data-ov-custom). */
 [data-ov-custom] [data-ov-part][data-ov-dock] { position: absolute; }
-[data-ov-custom] [data-ov-part][data-ov-dock="left"] { left: calc(16px + env(safe-area-inset-left)); }
-[data-ov-custom] [data-ov-part][data-ov-dock="right"] { right: calc(16px + env(safe-area-inset-right)); }
-[data-ov-custom] [data-ov-part][data-ov-dock="top"] { top: calc(16px + env(safe-area-inset-top)); }
-[data-ov-custom] [data-ov-part][data-ov-dock="bottom"] { bottom: calc(16px + env(safe-area-inset-bottom)); }
+[data-ov-custom] [data-ov-part][data-ov-dock="left"] { left: calc(16px + env(safe-area-inset-left)); right: auto; }
+[data-ov-custom] [data-ov-part][data-ov-dock="right"] { right: calc(16px + env(safe-area-inset-right)); left: auto; }
+[data-ov-custom] [data-ov-part][data-ov-dock="top"] { top: calc(16px + env(safe-area-inset-top)); bottom: auto; }
+[data-ov-custom] [data-ov-part][data-ov-dock="bottom"] { bottom: calc(16px + env(safe-area-inset-bottom)); top: auto; }
 [data-ov-custom] [data-ov-part][data-ov-dock="left"][data-ov-order="0"],
-[data-ov-custom] [data-ov-part][data-ov-dock="right"][data-ov-order="0"] { top: calc(16px + env(safe-area-inset-top)); }
+[data-ov-custom] [data-ov-part][data-ov-dock="right"][data-ov-order="0"] { top: calc(16px + env(safe-area-inset-top)); bottom: auto; }
 [data-ov-custom] [data-ov-part][data-ov-dock="left"][data-ov-order="1"],
-[data-ov-custom] [data-ov-part][data-ov-dock="right"][data-ov-order="1"] { bottom: calc(16px + env(safe-area-inset-bottom)); }
+[data-ov-custom] [data-ov-part][data-ov-dock="right"][data-ov-order="1"] { bottom: calc(16px + env(safe-area-inset-bottom)); top: auto; }
 [data-ov-custom] [data-ov-part][data-ov-dock="left"][data-ov-order="2"],
-[data-ov-custom] [data-ov-part][data-ov-dock="right"][data-ov-order="2"] { bottom: calc(80px + env(safe-area-inset-bottom)); }
-[data-ov-custom] [data-ov-part="more"][data-ov-dock="right"] { top: calc(68px + env(safe-area-inset-top)); }
+[data-ov-custom] [data-ov-part][data-ov-dock="right"][data-ov-order="2"] { bottom: calc(80px + env(safe-area-inset-bottom)); top: auto; }
+[data-ov-custom] [data-ov-part="more"][data-ov-dock="right"] { top: calc(68px + env(safe-area-inset-top)); bottom: auto; }
 [data-ov-custom] [data-ov-part="slider"][data-ov-dock="bottom"] { left: 50%; transform: translateX(-50%); }
 
 /* ── Controls v2 (ask 368, 2026-11-11: the owner circled the pad, the Stop, the head slider and the readouts:
    "redesign … polish … more consistent … per user"). One family on the full panel, in a channel's Robot tab and
    framed anywhere: the stick has its four marks and a knob that lights when it drives; Stop is a ringed red disc
    beside it (on the hand this person chose); a slider says its value with − and + to step it; battery and latency
-   are slim readout rows. The pad's arrangement menu (the sliders icon) keeps the hand, the size and the readouts. ─── */
+   are slim readout rows. The Arrange button (make your own controls) replaces the old arrangement menu; the pad's
+   hand, size and readouts are now the person's ui.layout@1. ─── */
 #panel .widget-drive { position: relative; }
 #panel .drive-pad { grid-template-columns: auto auto; justify-content: center; align-items: center; gap: 0.75rem 1.4rem; }
 #panel .drive-pad > :not(.stick):not(.stop) { grid-column: 1 / -1; }
