@@ -639,7 +639,9 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         if (/^desk-/.test(named) && await domain.deskLeases.get(device.id, named)) fail(409, 'bot.desk_leased', 'that desk is held by an OpenVibe.Run session');
         const principal = req.principal.kind === 'service' ? { ...req.principal, subject } : req.principal;
         const result = await hub.machineCommand(device.id, principal, subject, { id: req.body?.id, kind: req.body?.kind, value: req.body?.value, ms: req.body?.ms });
-        if (result.result === 'refused') fail(commandRefusalStatus(result.code), result.code, result.reason || null);
+        if (result.result === 'refused') return http.sendProblem(res, commandRefusalStatus(result.code), result.code, {
+            detail: result.reason || null, ctx: req.ov, extra: { delivery: result.delivery, retry: result.retry },
+        });
         res.json({ machine_id: device.id, ...result });
     }));
     // Who has a desk right now (Desks plan D4): an agent that asked its person to take over a step (a sign-in, a

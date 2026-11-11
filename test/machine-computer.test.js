@@ -6,8 +6,14 @@
 // send these kinds; a machine whose plugin is off answers bot.computer_off.
 const assert = require('assert');
 const { boot, check, done } = require('./helpers/app');
+const { withDelivery } = require('../server/command-delivery');
 
 (async () => {
+    await check('a timeout or in-flight repeat never claims a safe retry', async () => {
+        for (const r of [{ result: 'expired' }, { result: 'pending' }, { result: 'refused', code: 'bot.command_pending' }]) {
+            assert.deepStrictEqual([withDelivery(r).delivery, withDelivery(r).retry.safe], ['uncertain', false]);
+        }
+    });
     const t = await boot({ env: { BOT_ROUTINE_TICK_MS: '0', BOT_WEBHOOK_TICK_MS: '0', BOT_PERSON_TURN_MS: '400' } });
     const alex = t.network.newUser('alex');
     const bob = t.network.newUser('bob');
@@ -57,6 +63,7 @@ const { boot, check, done } = require('./helpers/app');
         const r = await cmd(mine.deviceId, { id: 'a1', kind: 'exec', value: { argv: ['echo', 'hi'], stdin: 'secret input' } }, { user: alex });
         assert.strictEqual(r.status, 200, r.text);
         assert.deepStrictEqual([r.json.result, r.json.data.stdout, r.json.machine_id], ['ack', 'hi\n', mine.deviceId]);
+        assert.deepStrictEqual([r.json.delivery, r.json.retry.safe], ['delivered', false]);
         const sent = seen.at(-1);
         assert.deepStrictEqual([sent.kind, sent.operator.role, sent.value.argv], ['exec', 'owner', ['echo', 'hi']]);
         assert.ok(sent.deadline_ms - Date.now() > 50000, 'a long reply window by default');
@@ -64,6 +71,7 @@ const { boot, check, done } = require('./helpers/app');
         assert.deepStrictEqual([ls.status, ls.json.data.path], [200, '/home/alex']);
         const again = await cmd(mine.deviceId, { id: 'a1', kind: 'exec', value: { argv: ['echo', 'hi'] } }, { user: alex });
         assert.deepStrictEqual([again.json.result, again.json.cached, again.json.data], ['ack', true, undefined], 'a repeated id: its result, never the data again');
+        assert.deepStrictEqual([again.json.delivery, again.json.retry.safe], ['delivered', false]);
     });
 
     await check('an answer larger than 64 KB comes through; a refusal on the machine says why', async () => {
@@ -71,6 +79,7 @@ const { boot, check, done } = require('./helpers/app');
         assert.deepStrictEqual([big.status, big.json.data.stdout.length], [200, 200 * 1024]);
         const nack = await cmd(mine.deviceId, { kind: 'screen', value: {} }, { user: alex });
         assert.deepStrictEqual([nack.status, nack.json.result, nack.json.reason], [200, 'nack', 'this machine allows observing only']);
+        assert.deepStrictEqual([nack.json.delivery, nack.json.retry.safe], ['delivered', false], 'a machine refusal proves delivery');
     });
 
     await check('mouse and keyboard reach the machine as they were asked; a key is a key, never a command line', async () => {
@@ -300,6 +309,7 @@ const { boot, check, done } = require('./helpers/app');
         const off = await machine(bob, null);
         const r = await cmd(off.deviceId, { kind: 'fs', value: { op: 'list', path: '/' } }, { user: bob });
         assert.deepStrictEqual([r.status, r.json.code], [409, 'bot.computer_off']);
+        assert.deepStrictEqual([r.json.delivery, r.json.retry.safe], ['not_delivered', true]);
         off.c.close();
     });
 

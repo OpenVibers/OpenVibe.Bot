@@ -756,7 +756,8 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
      * → { id, result, code?, reason?, latency_ms?, data?, cached? }
      */
     function machineCommand(deviceId, principal, subject, msg) {
-        return machineSend(deviceId, principal, subject, { id: msg.id, kind: msg.kind, value: msg.value, ms: msg.ms });
+        return machineSend(deviceId, principal, subject, { id: msg.id, kind: msg.kind, value: msg.value, ms: msg.ms })
+            .then(require('./command-delivery').withDelivery);
     }
     /**
      * The live screen to the machine (api/v1.js and the web routes, the owner only): `value` is screen_stream's,
