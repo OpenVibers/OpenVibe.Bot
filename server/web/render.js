@@ -48,6 +48,7 @@ const PATHS = {
     cw: '<path d="M20 4v6h-6"/><path d="M18.5 15a7.5 7.5 0 1 1-1.8-7.8L20 10"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
     minus: '<path d="M5 12h14"/>',
+    sliders: '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>',
     stop: '<path d="M8.2 2h7.6L22 8.2v7.6L15.8 22H8.2L2 15.8V8.2z"/><path d="M8 12h8"/>',
     square: '<rect x="6" y="6" width="12" height="12" rx="1.5"/>',
     camera: '<path d="M3 7h3l2-3h8l2 3h3v12H3z"/><circle cx="12" cy="13" r="3.5"/>',
@@ -127,11 +128,28 @@ function drivePad(axes, enabled) {
     const label = [y && AXIS_NAME[y], x && AXIS_NAME[x]].filter(Boolean).join(' and ');
     const joystick = x || y
         ? `<div class="stick" data-joystick="${data(stick)}" role="img" aria-label="${esc(`Joystick: ${label}. Drag and hold to drive.`)}"${enabled ? '' : ' aria-disabled="true"'}>`
-            + '<span class="stick-ring"></span><span class="stick-cross"></span>'
+            + '<span class="stick-ring"></span><span class="stick-cross"></span><svg class="stick-dirs" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><path d="M50 5l6 7H44zM95 50l-7 6V44zM50 95l-6-7h12zM5 50l7-6v12z"/></svg>'
             + `<span class="stick-knob" data-knob></span></div>`
         : '';
     return `<div class="drive-pad" data-axes="${data(axes)}">${joystick}${Object.keys(rest).length ? `<div class="pad">${axisButtons(rest, enabled)}</div>` : ''}`
-        + `<button type="button" class="stop" data-stop${disabledUnless(enabled)}>${icon('square')}<span>Stop</span></button></div>`;
+        + `<button type="button" class="stop" data-stop${disabledUnless(enabled)}>${icon('square')}<span>Stop</span></button></div>`
+        + padPrefs();
+}
+
+/**
+ * How this person likes the pad (controls v2, ask 368: "make it … per user"): the hand the Stop sits on, the pad's size
+ * and the readouts shown or folded. public/panel.js keeps the choice in this browser and sets data-hand, data-pad and
+ * data-readouts on #panel; nothing here changes what the robot does.
+ */
+function padPrefs() {
+    const group = (name, label, opts) => `<div class="pad-pref" role="radiogroup" aria-label="${esc(label)}"><span class="pad-pref-l">${esc(label)}</span><div class="pad-pref-opts">${opts.map(([v, t]) =>
+        `<label><input type="radio" name="pad-${esc(name)}" value="${esc(v)}" data-pad-pref="${esc(name)}"><span>${esc(t)}</span></label>`).join('')}</div></div>`;
+    return `<button type="button" class="pad-prefs-btn" data-pad-prefs aria-expanded="false" aria-controls="pad-prefs" title="Arrange the controls" aria-label="Arrange the controls">${icon('sliders')}</button>`
+        + `<div class="pad-prefs" id="pad-prefs" data-pad-prefs-menu hidden>`
+        + group('hand', 'Stop on the', [['right', 'Right'], ['left', 'Left']])
+        + group('size', 'Pad', [['s', 'Small'], ['m', 'Medium'], ['l', 'Large']])
+        + group('readouts', 'Readouts', [['on', 'Shown'], ['off', 'Folded']])
+        + '</div>';
 }
 
 /** An actuator's name as a label: backpack_lights → Backpack lights. */
@@ -157,7 +175,10 @@ function actuatorControl(name, a, enabled, profileId = '') {
     const off = disabledUnless(enabled);
     const label = humanName(name);
     if (a.type === 'number') {
-        return `<label class="control slider"><span class="control-name">${esc(label)}</span> ${numberRange(name, a, enabled, profileId)}</label>`;
+        return `<div class="control slider"><label class="slider-head"><span class="control-name">${esc(label)}</span><output class="control-value" data-value-of="${esc(name)}">0</output></label>`
+            + `<div class="slider-row"><button type="button" class="step" data-step-for="${esc(name)}" data-step="-1" aria-label="${esc(`${label} down`)}"${off}>${icon('minus')}</button>`
+            + `${numberRange(name, a, enabled, profileId)}`
+            + `<button type="button" class="step" data-step-for="${esc(name)}" data-step="1" aria-label="${esc(`${label} up`)}"${off}>${icon('plus')}</button></div></div>`;
     }
     if (a.type === 'rgb') {
         return `<div class="control colour"><label><span class="control-name">${esc(label)}</span> <input type="color" value="#ffffff" data-rgb="${esc(name)}"${off}></label>`
@@ -234,7 +255,7 @@ function renderWidget(w, { profile = {}, allowed_commands = [], signaling_url = 
             // sim … would work killer for LOOI or any PTZ"): drag to move, let go to stop; zoom stays on its buttons.
             const ptzStick = axes.pan && axes.tilt
                 ? `<div class="stick stick--ptz" data-ptz-stick="${data({ x: 'pan', y: 'tilt' })}" data-axes="${data(axes)}" role="img" aria-label="Joystick: pan and tilt. Drag and hold to move the camera."${enabled ? '' : ' aria-disabled="true"'}>`
-                    + '<span class="stick-ring"></span><span class="stick-cross"></span><span class="stick-knob" data-knob></span></div>'
+                    + '<span class="stick-ring"></span><span class="stick-cross"></span><svg class="stick-dirs" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><path d="M50 5l6 7H44zM95 50l-7 6V44zM50 95l-6-7h12zM5 50l7-6v12z"/></svg><span class="stick-knob" data-knob></span></div>'
                 : '';
             inner = `<div class="ptz-pad">${ptzStick}<div class="pad">${axisButtons(axes, enabled)}</div></div>`;
             break;
@@ -283,7 +304,7 @@ function renderWidget(w, { profile = {}, allowed_commands = [], signaling_url = 
             const hasDrive = (profile.widgets || []).some((x) => x.type === 'drive');
             const buttonStick = dirs.length >= 2 && !hasDrive
                 ? `<div class="stick stick--buttons" data-button-stick role="img" aria-label="Joystick: presses ${esc(dirs.map((d) => d.label).join(', '))}. Drag and hold to drive."${enabled ? '' : ' aria-disabled="true"'}>`
-                    + '<span class="stick-ring"></span><span class="stick-cross"></span><span class="stick-knob" data-knob></span></div>'
+                    + '<span class="stick-ring"></span><span class="stick-cross"></span><svg class="stick-dirs" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><path d="M50 5l6 7H44zM95 50l-7 6V44zM50 95l-6-7h12zM5 50l7-6v12z"/></svg><span class="stick-knob" data-knob></span></div>'
                     + `<p class="hint"><kbd>W A S D</kbd> or arrows press ${esc(dirs.map((d) => d.label).join(', '))}. <span class="pad-hint" data-pad-hint>${icon('gamepad')} A gamepad's stick and D-pad do too.</span></p>`
                 : '';
             inner = `${buttonStick}<div class="button-grid">${Object.entries(names).map(([name, button]) =>
@@ -590,14 +611,14 @@ function overlayStickMarkup(profile, allowed) {
             const label = [y && AXIS_NAME[y], x && AXIS_NAME[x]].filter(Boolean).join(' and ');
             return `<section class="widget widget-drive bot-widget" data-widget="drive" data-command="${data(w.command)}">`
                 + `<div class="drive-pad" data-axes="${data(axes)}"><div class="stick" data-joystick="${data(stick)}" role="img" aria-label="${esc(`Joystick: ${label}. Drag and hold to drive.`)}"${enabled ? '' : ' aria-disabled="true"'}>`
-                + '<span class="stick-ring"></span><span class="stick-cross"></span><span class="stick-knob" data-knob></span></div></div></section>';
+                + '<span class="stick-ring"></span><span class="stick-cross"></span><svg class="stick-dirs" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><path d="M50 5l6 7H44zM95 50l-7 6V44zM50 95l-6-7h12zM5 50l7-6v12z"/></svg><span class="stick-knob" data-knob></span></div></div></section>';
         }
         if (w.type === 'ptz') {
             const axes = (commands[kind] && commands[kind].axes) || {};
             if (!axes.pan || !axes.tilt) continue;
             return `<section class="widget widget-ptz bot-widget" data-widget="ptz" data-command="${data(w.command)}">`
                 + `<div class="ptz-pad"><div class="stick stick--ptz" data-ptz-stick="${data({ x: 'pan', y: 'tilt' })}" data-axes="${data(axes)}" role="img" aria-label="Joystick: pan and tilt. Drag and hold to move the camera."${enabled ? '' : ' aria-disabled="true"'}>`
-                + '<span class="stick-ring"></span><span class="stick-cross"></span><span class="stick-knob" data-knob></span></div></div></section>';
+                + '<span class="stick-ring"></span><span class="stick-cross"></span><svg class="stick-dirs" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><path d="M50 5l6 7H44zM95 50l-7 6V44zM50 95l-6-7h12zM5 50l7-6v12z"/></svg><span class="stick-knob" data-knob></span></div></div></section>';
         }
         if (w.type === 'buttons') {
             const names = (commands.button && commands.button.names) || {};
@@ -605,7 +626,7 @@ function overlayStickMarkup(profile, allowed) {
             if (dirs.length < 2) continue;
             return `<section class="widget widget-buttons bot-widget" data-widget="buttons" data-command="${data(w.command || { kind: 'button' })}">`
                 + `<div class="stick stick--buttons" data-button-stick role="img" aria-label="${esc(`Joystick: presses ${dirs.map((d) => d.label).join(', ')}. Drag and hold to drive.`)}"${enabled ? '' : ' aria-disabled="true"'}>`
-                + '<span class="stick-ring"></span><span class="stick-cross"></span><span class="stick-knob" data-knob></span></div></section>';
+                + '<span class="stick-ring"></span><span class="stick-cross"></span><svg class="stick-dirs" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><path d="M50 5l6 7H44zM95 50l-7 6V44zM50 95l-6-7h12zM5 50l7-6v12z"/></svg><span class="stick-knob" data-knob></span></div></section>';
         }
     }
     return '';

@@ -448,7 +448,7 @@ resumes it at once.
 
 ```json
 { "v": 1, "seq": 3, "ts": 1738065600206, "type": "command_result", "id": "cmd_01J8Z4F…",
-  "result": "refused", "code": "bot.device_offline", "reason": "the device is offline; commands are never queued" }
+  "result": "refused", "code": "bot.device_offline", "reason": "The robot is offline. Nothing you press waits for it: it moves only while it is connected." }
 ```
 
 ```json

@@ -1458,7 +1458,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         }
         const allow = allowedFor(robot, role, profile);
         if (!allow.includes(kind)) return { ok: false, code: 'bot.command_not_allowed', reason: `${kind} is not allowed for ${role}`, robot, role };
-        if (!online) return { ok: false, code: 'bot.device_offline', reason: 'the device is offline; commands are never queued', robot, role };
+        if (!online) return { ok: false, code: 'bot.device_offline', reason: 'The robot is offline. Nothing you press waits for it: it moves only while it is connected.', robot, role };
 
         const eff = effectiveLimits(robot, profile);
         const release = kind === 'button' && value && value.state === 'up';

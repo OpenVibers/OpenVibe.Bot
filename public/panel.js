@@ -879,6 +879,49 @@
         });
         for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) el.addEventListener(ev, stop);
     });
+    // Controls v2: a slider says its value and fills its track to it (--p); − and + beside it step it a tenth of its
+    // range, the same input a drag makes, so the same command goes (and the same throttle holds).
+    const fmt = (v) => (Math.abs(v) >= 10 ? String(Math.round(v)) : String(Math.round(v * 100) / 100));
+    $$('input[type="range"][data-actuator]').forEach((el) => {
+        const out = document.querySelector(`[data-value-of="${CSS.escape(el.dataset.actuator)}"]`);
+        const paint = () => { const lo = Number(el.min), hi = Number(el.max), v = Number(el.value); el.style.setProperty('--p', `${((v - lo) / ((hi - lo) || 1)) * 100}%`); if (out) out.textContent = fmt(v); };
+        el.addEventListener('input', paint);
+        el.addEventListener('change', paint);
+        paint();
+    });
+    $$('[data-step-for]').forEach((b) => b.addEventListener('click', () => {
+        const el = document.querySelector(`input[data-actuator="${CSS.escape(b.dataset.stepFor)}"]`);
+        if (!el || el.disabled) return;
+        const lo = Number(el.min), hi = Number(el.max);
+        el.value = String(Math.min(hi, Math.max(lo, Number(el.value) + ((hi - lo) / 10) * Number(b.dataset.step))));
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+    }));
+    // The pad's arrangement, this person's (kept in this browser): the Stop's hand, the pad's size, the readouts.
+    (() => {
+        const KEY = 'ov-bot-pad-prefs';
+        const panelEl = document.getElementById('panel');
+        const btn = document.querySelector('[data-pad-prefs]');
+        const menu = document.querySelector('[data-pad-prefs-menu]');
+        if (!panelEl) return;
+        let prefs = { hand: 'right', size: 'm', readouts: 'on' };
+        try { prefs = { ...prefs, ...(JSON.parse(localStorage.getItem(KEY) || '{}') || {}) }; } catch { /* private mode */ }
+        const apply = () => {
+            panelEl.dataset.hand = prefs.hand; panelEl.dataset.pad = prefs.size; panelEl.dataset.readouts = prefs.readouts;
+            $$('[data-pad-pref]').forEach((r) => { r.checked = prefs[r.dataset.padPref] === r.value; });
+        };
+        apply();
+        if (!btn || !menu) return;
+        const close = () => { menu.hidden = true; btn.setAttribute('aria-expanded', 'false'); };
+        btn.addEventListener('click', (e) => { e.stopPropagation(); const open = menu.hidden; menu.hidden = !open; btn.setAttribute('aria-expanded', String(open)); });
+        document.addEventListener('click', (e) => { if (!menu.hidden && !menu.contains(e.target) && e.target !== btn) close(); });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !menu.hidden) { close(); btn.focus(); } });
+        $$('[data-pad-pref]').forEach((r) => r.addEventListener('change', () => {
+            prefs[r.dataset.padPref] = r.value;
+            try { localStorage.setItem(KEY, JSON.stringify(prefs)); } catch { /* */ }
+            apply();
+        }));
+    })();
     const stopRepeats = () => { [...repeats].forEach((s) => s()); };
     window.addEventListener('blur', stopRepeats);
     document.addEventListener('visibilitychange', () => { if (document.hidden) stopRepeats(); });
@@ -943,7 +986,8 @@
     function enableControls() {
         for (const section of $$('[data-command]')) {
             const ok = joined && allowed.includes(JSON.parse(section.dataset.command).kind);
-            for (const el of $$('button, input, select', section)) el.disabled = !ok;
+            // The pad's arrangement is this person's own and works offline: it is never a control of the robot.
+            for (const el of $$('button, input, select', section)) if (!el.closest('[data-pad-prefs-menu]') && !el.matches('[data-pad-prefs]')) el.disabled = !ok;
             for (const el of $$('[data-joystick], [data-button-stick], [data-ptz-stick]', section)) { if (ok) el.removeAttribute('aria-disabled'); else el.setAttribute('aria-disabled', 'true'); }
         }
         announceControls();
