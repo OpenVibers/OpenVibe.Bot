@@ -6,12 +6,12 @@
   "port": 4630,
   "domain": "openvibe.bot (www -> apex; /device and /control WebSockets; /install)",
   "contracts": "openvibe-contracts v0.406.0",
-  "sdk": "openvibe-sdk v0.150.0",
-  "shared": "openvibe-shared v4.211.0",
+  "sdk": "openvibe-sdk 0.151.0 (reviewed commit 6236bf23edc3f73c8eaed78f3616bb25d253ff29)",
+  "shared": "openvibe-shared 4.214.0 (reviewed commit 7bcd35e9d32e987b83f777bbadd0d86cd2cb5dd1)",
   "packages": [
     "openvibe-contracts v0.406.0",
-    "openvibe-sdk v0.150.0",
-    "openvibe-shared v4.211.0"
+    "openvibe-sdk 0.151.0 (commit 6236bf23edc3f73c8eaed78f3616bb25d253ff29)",
+    "openvibe-shared 4.214.0 (commit 7bcd35e9d32e987b83f777bbadd0d86cd2cb5dd1)"
   ],
   "capabilities": [
     "bot.robot.read",
@@ -43,7 +43,7 @@
     "device credentials hashed at rest and rotatable; revoke closes the socket at once and revokes the Network principal for a node machine",
     "catalogue profiles adeept.adr036 (+ mecanum variant), cozmo, looi, phone.camera, camera.onvif, sim.rover, relay.generic (the bare relay robot; OpenVibe.Live's old controls were converted to it and deleted from Live) and ros2.diffdrive / ros2.holonomic, seeded from server/profiles/*.json; owner-edited robot-local button and video-click profiles stored with each robot",
     "ROS 2 robots: profiles ros2.diffdrive and ros2.holonomic (mapping driver plugin, plugin ros2; drive, camera, distance ahead, battery), installer --driver ros2 / ros2-holonomic; the device side is OpenVibe Link's bundled ros2 plugin (cmd_vel Twist, BatteryState, Range/LaserScan, Odometry, CompressedImage; rclpy or rosbridge)",
-    "curated kit catalogue (server/kits/*.json; GET /api/v1/kits, /kits/:id): each kit's parts list and build guide, validated and bound to a shipped profile \u2014 the Adeept ADR036 first; metadata only (pricing, shipping and returns are O29)",
+    "curated kit catalogue (server/kits/*.json; GET /api/v1/kits, /kits/:id): each kit's parts list and build guide, validated and bound to a shipped profile — the Adeept ADR036 first; metadata only (pricing, shipping and returns are O29)",
     "a latched e-stop only the owner clears, with halt always allowed, and a device-side deadman deadline on the motion kinds",
     "command audit kept 30 days, and the bot.robot.online/offline, bot.estop.set/cleared and bot.command.refused outbox events",
     "public robot-profile catalogue (GET /profiles, /profiles/:id); robots are private to their owner, with public control only as a timed turn queue",
@@ -55,8 +55,8 @@
     "community robots (server/submissions.js, migration 0010): submit at /robots/submit (id community.<name>, driver plugin + mapping.plugin, Contracts 0.160.0, https driver and guide links, licence), status at /robots/submissions, admin review there (approve signs Ed25519 over canonical JSON with BOT_PROFILE_SIGNING_KEY and inserts robot_profiles; reject needs a note); GET /api/v1/profiles/:id carries the signature, GET /api/v1/profiles/signing-key the public key; /models lists them under From the community with credits; in the ADR-033 export, and deletion drops unapproved ones and keeps approved ones authorless",
     "routines (server/routines.js, migration 0011): steps in plain lines parsed against the profile, run on demand, every N minutes (>= 5), daily at a UTC time on chosen days, or on bot.robot.online; each step through hub.operatorCommand as the owner, held steps re-sent within the deadman and released, a refusal stops it with its reason, one per robot at a time; panel card + /api/v1/robots/:id/routines",
     "webhooks (server/webhooks.js, migration 0011): up to 5 https endpoints per robot for bot.robot.online/offline, bot.estop.set/cleared, bot.command.refused; whsec_ secret shown once; deliveries written in the emitting transaction, signed X-OpenVibe-Signature-V2 (openvibe-sdk/events), posted through the public-only poster with no redirects, retried 30 s/2/10/30/120 min then failed; panel card + /api/v1/robots/:id/webhooks",
-    "the owner's agent (migration 0012 robots.agent_control): panel 'Your agent' switch; svc:actor acting for the owner only reads GET /api/v1/robots/:id/steps (state + step words) and runs POST \u2026/steps (<= 20 steps, <= 30 s, through hub.operatorCommand, audited as the service) or POST \u2026/commands; otherwise 403 bot.agent_not_allowed",
-    "the panel's People card: the owner adds an operator or viewer by @username (OpenVibe.Network resolves the name to a subject) and removes them again, shown with Network's names; a signed-in visitor on an open-queue robot sees their turn or their place in line and can leave the queue, promoting the next person (POST /robots/:id/operators and \u2026/operators/:subject/remove, POST /robots/:id/queue/leave)",
+    "the owner's agent (migration 0012 robots.agent_control): panel 'Your agent' switch; svc:actor acting for the owner only reads GET /api/v1/robots/:id/steps (state + step words) and runs POST …/steps (<= 20 steps, <= 30 s, through hub.operatorCommand, audited as the service) or POST …/commands; otherwise 403 bot.agent_not_allowed",
+    "the panel's People card: the owner adds an operator or viewer by @username (OpenVibe.Network resolves the name to a subject) and removes them again, shown with Network's names; a signed-in visitor on an open-queue robot sees their turn or their place in line and can leave the queue, promoting the next person (POST /robots/:id/operators and …/operators/:subject/remove, POST /robots/:id/queue/leave)",
     "panel input: a touch joystick, the keyboard and a gamepad (Gamepad API), each held control re-sent while held and zeroed at once on release; a latency meter (round-trip median and telemetry age); one camera tile per camera the profile lists, playing the robot's live OpenRestream WebRTC session (the Adeept and Cozmo profiles carry a camera widget since 2026-10-13); a readout shows the sensor keys the Link's drivers report (distance_cm, line, cliff and picked_up); a live online indicator on /pair/:id read from /control",
     "platform.job@1 jobs dispatched to a paired Link over /device (platform.job-frame@1: resent unacked on reconnect, only to an advertised runtime class) and metered per second into run_usage_outbox for billing.usage.record",
     "embed opt-in: robots.embed_public (migration 0005), set only by the owner with POST /robots/:id/embed, web-only (not in /api/v1); BOT_EMBED_ORIGINS is the validated frame-ancestors allow-list for the embeddable panel (default OpenVibe.Live)",
