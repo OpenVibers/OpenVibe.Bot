@@ -548,3 +548,121 @@ body.bot-mode-compact .bot-compact .bot-control { background: transparent; borde
 /* The e-stop reads as one: a red ring and glyph on the same scrim. */
 .bot-estop { border-color: color-mix(in srgb, var(--danger) 70%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 18%, transparent); }
 .bot-pill[data-state="estop"] { border-color: color-mix(in srgb, var(--danger) 55%, rgba(255, 255, 255, 0.14)); }
+
+/* ── The panel in a frame, compact at any size (ask 353, 2026-11-11: on a phone the framed panel was 950 px of
+   banner, header, pills, a 240 px stick and four cards, and it pushed the stream's chat off the screen) ──────────
+   A frame's height follows its content (embed-frame.js), so nothing here may depend on the frame's height or
+   orientation: those media queries above are for the panel's own page. The frame's width decides the columns. */
+html.embed-page[data-bot-view="panel"] main#panel:not(.bot-surface) { padding: 0.6rem 0.7rem calc(0.7rem + env(safe-area-inset-bottom)); }
+/* The e-stop bar only when it says something (latched) or holds the button (you drive): clear and watching, the
+   state is the dot in the head's pill. */
+html.embed-page[data-bot-view="panel"] .estop-banner[data-latched="false"]:not(:has(.estop:not([hidden]))) { display: none; }
+html.embed-page[data-bot-view="panel"] .estop-bar { padding: 0.35rem 0.7rem; gap: 0.5rem; }
+html.embed-page[data-bot-view="panel"] .estop-state { font-size: 0.9rem; }
+html.embed-page[data-bot-view="panel"] .estop { min-height: 44px; min-width: 0; padding: 0 0.85rem; border-radius: 12px; font-size: 0.85rem; box-shadow: 0 3px 0 var(--danger-deep); }
+/* The head: one row with the name, its state, Drive and the way to the robot's own page. */
+html.embed-page[data-bot-view="panel"] #panel > .panel-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.5rem; margin: 0 0 0.6rem; }
+html.embed-page[data-bot-view="panel"] .panel-head .ovk-page-head { margin: 0; flex: 0 1 auto; min-width: 0; padding: 0; }
+html.embed-page[data-bot-view="panel"] .panel-head .ovk-page-head-row { gap: 0; min-height: 0; }
+html.embed-page[data-bot-view="panel"] .panel-head .ovk-heading-icon { display: none; }
+html.embed-page[data-bot-view="panel"] .panel-head h1 { margin: 0; font-size: 1.05rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html.embed-page[data-bot-view="panel"] .panel-head .meta { flex: 1 1 0; min-width: 0; margin: 0; gap: 0.3rem; flex-wrap: nowrap; overflow: hidden; }
+html.embed-page[data-bot-view="panel"] .panel-head .meta .pill { min-height: 1.6rem; padding: 0 0.5rem; font-size: 0.75rem; }
+html.embed-page[data-bot-view="panel"] .embed-sign-in { display: flex; align-items: center; gap: 0.4rem; margin: 0 0 0 auto; }
+html.embed-page[data-bot-view="panel"] .embed-sign-in .button { min-height: 40px; padding: 0 0.85rem; font-size: 0.9rem; }
+html.embed-page[data-bot-view="panel"] .embed-open { width: 40px; min-width: 40px; padding: 0; }
+html.embed-page[data-bot-view="panel"] .embed-open span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+html.embed-page[data-bot-view="panel"] .panel-head .turn-strip, html.embed-page[data-bot-view="panel"] .panel-head > :is(.notice, .turn) { flex-basis: 100%; }
+/* Narrow: the name, its state and the actions; the profile and "Watching" (Drive says it) step aside. */
+@media (max-width: 30rem) { html.embed-page[data-bot-view="panel"] .panel-head .meta .pill:not(.online) { display: none; } }
+/* The cards: tighter, and a card with one control lets that control's name be its title. */
+html.embed-page[data-bot-view="panel"] .widgets { gap: 0.5rem; grid-template-columns: minmax(0, 1fr); }
+html.embed-page[data-bot-view="panel"] .widget { padding: 0.7rem; border-radius: 12px; }
+html.embed-page[data-bot-view="panel"] .widget h2 { margin: 0 0 0.45rem; font-size: 0.68rem; }
+html.embed-page[data-bot-view="panel"] .widget:has(> .controls > .control:only-child) > h2,
+html.embed-page[data-bot-view="panel"] .widget-drive > h2 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+html.embed-page[data-bot-view="panel"] :is(.widget-camera, .widget-video_click, .widget-drive) { grid-column: auto; grid-row: auto; position: static; box-shadow: none; }
+/* The stick and Stop side by side: a thumb on each. */
+html.embed-page[data-bot-view="panel"] .drive-pad { grid-template-columns: auto auto; justify-content: center; align-items: center; gap: 0.75rem 1.25rem; }
+html.embed-page[data-bot-view="panel"] .drive-pad > :not(.stick):not(.stop) { grid-column: 1 / -1; }
+html.embed-page[data-bot-view="panel"] .drive-pad .stick { width: clamp(7.5rem, 40vw, 11rem); }
+html.embed-page[data-bot-view="panel"] .drive-pad .stop { width: 4.75rem; max-width: none; height: 4.75rem; min-height: 0; padding: 0; border-radius: 50%; flex-direction: column; gap: 0.15rem; font-size: 0.8rem; }
+html.embed-page[data-bot-view="panel"] .widget-drive .hint { margin: 0.55rem 0 0; }
+html.embed-page[data-bot-view="panel"] .stick--buttons, html.embed-page[data-bot-view="panel"] .stick--ptz { width: clamp(7.5rem, 40vw, 11rem); }
+/* Readouts as one short row each. */
+html.embed-page[data-bot-view="panel"] .widget-battery { display: flex; align-items: center; gap: 0.6rem; padding-block: 0.5rem; }
+html.embed-page[data-bot-view="panel"] .widget-battery > h2 { margin: 0; }
+html.embed-page[data-bot-view="panel"] .widget-battery .battery { flex: 1; gap: 0.5rem; }
+html.embed-page[data-bot-view="panel"] .widget-battery .readout { font-size: 0.95rem; }
+html.embed-page[data-bot-view="panel"] .widget-latency { padding-block: 0.5rem; }
+html.embed-page[data-bot-view="panel"] .widget-latency .stats { gap: 0.35rem; }
+html.embed-page[data-bot-view="panel"] .widget-latency .stat { padding: 0.3rem 0.5rem; }
+html.embed-page[data-bot-view="panel"] .widget-latency .stat .readout { font-size: 0.95rem; }
+html.embed-page[data-bot-view="panel"] .widget-latency .stat-label { font-size: 0.66rem; }
+/* Wider frames: the stick in its own column, the rest beside it. */
+@media (min-width: 34rem) {
+  html.embed-page[data-bot-view="panel"] .widgets { grid-template-columns: minmax(15rem, 0.9fr) minmax(0, 1fr); align-items: start; }
+  html.embed-page[data-bot-view="panel"] .widget-drive { grid-row: span 4; }
+  html.embed-page[data-bot-view="panel"] :is(.widget-camera, .widget-video_click) { grid-column: 1 / -1; }
+}
+@media (min-width: 60rem) {
+  html.embed-page[data-bot-view="panel"] .widgets { grid-template-columns: minmax(15rem, 0.8fr) repeat(2, minmax(0, 1fr)); }
+}
+html.embed-page[data-bot-view="panel"] .hint { display: block; }
+@media (hover: none) and (pointer: coarse) { html.embed-page[data-bot-view="panel"] .hint { display: none; } html.embed-page[data-bot-view="panel"] #panel[data-gamepad="true"] .hint { display: block; } }
+
+/* The stick on the surfaces fills its scrim (the pad around it had no size, so the stick was a dot). */
+.bot-stick .drive-pad, .bot-stick .ptz-pad { display: grid; grid-template: 100% / 100%; width: 100%; height: 100%; gap: 0; }
+.bot-stick .bot-widget > .stick, .bot-stick :is(.drive-pad, .ptz-pad) > .stick { width: 100%; height: 100%; }
+.bot-stick .stick[aria-disabled="true"] { opacity: 0.55; }
+.bot-slider input:disabled { opacity: 0.55; }
+
+/* A watcher's Drive: where the e-stop goes once they have the controls; and the page's answer under it. */
+.bot-drive {
+  position: absolute; top: calc(16px + env(safe-area-inset-top)); right: calc(16px + env(safe-area-inset-right));
+  height: 44px; min-height: 44px; padding: 0 14px 0 12px; gap: 6px; border-radius: 22px; font-size: 13px; font-weight: 700;
+  background: var(--fill-accent); border-color: color-mix(in srgb, var(--fill-accent) 70%, #fff); color: var(--on-fill-accent);
+}
+.bot-drive .icon { width: 18px; height: 18px; }
+.bot-notice {
+  position: absolute; left: 50%; top: calc(16px + env(safe-area-inset-top)); transform: translateX(-50%);
+  max-width: min(22rem, calc(100% - 32px)); margin: 0; padding: 6px 12px; border-radius: 12px; font-size: 12px; line-height: 1.35; text-align: center;
+}
+.bot-overlay .bot-notice { top: auto; bottom: calc(16px + env(safe-area-inset-bottom)); }
+@media (max-height: 300px) {
+  .bot-drive { top: calc(var(--bot-gap) + env(safe-area-inset-top)); right: calc(12px + 44px + 8px + env(safe-area-inset-right)); }
+  .bot-overlay .bot-notice { bottom: calc(var(--bot-gap) + env(safe-area-inset-bottom)); max-width: calc(100% - 2 * var(--bot-sz) - 24px); }
+}
+
+/* The one row, as a small remote: the stick at the left, the name over the slider, Drive or the e-stop over "more".
+   A wide frame puts it all on one line. */
+body.bot-mode-compact main#panel.bot-surface { display: block; padding: 0; }
+.bot-compact {
+  display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; grid-template-areas: "stick pill act" "stick slider more" "note note note";
+  align-items: center; gap: 6px 12px; min-height: 112px; padding: 8px 10px; border-radius: 16px;
+}
+.bot-compact[data-no-slider] { grid-template-areas: "stick pill act" "stick pill more" "note note note"; }
+.bot-compact .bot-stick { grid-area: stick; }
+.bot-compact .bot-pill { grid-area: pill; height: 32px; padding: 0 4px; font-size: 13px; }
+.bot-compact .bot-slider { grid-area: slider; width: 100%; max-width: 260px; height: 44px; padding: 0 10px; }
+.bot-compact .bot-slider .bot-widget, .bot-compact .bot-slider label { width: 100%; }
+.bot-compact .bot-slider input[type="range"] { width: 100%; height: 28px; }
+.bot-compact :is(.bot-estop, .bot-drive) { grid-area: act; justify-self: end; }
+.bot-compact .bot-more { grid-area: more; justify-self: end; }
+.bot-compact .bot-drive { position: static; }
+.bot-compact .bot-notice { grid-area: note; position: static; transform: none; max-width: none; text-align: left; }
+@media (min-width: 36rem) {
+  .bot-compact { grid-template-columns: minmax(0, 1fr) 96px minmax(8rem, 16rem) auto auto; grid-template-areas: "pill stick slider act more" "note note note note note"; }
+  .bot-compact[data-no-slider] { grid-template-areas: "pill stick stick act more" "note note note note note"; }
+}
+/* The row sits in the host's own card (Live's robot card): no second box, and the page's colours, so it reads on a
+   light card as well as a dark one. Drive keeps its fill; the e-stop its red ring. */
+.bot-compact { background: transparent; border: 0; border-radius: 0; -webkit-backdrop-filter: none; backdrop-filter: none; padding: 6px 8px; }
+body.bot-mode-compact .bot-compact .bot-control { color: var(--text); }
+body.bot-mode-compact .bot-compact .bot-pill-state { color: var(--muted); }
+body.bot-mode-compact .bot-compact .bot-stick { background: color-mix(in srgb, var(--text) 6%, transparent); border-color: var(--line); }
+body.bot-mode-compact .bot-compact .bot-stick .stick-ring { border-color: var(--line); }
+body.bot-mode-compact .bot-compact :is(.bot-more, .bot-estop) { background: color-mix(in srgb, var(--text) 7%, transparent); }
+body.bot-mode-compact .bot-compact .bot-estop { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 70%, transparent); }
+body.bot-mode-compact .bot-compact .bot-drive { background: var(--fill-accent); border-color: var(--fill-accent); color: var(--on-fill-accent); }
+body.bot-mode-compact .bot-compact .bot-notice { color: var(--warn); background: color-mix(in srgb, var(--warn) 10%, transparent); }

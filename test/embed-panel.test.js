@@ -24,7 +24,8 @@ const { renderPanel } = require('../server/web/render');
         assert.ok(!watcher.includes('data-estop>') && !watcher.includes('data-estop-clear') && !watcher.includes('data-embed-form'));
         assert.ok(watcher.includes('data-role="watcher"') && watcher.includes('data-allowed="[]"'));
         assert.ok(!/<button(?![^>]*disabled)[^>]*data-(hold|stop)/.test(watcher), 'a control is enabled for a watcher');
-        assert.match(watcher, /<a class="button" href="\/panel\/rob_e1" target="_blank" rel="noopener">Open on openvibe.bot<\/a>/);
+        // Ask 353 (2026-11-11): in the head's row, as an icon with its words for screen readers.
+        assert.match(watcher, /<a class="button embed-open" href="\/panel\/rob_e1" target="_blank" rel="noopener" title="Open on openvibe.bot"><svg[^>]*>.*?<\/svg><span>Open on openvibe.bot<\/span><\/a>/);
         for (const a of watcher.match(/<a [^>]*>/g)) assert.ok(a.includes('target="_blank"') && a.includes('rel="noopener"'), a);
         const signedIn = renderPanel({ robot: robotRow, profile: SIM, role: 'watcher', allowed_commands: [], mode: 'embed', signedIn: true });
         assert.ok(!signedIn.includes('Open on openvibe.bot'));

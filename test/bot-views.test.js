@@ -52,7 +52,11 @@ const render = (over = {}) => renderPanel({
         };
         const cam = renderPanel({ robot: { ...ROBOT, id: 'rob_cam1' }, profile: ptz, role: 'watcher', allowed_commands: [], mode: 'embed', view: 'overlay' });
         assert.ok(cam.includes('data-ptz-stick') && cam.includes('data-actuator="zoom"'));
-        assert.ok(!cam.includes('data-estop'), 'a watcher has no e-stop until they take the controls');
+        assert.ok(!cam.includes('data-estop'), 'a signed-in watcher has no e-stop and no Drive here');
+        const anon = renderPanel({ robot: { ...ROBOT, id: 'rob_cam1' }, profile: ptz, role: 'watcher', allowed_commands: [], mode: 'embed', view: 'overlay', signedIn: false });
+        assert.ok(/<button[^>]*class="bot-drive bot-control"[^>]*data-drive data-drive-bar data-bot-hit/.test(anon), 'the anonymous embed takes the controls with Drive (ask 353)');
+        assert.ok(/<button[^>]*class="bot-estop bot-control"[^>]*data-estop[^>]*hidden>/.test(anon), 'its e-stop waits, hidden, for the join');
+        assert.ok(anon.includes('class="bot-notice bot-control" data-notice data-bot-hit role="alert" hidden'), 'and the page\'s answer has a line');
         assert.ok(cam.includes('data-bot-more'), 'but there is always a way to the full panel');
         const hornOnly = {
             id: 'horn.demo', name: 'Horn', commands: { actuator: { names: { horn: { type: 'tone', hz: [220, 880] } } } },
