@@ -7,6 +7,7 @@
 const assert = require('assert');
 const { boot, check, done } = require('./helpers/app');
 const { withDelivery } = require('../server/command-delivery');
+const { boundPage, MAX_PAGE } = require('../server/browser-content');
 
 (async () => {
     await check('a timeout or in-flight repeat never claims a safe retry', async () => {
@@ -95,6 +96,8 @@ const { withDelivery } = require('../server/command-delivery');
     await check('the browser kind reaches the machine; a file: address is refused before it leaves', async () => {
         const open = await cmd(mine.deviceId, { kind: 'browser', value: { action: 'open', url: 'https://example.org/account?token=abc' } }, { user: alex });
         assert.deepStrictEqual([open.status, open.json.result, open.json.data.title], [200, 'ack', 'Example']);
+        assert.match(open.json.data.text, /^<<<ov-text nonce:[0-9a-f]{32} origin:https:\/\/example.org>>>\nExample page\n<<<ov-text-end nonce:[0-9a-f]{32}>>>$/);
+        assert.equal(open.json.data.origin, 'https://example.org');
         const fill = await cmd(mine.deviceId, { kind: 'browser', value: { action: 'fill', selector: '#password', text: 'hunter3 secret' } }, { user: alex });
         assert.strictEqual(fill.json.result, 'ack');
         assert.deepStrictEqual(seen.filter((m) => m.kind === 'browser').map((m) => m.value.action), ['open', 'fill']);
@@ -104,6 +107,23 @@ const { withDelivery } = require('../server/command-delivery');
         assert.deepStrictEqual(rows.map((r) => r.value), [{ action: 'open', host: 'example.org' }, { action: 'fill', selector: '#password', chars: 14 }],
             'the audit keeps the host (never the path or query) and how much was typed (never the text)');
         assert.ok(!JSON.stringify(rows).includes('hunter3') && !JSON.stringify(rows).includes('token=abc'));
+        const bounded = await cmd(mine.deviceId, { kind: 'browser', value: { action: 'read', origins: ['https://example.org'] } }, { user: alex });
+        assert.equal(bounded.status, 200, bounded.text);
+        assert.deepStrictEqual(seen.at(-1).value.origins, ['https://example.org']);
+        const invalidOrigins = await cmd(mine.deviceId, { kind: 'browser', value: { action: 'read', origins: ['https://example.org/path'] } }, { user: alex });
+        assert.deepStrictEqual([invalidOrigins.status, invalidOrigins.json.code], [422, 'bot.invalid_input']);
+    });
+
+    await check('a verbose page is bounded before it reaches a caller', async () => {
+        const out = boundPage({ url: 'https://example.org/', title: 'A', text: 'é'.repeat(100000),
+                                links: Array.from({ length: 60 }, () => ({ text: 'x', href: 'https://example.org/' + 'y'.repeat(5000) })),
+                                elements: Array(120).fill('e1 button ' + 'z'.repeat(500)),
+                                untrusted_extra: 'x'.repeat(200000), receipt: { appeared: ['a'.repeat(200000)], extra: 'y'.repeat(200000) } });
+        assert.equal(out.truncated, true);
+        assert.ok(Buffer.byteLength(JSON.stringify(out)) <= MAX_PAGE);
+        assert.equal(out.untrusted_extra, undefined);
+        assert.equal(out.receipt.extra, undefined);
+        assert.match(out.text, /<<<ov-text-end nonce:[0-9a-f]{32}>>>$/);
     });
 
     await check('the private desk (contracts 0.214.0): start, stop and status reach a machine that has one, and desk: private acts there; one without says so', async () => {

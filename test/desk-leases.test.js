@@ -87,6 +87,8 @@ const { boot, check, done } = require('./helpers/app');
         assert.strictEqual(bad.status, 422, 'never main or private');
         const notShared = await t.call('POST', `/api/v1/machines/${plain.deviceId}/desk-leases`, { ...asRun(bob.subject), body: { ...body, session: SES(4) } });
         assert.strictEqual(notShared.status, 404, 'a host that does not sandbox its desks is never leased to someone else');
+        const bounded = await t.call('POST', `/api/v1/machines/${host.deviceId}/desk-leases`, { ...asRun(bob.subject), body: { ...body, session: SES(9), desk: 'desk-s09', origins: ['https://example.org'] } });
+        assert.deepStrictEqual([bounded.status, bounded.json.code], [409, 'bot.origin_boundary_unavailable'], 'a shared sandbox cannot silently skip the origin boundary');
     });
 
     await check('commands reach the leased desk alone, for its person alone', async () => {
@@ -138,8 +140,18 @@ const { boot, check, done } = require('./helpers/app');
         await t.domain.machines.setSharedDesks(host.deviceId, false);
         const r = await t.call('POST', `/api/v1/machines/${host.deviceId}/desk-leases`, { ...asRun(bob.subject), body: { session: SES(7), desk: 'desk-s07', kind: 'browser' } });
         assert.strictEqual(r.status, 404);
-        const own2 = await t.call('POST', `/api/v1/machines/${own.deviceId}/desk-leases`, { ...asRun(bob.subject), body: { session: SES(8), desk: 'desk-s08', kind: 'browser' } });
+        const body = { session: SES(8), desk: 'desk-s08', kind: 'browser', origins: ['https://example.org'] };
+        const own2 = await t.call('POST', `/api/v1/machines/${own.deviceId}/desk-leases`, { ...asRun(bob.subject), body });
         assert.deepStrictEqual([own2.status, own2.json.shared], [201, false], 'a person\'s own machine, where agents may work');
+        assert.equal((await t.call('POST', `/api/v1/machines/${own.deviceId}/desk-leases`, { ...asRun(bob.subject), body: { ...body, origins: [] } })).status, 409, 'a retry cannot widen or change the boundary');
+        const url = `/api/v1/machines/${own.deviceId}/desk-leases/desk-s08/commands`;
+        const action = await t.call('POST', url, { ...asRun(bob.subject), body: { kind: 'browser', value: { action: 'open', url: 'https://example.org/' } } });
+        assert.equal(action.status, 200, action.text);
+        assert.deepStrictEqual(seen.at(-1).value.origins, ['https://example.org'], 'Bot attaches the stored list to every browser command');
+        const profile = await t.call('POST', url, { ...asRun(bob.subject), body: { kind: 'browser', value: { action: 'profile_export' } } });
+        assert.equal(profile.status, 200, profile.text);
+        assert.deepStrictEqual(seen.at(-1).value.origins, ['https://example.org']);
+        assert.equal((await t.call('POST', url, { ...asRun(bob.subject), body: { kind: 'browser', value: { action: 'read', origins: [] } } })).status, 422, 'the caller cannot change the list per command');
     });
 
     for (const m of [host, plain, own]) m.c.close();
