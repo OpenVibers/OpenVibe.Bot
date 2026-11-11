@@ -677,3 +677,115 @@ body.bot-mode-compact .bot-compact .bot-notice { color: var(--warn); background:
   background: color-mix(in srgb, var(--fill-accent) 85%, transparent) center / 11px 11px no-repeat
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.6' stroke-linecap='round'%3E%3Crect x='5' y='11' width='14' height='9' rx='2'/%3E%3Cpath d='M8 11V8a4 4 0 0 1 8 0v3'/%3E%3C/svg%3E");
 }
+
+/* ── Controls v2 (ask 368, 2026-11-11: the owner circled the pad, the Stop, the head slider and the readouts:
+   "redesign … polish … more consistent … per user"). One family on the full panel, in a channel's Robot tab and
+   framed anywhere: the stick has its four marks and a knob that lights when it drives; Stop is a ringed red disc
+   beside it (on the hand this person chose); a slider says its value with − and + to step it; battery and latency
+   are slim readout rows. The pad's arrangement menu (the sliders icon) keeps the hand, the size and the readouts. ─── */
+#panel .widget-drive { position: relative; }
+#panel .drive-pad { grid-template-columns: auto auto; justify-content: center; align-items: center; gap: 0.75rem 1.4rem; }
+#panel .drive-pad > :not(.stick):not(.stop) { grid-column: 1 / -1; }
+#panel[data-hand="left"] .drive-pad .stop { order: -1; }
+#panel .stick {
+  --stick: clamp(8.5rem, 44vw, 12.5rem);
+  width: var(--stick);
+  background:
+    radial-gradient(circle at 50% 40%, color-mix(in srgb, var(--surface) 70%, var(--text) 8%) 0%, color-mix(in srgb, var(--bg) 92%, #000) 72%);
+  border: 1px solid color-mix(in srgb, var(--line) 80%, var(--text) 20%);
+  box-shadow: inset 0 2px 14px rgba(0, 0, 0, 0.55), inset 0 -1px 0 rgba(255, 255, 255, 0.04), 0 1px 0 rgba(255, 255, 255, 0.05);
+  transition: box-shadow 0.18s ease, border-color 0.18s ease;
+}
+#panel[data-pad="s"] .stick { --stick: clamp(7rem, 34vw, 9.5rem); }
+#panel[data-pad="l"] .stick { --stick: clamp(10rem, 58vw, 15rem); }
+#panel .stick-ring { inset: 22%; border: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
+#panel .stick-cross { inset: 30%; opacity: 0.35; }
+#panel .stick-dirs { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; fill: color-mix(in srgb, var(--text) 32%, transparent); transition: fill 0.18s ease; }
+#panel .stick-knob {
+  width: 38%;
+  background:
+    radial-gradient(circle at 36% 28%, rgba(255, 255, 255, 0.28), transparent 42%),
+    radial-gradient(circle at 50% 55%, color-mix(in srgb, var(--raised) 85%, var(--text) 15%), color-mix(in srgb, var(--bg) 70%, #000) 78%);
+  border: 1px solid color-mix(in srgb, var(--line) 50%, var(--text) 30%);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+#panel .stick.held, #panel .stick.active { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); box-shadow: inset 0 2px 14px rgba(0, 0, 0, 0.5), 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent); }
+#panel .stick.held .stick-dirs, #panel .stick.active .stick-dirs { fill: color-mix(in srgb, var(--accent) 70%, var(--text)); }
+#panel .stick.active .stick-knob { background: radial-gradient(circle at 36% 28%, rgba(255, 255, 255, 0.4), transparent 42%), radial-gradient(circle at 50% 55%, #6ea8ff, var(--accent) 75%); border-color: #9cc2ff; box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 22%, transparent), 0 10px 22px rgba(0, 0, 0, 0.45); }
+#panel .stick[aria-disabled="true"] { opacity: 0.5; filter: saturate(0.4); }
+
+#panel .drive-pad .stop {
+  width: calc(var(--stick, 11rem) * 0.46); height: calc(var(--stick, 11rem) * 0.46); min-width: 4.25rem; min-height: 4.25rem; max-width: 6rem; max-height: 6rem;
+  padding: 0; border-radius: 50%; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.2rem;
+  font-size: 0.78rem; font-weight: 700; letter-spacing: 0.02em; color: var(--text);
+  background: radial-gradient(circle at 50% 35%, color-mix(in srgb, var(--fill-danger) 22%, var(--surface)), color-mix(in srgb, var(--fill-danger) 10%, var(--bg)));
+  border: 2px solid color-mix(in srgb, var(--danger) 70%, transparent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger) 10%, transparent), 0 6px 14px rgba(0, 0, 0, 0.35);
+  transition: transform 0.12s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+#panel .drive-pad .stop .icon { width: 1.35em; height: 1.35em; fill: var(--danger); stroke: none; }
+#panel .drive-pad .stop:hover:not(:disabled) { background: radial-gradient(circle at 50% 35%, color-mix(in srgb, var(--fill-danger) 36%, var(--surface)), color-mix(in srgb, var(--fill-danger) 18%, var(--bg))); }
+#panel .drive-pad .stop:active:not(:disabled) { transform: scale(0.94); }
+#panel .drive-pad .stop:disabled { opacity: 0.5; filter: saturate(0.5); }
+
+/* The arrangement menu: a quiet icon in the drive card's corner, its choices as segmented rows. */
+#panel .pad-prefs-btn { position: absolute; top: 0.45rem; right: 0.45rem; min-width: 36px; min-height: 36px; width: 36px; height: 36px; padding: 0; border-radius: 10px; display: grid; place-items: center; background: transparent; border-color: transparent; color: var(--muted); }
+#panel .pad-prefs-btn:hover, #panel .pad-prefs-btn[aria-expanded="true"] { color: var(--text); background: var(--raised); }
+#panel .pad-prefs-btn .icon { width: 1.15rem; height: 1.15rem; }
+#panel .pad-prefs { position: absolute; top: 2.9rem; right: 0.45rem; z-index: 5; display: grid; gap: 0.6rem; width: min(17rem, calc(100% - 0.9rem)); padding: 0.75rem; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); box-shadow: 0 16px 36px -12px rgba(0, 0, 0, 0.6); }
+#panel .pad-prefs[hidden] { display: none; }
+#panel .pad-pref { display: grid; gap: 0.3rem; }
+#panel .pad-pref-l { font-size: 0.72rem; font-weight: 600; color: var(--muted); }
+#panel .pad-pref-opts { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 3px; padding: 3px; border-radius: 10px; background: var(--bg); }
+#panel .pad-pref label { position: relative; }
+#panel .pad-pref input { position: absolute; inset: 0; opacity: 0; margin: 0; width: 100%; height: 100%; min-height: 0; cursor: pointer; }
+#panel .pad-pref span { display: grid; place-items: center; min-height: 34px; border-radius: 8px; font-size: 0.8rem; font-weight: 600; color: var(--muted); }
+#panel .pad-pref input:checked + span { background: var(--raised); color: var(--text); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05), 0 2px 6px rgba(0, 0, 0, 0.25); }
+#panel .pad-pref input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* A slider: its name and value on one line, − the track + on the next; the track fills to the value. */
+#panel .control.slider { display: grid; gap: 0.4rem; align-items: stretch; }
+#panel .slider-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; margin: 0; }
+#panel .slider-head .control-name { min-width: 0; color: var(--text); font-weight: 600; font-size: 0.9rem; }
+#panel .control-value { font-variant-numeric: tabular-nums; font-size: 0.85rem; color: var(--muted); }
+#panel .slider-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.5rem; }
+#panel .slider-row .step { width: 40px; height: 40px; min-width: 40px; min-height: 40px; padding: 0; border-radius: 50%; display: grid; place-items: center; }
+#panel .slider-row .step .icon { width: 1.1rem; height: 1.1rem; }
+#panel .slider-row input[type="range"] {
+  -webkit-appearance: none; appearance: none; min-width: 0; height: 28px; min-height: 0; margin: 0; background: transparent; cursor: pointer;
+}
+#panel .slider-row input[type="range"]::-webkit-slider-runnable-track { height: 8px; border-radius: 999px; background: linear-gradient(90deg, var(--accent) 0 var(--p, 50%), color-mix(in srgb, var(--line) 80%, var(--text) 10%) var(--p, 50%) 100%); }
+#panel .slider-row input[type="range"]::-moz-range-track { height: 8px; border-radius: 999px; background: color-mix(in srgb, var(--line) 80%, var(--text) 10%); }
+#panel .slider-row input[type="range"]::-moz-range-progress { height: 8px; border-radius: 999px; background: var(--accent); }
+#panel .slider-row input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 24px; margin-top: -8px; border-radius: 50%; background: #fff; border: 0; box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 35%, transparent), 0 2px 6px rgba(0, 0, 0, 0.4); transition: box-shadow 0.15s ease; }
+#panel .slider-row input[type="range"]::-moz-range-thumb { width: 24px; height: 24px; border-radius: 50%; background: #fff; border: 0; box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 35%, transparent), 0 2px 6px rgba(0, 0, 0, 0.4); }
+#panel .slider-row input[type="range"]:active::-webkit-slider-thumb { box-shadow: 0 0 0 7px color-mix(in srgb, var(--accent) 30%, transparent), 0 2px 6px rgba(0, 0, 0, 0.4); }
+#panel .slider-row input[type="range"]:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Readouts: battery and latency as slim rows (the heading is the row's label), folded when this person folds them. */
+#panel .widget-battery { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 0.75rem; padding: 0.6rem 0.9rem; }
+#panel .widget-battery > h2 { margin: 0; }
+#panel .battery { gap: 0.6rem; }
+#panel .battery meter { height: 0.55rem; border-radius: 999px; border: 0; background: color-mix(in srgb, var(--line) 80%, var(--text) 8%); }
+#panel .battery meter::-webkit-meter-bar { height: 0.55rem; border: 0; border-radius: 999px; background: color-mix(in srgb, var(--line) 80%, var(--text) 8%); }
+#panel .battery meter::-webkit-meter-optimum-value { border-radius: 999px; background: var(--ok); }
+#panel .battery meter::-webkit-meter-suboptimum-value { border-radius: 999px; background: var(--warn); }
+#panel .battery meter::-webkit-meter-even-less-good-value { border-radius: 999px; background: var(--danger); }
+#panel .battery .readout { font-size: 0.95rem; min-width: 3.2ch; text-align: right; }
+#panel .widget-latency { padding: 0.6rem 0.9rem 0.75rem; }
+#panel .widget-latency > h2 { margin-bottom: 0.45rem; }
+#panel .stats { gap: 0.4rem; }
+#panel .stat { gap: 0.1rem; padding: 0.4rem 0.55rem; border-radius: 10px; border-color: transparent; background: color-mix(in srgb, var(--bg) 70%, var(--surface)); }
+#panel .stat .readout { font-size: 1rem; }
+#panel .stat-label { font-size: 0.68rem; line-height: 1.2; }
+#panel .readout:is(:empty) { color: var(--muted); }
+#panel[data-readouts="off"] :is(.widget-battery, .widget-latency, .widget-telemetry) { display: none; }
+
+/* The offline notice: a calm line, not an alarm. */
+#panel .notice[data-device-fault], #panel .notice[data-notice] { display: flex; align-items: center; gap: 0.5rem; font-size: 0.88rem; line-height: 1.35; }
+#panel .notice[hidden] { display: none; }
+
+@media (prefers-reduced-motion: reduce) { #panel .stick, #panel .drive-pad .stop, #panel .stick-dirs { transition: none; } }
+#panel .pad-prefs { text-align: left; }
+/* A wide panel lays the cards in columns: each card is as tall as what it holds (the battery was a tall empty box). */
+#panel .widgets { align-items: start; }
