@@ -968,7 +968,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
             const slider = overlaySlider(profile, role === 'watcher' ? [] : domain.control.allowedFor(robot, role, profile));
             const canDrive = role === 'watcher' && !signedIn;
             const catalog = surface.overlayCatalog(profile, {
-                slider: slider ? { name: slider.name.replace(/_/g, ' ') } : null,
+                slider: slider ? { name: slider.name.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()) } : null,
                 hasStick: !!overlayStickMarkup(profile, role === 'watcher' ? [] : domain.control.allowedFor(robot, role, profile)),
                 canDrive,
             });
