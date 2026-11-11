@@ -959,6 +959,8 @@
             ? (on === true ? 'Turning on…' : on === false ? 'Turning off…' : 'Unknown')
             : (hl.commanded === true ? 'On' : hl.commanded === false ? 'Off' : 'Unknown');
         hlStateEl.textContent = state;
+        // The look follows the state (panel.css): on, off, unknown, or waiting for the robot.
+        headlightEl.dataset.state = hl.pending ? 'pending' : hl.commanded === true ? 'on' : hl.commanded === false ? 'off' : 'unknown';
         if (hlUnconfirmed) hlUnconfirmed.hidden = hl.verified;
         const unknown = !hl.pending && hl.commanded === null;
         if (hlChoices) hlChoices.hidden = !(unknown && hl.choices);
