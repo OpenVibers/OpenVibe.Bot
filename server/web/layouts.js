@@ -11,17 +11,19 @@
  * the same cookie, so neither ever reaches the page's script.
  */
 const TIMEOUT_MS = 1200;
+const WRITE_TIMEOUT_MS = 15000;
+const SUGGEST_TIMEOUT_MS = 30000;
 
 function base(config) {
     return String(config.network.url || '').replace(/\/+$/, '');
 }
 
-async function call(config, token, method, path, body, fetchImpl = globalThis.fetch) {
+async function call(config, token, method, path, body, fetchImpl = globalThis.fetch, timeoutMs = TIMEOUT_MS) {
     const res = await fetchImpl(`${base(config)}${path}`, {
         method,
         headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) },
         ...(body ? { body: JSON.stringify(body) } : {}),
-        signal: AbortSignal.timeout(TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutMs),
     });
     const out = await res.json().catch(() => null);
     return { status: res.status, ok: res.ok, out };
@@ -42,7 +44,7 @@ async function activeLayout({ config, token, surface, device, fetchImpl }) {
 /** PUT the active layout. Returns Network's answer ({ layout } or the layout) or throws with a plain reason. */
 async function saveLayout({ config, token, surface, device, layout, catalog, fetchImpl }) {
     if (!catalog) throw new Error('the surface catalog is needed to save an arrangement');
-    const r = await call(config, token, 'PUT', `/api/v1/me/layouts/${encodeURIComponent(surface)}?device=${encodeURIComponent(device)}`, { catalog, layout }, fetchImpl);
+    const r = await call(config, token, 'PUT', `/api/v1/me/layouts/${encodeURIComponent(surface)}?device=${encodeURIComponent(device)}`, { catalog, layout }, fetchImpl, WRITE_TIMEOUT_MS);
     if (!r.ok) throw new Error((r.out && (r.out.detail || r.out.error)) || `Network answered ${r.status}`);
     return r.out;
 }
@@ -50,7 +52,7 @@ async function saveLayout({ config, token, surface, device, layout, catalog, fet
 /** POST the person's words; Network checks entitlement and forwards to OpenVibe.AI's ui.layout.suggest. */
 async function suggestLayout({ config, token, surface, device, words, layout, catalog, fetchImpl }) {
     const body = { words, layout, catalog, device };
-    const r = await call(config, token, 'POST', `/api/v1/me/layouts/${encodeURIComponent(surface)}/suggest?device=${encodeURIComponent(device)}`, body, fetchImpl);
+    const r = await call(config, token, 'POST', `/api/v1/me/layouts/${encodeURIComponent(surface)}/suggest?device=${encodeURIComponent(device)}`, body, fetchImpl, SUGGEST_TIMEOUT_MS);
     if (!r.ok) throw new Error((r.out && (r.out.detail || r.out.error)) || `Network answered ${r.status}`);
     return r.out;
 }
@@ -59,7 +61,7 @@ async function suggestLayout({ config, token, surface, device, words, layout, ca
 async function shareLayout({ config, token, surface, device, layout, catalog, fetchImpl }) {
     const saved = await saveLayout({ config, token, surface, device, layout, catalog, fetchImpl });
     if (!saved || !saved.id) throw new Error('Network did not return the saved layout');
-    const r = await call(config, token, 'POST', `/api/v1/me/layouts/${encodeURIComponent(saved.id)}/share`, {}, fetchImpl);
+    const r = await call(config, token, 'POST', `/api/v1/me/layouts/${encodeURIComponent(saved.id)}/share`, {}, fetchImpl, WRITE_TIMEOUT_MS);
     if (!r.ok) throw new Error((r.out && (r.out.detail || r.out.error)) || `Network answered ${r.status}`);
     const url = r.out && r.out.url;
     if (url) { try { r.out.url = new URL(url, base(config) + '/').toString(); } catch { /* relative is still a link */ } }
