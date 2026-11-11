@@ -989,6 +989,11 @@
             if (!hl.pending) { hl.pending = true; paintHeadlight(); }
             return;
         }
+        if (m.result === 'ack' && !m.data) {
+            // An older/plain ack means accepted; keep the pending state only while telemetry may still arrive.
+            hl.timer = setTimeout(() => { if (hl.pending) { hl.pending = false; hl.target = null; paintHeadlight(); } }, 2000);
+            return;
+        }
         if (m.result === 'ack' && m.data && m.data.stage === 'headlight_refused' && m.data.admitted === false) {
             hl.pending = false; hl.target = null;
             hlNotice('Busy, try again in a moment.');
@@ -1096,10 +1101,13 @@
 
     // ── State ─────────────────────────────────────────────────────────────────────────────────────────
     function enableControls() {
+        for (const el of $$('[data-headlight] button')) el.disabled = !(joined && allowed.includes('headlight'));
         for (const section of $$('[data-command]')) {
             const ok = joined && allowed.includes(JSON.parse(section.dataset.command).kind);
             // The pad's arrangement is this person's own and works offline: it is never a control of the robot.
-            for (const el of $$('button, input, select', section)) if (!el.closest('[data-pad-prefs-menu]') && !el.matches('[data-pad-prefs]')) el.disabled = !ok;
+            // A custom action in the card (LOOI's headlights) has its own kind: never disable it from the actuator's
+            // state. The join below enables it only when the panel may send headlights.
+            for (const el of $$('button, input, select', section)) if (!el.closest('[data-pad-prefs-menu]') && !el.matches('[data-pad-prefs]') && !el.closest('[data-headlight]')) el.disabled = !ok;
             for (const el of $$('[data-joystick], [data-button-stick], [data-ptz-stick]', section)) { if (ok) el.removeAttribute('aria-disabled'); else el.setAttribute('aria-disabled', 'true'); }
         }
         announceControls();
