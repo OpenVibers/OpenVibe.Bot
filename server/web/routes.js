@@ -229,6 +229,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     const asset = (file, type) => (req, res) => { res.setHeader('Cache-Control', cache.assetHeaders(req.path, { hashed: false })); res.type(type).sendFile(path.join(PUBLIC, file)); };
     r.get('/panel/panel.js', asset('panel.js', 'application/javascript'));
     r.get('/panel/panel.css', asset('panel.css', 'text/css'));
+    r.get('/panel/lock.svg', asset('lock.svg', 'image/svg+xml'));   // the locked-control badge (a data: image is refused by default-src 'self')
     r.get('/panel/embed-frame.js', asset('embed-frame.js', 'application/javascript'));
     r.get('/panel/screen-share.js', asset('screen-share.js', 'application/javascript'));
     r.get('/panel/drive.js', asset('drive.js', 'application/javascript'));
