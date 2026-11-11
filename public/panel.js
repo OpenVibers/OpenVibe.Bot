@@ -927,6 +927,18 @@
         send('point', { x: (e.clientX - left) / width, y: (e.clientY - top) / height });
     });
 
+    // A press on a control that is still locked, by someone who may take the controls here, asks for them as Drive does
+    // (the locked control dims with a lock; public/panel.css). Their next press drives.
+    main.addEventListener('pointerdown', (e) => {
+        if (!watcher || driving) return;
+        const t = e.target && e.target.closest ? e.target.closest('[data-command], .bot-stick, .bot-slider') : null;
+        if (!t || (e.target.closest && e.target.closest('[data-drive], [data-bot-more], [data-estop]'))) return;
+        const drive = $('[data-drive]:not([hidden])');
+        if (!drive) return;
+        e.preventDefault();
+        drive.click();
+    }, true);
+
     // ── State ─────────────────────────────────────────────────────────────────────────────────────────
     function enableControls() {
         for (const section of $$('[data-command]')) {

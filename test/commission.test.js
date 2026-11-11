@@ -28,7 +28,7 @@ const { loadProfiles } = require('../server/profiles');
 
     await check('without commissioning, values above the profile default clamp to the default exactly as today', async () => {
         const { robot } = await t.robot(alex, { profile_id: 'looi', limits: { max_speed: 0.9, max_turn: 0.9 } });
-        assert.deepStrictEqual(await eff(robot.id), { maxSpeed: 0.5, maxTurn: 0.6, maxCommandMs: 300, cooldownMs: 0 });
+        assert.deepStrictEqual(await eff(robot.id), { maxSpeed: 0.5, maxTurn: 0.6, maxCommandMs: 500, cooldownMs: 0 });
     });
 
     await check('commissioning needs the owner, a person and an explicit confirm', async () => {
@@ -66,7 +66,7 @@ const { loadProfiles } = require('../server/profiles');
         assert.strictEqual(r.json.robot.commissioned.by, alex.subject);
         assert.ok(r.json.robot.commissioned.at);
         assert.strictEqual((await patch(robot.id, { max_speed: 0.8, max_turn: 0.9 })).status, 200);
-        assert.deepStrictEqual(await eff(robot.id), { maxSpeed: 0.8, maxTurn: 0.9, maxCommandMs: 300, cooldownMs: 0 });
+        assert.deepStrictEqual(await eff(robot.id), { maxSpeed: 0.8, maxTurn: 0.9, maxCommandMs: 500, cooldownMs: 0 });
         const audit = await t.domain.audit.list(robot.id, { limit: 20 });
         const row = audit.find((a) => a.kind === 'robot.commission');
         assert.ok(row && row.operator_subject === alex.subject && row.result === 'ack');
@@ -76,14 +76,14 @@ const { loadProfiles } = require('../server/profiles');
         const { robot } = await t.robot(alex, { profile_id: 'looi' });
         await commission(robot.id);
         await patch(robot.id, { max_speed: 5, max_turn: 5 });
-        assert.deepStrictEqual(await eff(robot.id), { maxSpeed: 1, maxTurn: 1, maxCommandMs: 300, cooldownMs: 0 });
+        assert.deepStrictEqual(await eff(robot.id), { maxSpeed: 1, maxTurn: 1, maxCommandMs: 500, cooldownMs: 0 });
     });
 
     await check('max_command_ms is never raised, even when commissioned', async () => {
         const { robot } = await t.robot(alex, { profile_id: 'looi' });
         await commission(robot.id);
         await patch(robot.id, { max_command_ms: 5000 });
-        assert.deepStrictEqual(await eff(robot.id), { maxSpeed: 0.5, maxTurn: 0.6, maxCommandMs: 300, cooldownMs: 0 });
+        assert.deepStrictEqual(await eff(robot.id), { maxSpeed: 0.5, maxTurn: 0.6, maxCommandMs: 500, cooldownMs: 0 });
     });
 
     await check('uncommissioning drops back to the defaults at once, and the audit says so', async () => {
@@ -94,7 +94,7 @@ const { loadProfiles } = require('../server/profiles');
         const r = await uncommission(robot.id);
         assert.strictEqual(r.status, 200, r.text);
         assert.strictEqual(r.json.robot.commissioned, null);
-        assert.deepStrictEqual(await eff(robot.id), { maxSpeed: 0.5, maxTurn: 0.6, maxCommandMs: 300, cooldownMs: 0 });
+        assert.deepStrictEqual(await eff(robot.id), { maxSpeed: 0.5, maxTurn: 0.6, maxCommandMs: 500, cooldownMs: 0 });
         const audit = await t.domain.audit.list(robot.id, { limit: 20 });
         assert.ok(audit.some((a) => a.kind === 'robot.uncommission' && a.result === 'ack'));
     });
@@ -105,16 +105,16 @@ const { loadProfiles } = require('../server/profiles');
         const dev = await t.ws('/device', { headers: { Authorization: `Bearer ${p.json.credential}` } });
         await dev.waitFor((m) => m.type === 'hello');
         const first = await dev.waitFor((m) => m.type === 'config');
-        assert.deepStrictEqual(first.limits, { max_speed: 0.5, max_turn: 0.6, max_command_ms: 300, heartbeat_ms: 1000 }, 'clamped before commissioning');
+        assert.deepStrictEqual(first.limits, { max_speed: 0.5, max_turn: 0.6, max_command_ms: 500, heartbeat_ms: 1000 }, 'clamped before commissioning');
         await commission(robot.id);
         await dev.waitFor((m) => m.type === 'config' && m.seq > first.seq);
         const high = await patch(robot.id, { max_speed: 0.9, max_turn: 0.9 });
         assert.strictEqual(high.status, 200);
         const second = await dev.waitFor((m) => m.type === 'config' && m.seq > first.seq && m.limits.max_turn === 0.9);
-        assert.deepStrictEqual(second.limits, { max_speed: 0.9, max_turn: 0.9, max_command_ms: 300, heartbeat_ms: 1000 });
+        assert.deepStrictEqual(second.limits, { max_speed: 0.9, max_turn: 0.9, max_command_ms: 500, heartbeat_ms: 1000 });
         await uncommission(robot.id);
         const third = await dev.waitFor((m) => m.type === 'config' && m.seq > second.seq && m.limits.max_speed === 0.5);
-        assert.deepStrictEqual(third.limits, { max_speed: 0.5, max_turn: 0.6, max_command_ms: 300, heartbeat_ms: 1000 }, 'at once, on the device');
+        assert.deepStrictEqual(third.limits, { max_speed: 0.5, max_turn: 0.6, max_command_ms: 500, heartbeat_ms: 1000 }, 'at once, on the device');
         dev.close();
     });
 
@@ -134,7 +134,7 @@ const { loadProfiles } = require('../server/profiles');
         assert.strictEqual((await post(`/robots/${robot.id}/limits`, bob, { max_speed: '1', max_turn: '1' })).status, 403, 'others cannot set them');
         assert.strictEqual((await post(`/robots/${robot.id}/limits`, alex, { max_speed: '2', max_turn: '1' })).status, 422, 'above 1 is refused');
         assert.strictEqual((await post(`/robots/${robot.id}/limits`, alex, { max_speed: '0.9', max_turn: '0.8' })).status, 303);
-        assert.deepStrictEqual(await eff(robot.id), { maxSpeed: 0.9, maxTurn: 0.8, maxCommandMs: 300, cooldownMs: (await eff(robot.id)).cooldownMs }, 'saved and in force');
+        assert.deepStrictEqual(await eff(robot.id), { maxSpeed: 0.9, maxTurn: 0.8, maxCommandMs: 500, cooldownMs: (await eff(robot.id)).cooldownMs }, 'saved and in force');
         assert.strictEqual((await post(`/robots/${robot.id}/uncommission`, alex, {})).status, 303);
         const back = await eff(robot.id);
         assert.deepStrictEqual([back.maxSpeed, back.maxTurn], [0.5, 0.6], 'uncommissioned: the defaults at once, whatever is stored');

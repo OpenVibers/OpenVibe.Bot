@@ -950,8 +950,10 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
             parentOrigins: mode === 'embed' ? ((config.embed && config.embed.origins) || []) : [],
             liveUrl: role === 'owner' && mode === 'page' ? liveOrigin : null,
             allowed_commands: role === 'watcher' ? [] : domain.control.allowedFor(robot, role, profile),
-            // A held control is re-sent well inside the device's deadline, so it never stops between two frames.
-            holdResendMs: Math.max(50, Math.min(HOLD_RESEND_MS, Math.floor(maxCommandMs / 2))),
+            // A held control is re-sent well inside the device's deadline, so it never stops between two frames: at a
+            // sixth of it (50 ms at the least). Half left about 90 ms of slack on LOOI, and ordinary Wi-Fi jitter expired
+            // commands mid-hold (Maticus, 2026-11-11: four in 9 minutes, gaps of 171–257 ms).
+            holdResendMs: Math.max(50, Math.min(HOLD_RESEND_MS, Math.floor(maxCommandMs / 6))),
         }));
     }
 
