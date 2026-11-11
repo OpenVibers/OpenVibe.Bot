@@ -897,30 +897,99 @@
         el.dispatchEvent(new Event('input', { bubbles: true }));
         el.dispatchEvent(new Event('change', { bubbles: true }));
     }));
-    // The pad's arrangement, this person's (kept in this browser): the Stop's hand, the pad's size, the readouts.
+    // ── Make your own controls: the Arrange editor and the Controls v2 store's one migration ─────────────
+    // The panel is drawn with the person's ui.layout@1 on the server (never a flash of the default). Arrange
+    // loads openvibe-shared/ov-arrange.js only when pressed; the editor works on these real parts. The old
+    // browser store (ov-bot-pad-prefs: Stop's hand, pad size, readouts) becomes a layout once, then goes.
+    const arrangeData = () => {
+        const el = document.getElementById('ov-arrange-data');
+        if (!el) return null;
+        try { return { el, data: JSON.parse(el.textContent) }; } catch { return null; }
+    };
     (() => {
-        const KEY = 'ov-bot-pad-prefs';
-        const panelEl = document.getElementById('panel');
-        const btn = document.querySelector('[data-pad-prefs]');
-        const menu = document.querySelector('[data-pad-prefs-menu]');
-        if (!panelEl) return;
-        let prefs = { hand: 'right', size: 'm', readouts: 'on' };
-        try { prefs = { ...prefs, ...(JSON.parse(localStorage.getItem(KEY) || '{}') || {}) }; } catch { /* private mode */ }
-        const apply = () => {
-            panelEl.dataset.hand = prefs.hand; panelEl.dataset.pad = prefs.size; panelEl.dataset.readouts = prefs.readouts;
-            $$('[data-pad-pref]').forEach((r) => { r.checked = prefs[r.dataset.padPref] === r.value; });
+        let raw = null;
+        try { raw = localStorage.getItem('ov-bot-pad-prefs'); if (raw != null) localStorage.removeItem('ov-bot-pad-prefs'); } catch { /* private mode */ }
+        if (raw == null) return;
+        const got = arrangeData();
+        if (!got || got.data.layoutSource === 'account') return;
+        let prefs = {};
+        try { prefs = JSON.parse(raw) || {}; } catch { return; }
+        const { data } = got;
+        const set = (id, fn) => { const e = (data.layout.parts || []).find((p) => p.id === id); if (e) fn(e); };
+        if (prefs.hand === 'left') {
+            const stick = (data.layout.parts || []).find((p) => p.id === 'stick');
+            const stop = (data.layout.parts || []).find((p) => p.id === 'stop');
+            if (stick && stop && stick.place && stop.place && stick.place.x != null && stop.place.x != null) {
+                const x = stick.place.x; stick.place.x = stop.place.x; stop.place.x = x;
+            }
+        }
+        if (prefs.size === 'l') set('stick', (p) => { if (p.place && p.place.x != null) { p.place.w = Math.max(p.place.w, 3); p.place.h = Math.max(p.place.h, 3); } });
+        if (prefs.readouts === 'off') for (const id of ['battery', 'latency', 'telemetry']) set(id, (p) => { p.visible = false; });
+        got.el.textContent = JSON.stringify(data);
+        // Put it on this page's already-rendered parts too, so the person sees their old arrangement at once.
+        const surfaceEl = document.querySelector('#panel .widgets[data-ov-surface]') || document.querySelector('#panel .bot-overlay[data-ov-surface]');
+        if (surfaceEl && data.surface === 'bot.controls') {
+            const cols = data.catalog && data.catalog.grid ? data.catalog.grid.columns[data.device] : 4;
+            const cell = data.catalog && data.catalog.grid ? data.catalog.grid.cell_px[data.device] : 64;
+            surfaceEl.setAttribute('data-ov-arranged', 'true');
+            surfaceEl.style.setProperty('--ov-cols', String(cols));
+            surfaceEl.style.setProperty('--ov-cell', `${cell}px`);
+            surfaceEl.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+            surfaceEl.style.gridAutoRows = `minmax(${cell}px, auto)`;
+        }
+        for (const e of data.layout.parts || []) {
+            const el = document.querySelector(`[data-ov-part="${CSS.escape(e.id)}"]`);
+            if (!el) continue;
+            if (e.place && e.place.x != null) { el.style.gridColumn = `${e.place.x + 1} / span ${e.place.w}`; el.style.gridRow = `${e.place.y + 1} / span ${e.place.h}`; }
+            el.hidden = e.visible === false;
+        }
+        if (data.signedIn && data.save) {
+            fetch(data.save, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ surface: data.surface, device: data.device, catalog: data.catalog, layout: data.layout }) }).catch(() => {});
+        }
+    })();
+
+    (() => {
+        const btn = document.querySelector('[data-arrange]');
+        if (!btn) return;
+        let opening = false;
+        let saved = false;
+        const post = async (url, body) => {
+            const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+            const out = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error((out.reasons && out.reasons[0]) || out.detail || 'That did not work.');
+            return out;
         };
-        apply();
-        if (!btn || !menu) return;
-        const close = () => { menu.hidden = true; btn.setAttribute('aria-expanded', 'false'); };
-        btn.addEventListener('click', (e) => { e.stopPropagation(); const open = menu.hidden; menu.hidden = !open; btn.setAttribute('aria-expanded', String(open)); });
-        document.addEventListener('click', (e) => { if (!menu.hidden && !menu.contains(e.target) && e.target !== btn) close(); });
-        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !menu.hidden) { close(); btn.focus(); } });
-        $$('[data-pad-pref]').forEach((r) => r.addEventListener('change', () => {
-            prefs[r.dataset.padPref] = r.value;
-            try { localStorage.setItem(KEY, JSON.stringify(prefs)); } catch { /* */ }
-            apply();
-        }));
+        const launch = () => {
+            const got = arrangeData();
+            if (!got || !window.OVArrange) { opening = false; return; }
+            const { data } = got;
+            const surfaceEl = document.querySelector('#panel .widgets[data-ov-surface]') || document.querySelector('#panel .bot-overlay[data-ov-surface]') || document.querySelector('#panel .bot-compact[data-ov-surface]');
+            if (!surfaceEl) { opening = false; return; }
+            window.ovArrange = window.OVArrange.open({
+                surface: surfaceEl, catalog: data.catalog, layout: data.layout, device: data.device,
+                onSave: async (layout) => {
+                    const out = await post(data.save, { surface: data.surface, device: data.device, catalog: data.catalog, layout });
+                    data.layout = layout; got.el.textContent = JSON.stringify(data); saved = true;
+                    return out;
+                },
+                onAsk: async (words, request) => post(data.suggest, { surface: data.surface, device: data.device, words, layout: request.layout, catalog: data.catalog }),
+                onShare: async (layout) => post(data.share, { surface: data.surface, device: data.device, catalog: data.catalog, layout }),
+                onClose: () => { opening = false; if (saved) setTimeout(() => location.reload(), 60); },
+                confirm: () => true,
+            });
+        };
+        btn.addEventListener('click', () => {
+            if (opening) return;
+            opening = true;
+            if (window.OVArrange) return launch();
+            const src = btn.dataset.arrangeSrc;
+            if (!src) { opening = false; return; }
+            const sc = document.createElement('script');
+            sc.src = src; sc.async = true;
+            sc.onload = launch;
+            sc.onerror = () => { opening = false; };
+            document.head.appendChild(sc);
+        });
     })();
     const stopRepeats = () => { [...repeats].forEach((s) => s()); };
     window.addEventListener('blur', stopRepeats);
@@ -987,7 +1056,7 @@
         for (const section of $$('[data-command]')) {
             const ok = joined && allowed.includes(JSON.parse(section.dataset.command).kind);
             // The pad's arrangement is this person's own and works offline: it is never a control of the robot.
-            for (const el of $$('button, input, select', section)) if (!el.closest('[data-pad-prefs-menu]') && !el.matches('[data-pad-prefs]')) el.disabled = !ok;
+            for (const el of $$('button, input, select', section)) el.disabled = !ok;
             for (const el of $$('[data-joystick], [data-button-stick], [data-ptz-stick]', section)) { if (ok) el.removeAttribute('aria-disabled'); else el.setAttribute('aria-disabled', 'true'); }
         }
         announceControls();
