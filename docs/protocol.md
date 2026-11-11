@@ -287,6 +287,20 @@ A drive command (a held control re-sends every 150 ms with a fresh `id`):
   "operator": { "subject": "usr_01J8…", "role": "operator" }, "robot_id": "rob_01J8Z4M2Q0R7T9YV3K6N8P1W2X" }
 ```
 
+A headlight (Bot stamps the actor, the epoch and the provenance; the browser sends only `kind` and `value`):
+
+```json
+{ "v": 1, "seq": 10, "ts": 1738065600000, "type": "command", "id": "cmd_01J8Z4H…", "ref": "op_hl…",
+  "kind": "headlight", "value": { "on": true }, "deadline_ms": 1738065600250,
+  "operator": { "subject": "usr_01J8…", "role": "owner" }, "robot_id": "rob_01J8Z4M2Q0R7T9YV3K6N8P1W2X",
+  "provenance": { "session": "sess_01J8Z4A…", "seq": 10, "issued_at_ms": 1738065600000,
+                  "expires_at_ms": 1738065600300, "clock_uncertainty_ms": 0 } }
+```
+
+Its link-level answer arrives in the ack's `data`: `{ "stage": "headlight_pending", "admitted": true }` (accepted,
+not confirmed) or `{ "stage": "headlight_refused", "admitted": false }` (busy/rate; the panel keeps its state). A
+`nack` is a rejection, with the driver's `message` as the reason the panel shows.
+
 ```json
 { "v": 1, "seq": 10, "ts": 1738065600005, "type": "ack", "id": "cmd_01J8Z4F…" }
 { "v": 1, "seq": 11, "ts": 1738065600010, "type": "nack", "id": "cmd_01J8Z4F…", "fault_code": "obstacle" }
