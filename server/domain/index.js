@@ -923,14 +923,18 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     const deskLeases = {
         async get(deviceId, desk) { return leaseOut(await db.maybe('SELECT * FROM desk_leases WHERE device_id = $1 AND desk = $2', [deviceId, desk])); },
         async forSession(sessionId) { return leaseOut(await db.maybe('SELECT * FROM desk_leases WHERE session_id = $1', [sessionId])); },
+        async origins(deviceId, desk) {
+            const row = await db.maybe('SELECT task_origins FROM desk_leases WHERE device_id = $1 AND desk = $2', [deviceId, desk]);
+            return row && row.task_origins != null ? (typeof row.task_origins === 'string' ? JSON.parse(row.task_origins) : row.task_origins) : null;
+        },
         async count(deviceId) { return Number((await db.one('SELECT count(*)::int AS n FROM desk_leases WHERE device_id = $1', [deviceId])).n); },
         async list(deviceId) { return (await db.many('SELECT * FROM desk_leases WHERE device_id = $1 ORDER BY created_at', [deviceId])).map(leaseOut); },
         /** The lease, or null when the desk is someone else's already (the caller answers 409). */
-        async create({ deviceId, desk, session, owner, width, height, shared }) {
+        async create({ deviceId, desk, session, owner, width, height, shared, origins = null }) {
             const r = await db.maybe(
-                `INSERT INTO desk_leases (device_id, desk, session_id, owner_subject, kind, width, height, shared, created_at)
-                 VALUES ($1, $2, $3, $4, 'browser', $5, $6, $7, $8) ON CONFLICT DO NOTHING RETURNING *`,
-                [deviceId, desk, session, owner, width, height, !!shared, iso(now())]);
+                `INSERT INTO desk_leases (device_id, desk, session_id, owner_subject, kind, width, height, shared, task_origins, created_at)
+                 VALUES ($1, $2, $3, $4, 'browser', $5, $6, $7, $8, $9) ON CONFLICT DO NOTHING RETURNING *`,
+                [deviceId, desk, session, owner, width, height, !!shared, origins === null ? null : JSON.stringify(origins), iso(now())]);
             return leaseOut(r);
         },
         async remove(deviceId, desk) { return leaseOut(await db.maybe('DELETE FROM desk_leases WHERE device_id = $1 AND desk = $2 RETURNING *', [deviceId, desk])); },

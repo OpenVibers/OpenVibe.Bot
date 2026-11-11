@@ -1,4 +1,5 @@
 'use strict';
+const { parseOrigins } = require('../browser-origins');
 /**
  * Desk leases for OpenVibe.Run's sessions (contracts 0.223.0, capability bot.desk.session; the Desks plan's D6). Run,
  * with a service token naming the session's person in X-OV-Subject, leases one named browser desk on a machine:
@@ -118,20 +119,25 @@ function router({ domain, apiAuth, hub, config = {}, limit = (req, res, next) =>
     r.post('/machines/:id/desk-leases', limit, express.json({ limit: '8kb' }), wrap(async (req, res) => {
         const subject = runFor(req);
         const body = req.body && typeof req.body === 'object' ? req.body : {};
-        const check = validate('bot.desk-lease-create-request@1', body);
+        let origins;
+        try { origins = parseOrigins(body.origins); } catch (e) { fail(422, 'bot.invalid_input', e.message); }
+        const { origins: _boundary, ...leaseBody } = body;
+        const check = validate('bot.desk-lease-create-request@1', leaseBody);
         if (!check.valid) fail(422, 'bot.invalid_input', `invalid lease: ${(check.errors && check.errors[0] && check.errors[0].message) || 'bad value'}`.slice(0, 300));
         const u = await machineFor(req, subject);
         const owner = `user:${subject}`;
         const mine = await domain.deskLeases.forSession(body.session);
         if (mine) {
-            if (mine.machine_id === u.device.id && mine.desk === body.desk && mine.owner === owner) return res.status(200).json(mine);
+            const oldOrigins = await domain.deskLeases.origins(mine.machine_id, mine.desk);
+            if (mine.machine_id === u.device.id && mine.desk === body.desk && mine.owner === owner && JSON.stringify(oldOrigins) === JSON.stringify(origins)) return res.status(200).json(mine);
             fail(409, 'bot.lease_conflict', 'that session holds another desk');
         }
+        if (u.shared && origins !== null) fail(409, 'bot.origin_boundary_unavailable', 'this shared desk cannot enforce a task origin list');
         if (!(hub.isOnline && hub.isOnline(u.device.id))) fail(409, 'bot.device_offline', 'the machine is offline');
         if ((await room(u.device, u.offered)).free < 1) fail(409, 'bot.machine_busy', 'the machine has no room for another desk right now');
         const width = Number.isInteger(body.width) ? body.width : 1280;
         const height = Number.isInteger(body.height) ? body.height : 800;
-        const lease = await domain.deskLeases.create({ deviceId: u.device.id, desk: body.desk, session: body.session, owner, width, height, shared: u.shared });
+        const lease = await domain.deskLeases.create({ deviceId: u.device.id, desk: body.desk, session: body.session, owner, width, height, shared: u.shared, origins });
         if (!lease) fail(409, 'bot.desk_busy', 'that desk is in use');
         // The desk starts now; a machine that refuses it gives the lease back at once.
         let result;
@@ -162,8 +168,10 @@ function router({ domain, apiAuth, hub, config = {}, limit = (req, res, next) =>
         const value = req.body && req.body.value && typeof req.body.value === 'object' && !Array.isArray(req.body.value) ? req.body.value : null;
         if (!ACTS.has(kind) || !value) fail(422, 'bot.invalid_input', 'kind is screen, input or browser, with a value');
         if ('desk' in value) fail(422, 'bot.invalid_input', 'a session acts on its own desk only: leave out desk');
+        if ('origins' in value) fail(422, 'bot.invalid_input', 'a session uses the origin list fixed when its desk was leased');
+        const origins = kind === 'browser' ? await domain.deskLeases.origins(device.id, lease.desk) : null;
         const result = await hub.machineCommand(device.id, principalFor(req, subject), subject, {
-            id: req.body.id, kind, value: { ...value, desk: lease.desk }, ms: req.body.ms,
+            id: req.body.id, kind, value: { ...value, desk: lease.desk, ...(origins !== null ? { origins } : {}) }, ms: req.body.ms,
         });
         res.json({ machine_id: device.id, desk: lease.desk, ...result });
     }));

@@ -48,6 +48,8 @@ const DEVICE_MAX_PAYLOAD = 640 * 1024;
 // 0.214.0, Link v0.15.0) starts, stops or reports the machine's private desk; screen, input and browser (and the live
 // screen) act there with `desk: private`, never on the owner's own screen.
 const COMPUTER_CAP = { exec: 'terminal', fs: 'files', screen: 'screen', probe: 'probe', input: 'input', browser: 'browser', desk: 'desk', ai: 'ai' };
+const { parseOrigins } = require('./browser-origins');
+const { boundPage } = require('./browser-content');
 const NO_DESK = 'this machine has no private desk: it needs OpenVibe Link v0.15.0 or newer on Linux, with Xvfb and allow_desk on';
 const NO_NAMED_DESKS = 'this machine runs one desk only (private): several named desks need OpenVibe Link v0.19.0 or newer';
 const NO_DESK_PROGRAMS = 'running a program on a desk needs OpenVibe Link v0.26.0 or newer (an older one would run it on the person\'s own screen)';
@@ -518,7 +520,8 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         // no data back), so 4096 cached results never hold 4096 screens.
         cacheResult(p.key, { result, reason: msg.fault_code || null });
         await domain.audit.record({ robotId: p.robotId, deviceId: p.deviceId, subject: p.subject, operatorKind: p.operatorKind, role: p.role, kind: p.kind, value: p.value, result, reason: msg.fault_code || null, latencyMs: latency });
-        const data = p.computer && result === 'ack' && msg.data && typeof msg.data === 'object' && !Array.isArray(msg.data) ? msg.data : null;
+        const rawData = p.computer && result === 'ack' && msg.data && typeof msg.data === 'object' && !Array.isArray(msg.data) ? msg.data : null;
+        const data = rawData && p.kind === 'browser' ? boundPage(rawData) : rawData;
         const message = p.computer && result === 'nack' && typeof msg.message === 'string' ? msg.message.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 300) : null;
         sendFrame(p.conn, 'command_result', { id: p.opId, result, reason: message || msg.fault_code || null, latency_ms: latency, ...(data ? { data } : {}) });
     }
@@ -806,15 +809,23 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             };
             const screen = msg.screen === true && kind === SCREEN_KIND;
             if (!screen && !COMPUTER_CAP[kind]) return refuse('bot.invalid_input', `kind is ${COMPUTER_KINDS.join(', ')}`);
+            if (kind === 'browser' && Object.hasOwn(value, 'origins')) {
+                try { parseOrigins(value.origins); } catch (e) { return refuse('bot.invalid_input', e.message); }
+            }
             const profileAction = kind === 'browser' && ['profile_export', 'profile_import', 'profile_sign_out'].includes(value.action);
             if (profileAction) {
                 const lease = /^desk-[a-z0-9][a-z0-9-]{0,23}$/.test(value.desk || '') ? await domain.deskLeases.get(deviceId, value.desk) : null;
                 if (conn.principal.kind !== 'service' || conn.principal.sub !== 'svc:run' || !lease || lease.owner !== `user:${subject}` || !capabilities.grants(conn.principal.cap, 'bot.desk.session')) return refuse('bot.forbidden', 'Saved sign-ins belong to Run and its leased desk.');
-                const keys = value.action === 'profile_import' ? ['action', 'desk', 'profile'] : value.action === 'profile_sign_out' ? ['action', 'desk', 'site'] : ['action', 'desk'];
+                const keys = value.action === 'profile_import' ? ['action', 'desk', 'profile', 'origins'] : value.action === 'profile_sign_out' ? ['action', 'desk', 'site', 'origins'] : ['action', 'desk', 'origins'];
                 if (Object.keys(value).some(k => !keys.includes(k)) || JSON.stringify(value).length > 48000 || (value.action === 'profile_import' && (!value.profile || !Array.isArray(value.profile.cookies) || !Array.isArray(value.profile.origins))) || (value.action === 'profile_sign_out' && !/^[a-z0-9.-]{1,253}$/.test(value.site || ''))) return refuse('bot.invalid_input', 'Invalid saved sign-ins.');
             }
             if (!screen && !profileAction) {
-                const check = validate('bot.command@1', { v: 1, seq: 0, ts: 0, type: 'command', id, kind, value });
+                let checkedValue = value;
+                if (kind === 'browser' && Object.hasOwn(value, 'origins')) {
+                    const { origins: _boundary, ...rest } = value;
+                    checkedValue = rest; // the released contract predates the additive task boundary
+                }
+                const check = validate('bot.command@1', { v: 1, seq: 0, ts: 0, type: 'command', id, kind, value: checkedValue });
                 if (!check.valid) return refuse('bot.invalid_input', `invalid ${kind}: ${(check.errors && check.errors[0] && (check.errors[0].message || JSON.stringify(check.errors[0]))) || 'bad value'}`.slice(0, 300));
             }
             const summary = screen
