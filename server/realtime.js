@@ -22,6 +22,7 @@
  * first result instead of reaching the device again.
  */
 const { WebSocketServer } = require('ws');
+const jwt = require('jsonwebtoken');
 const { createControlTickets, ticketFromProtocols, PROTOCOL: TICKET_PROTOCOL } = require('./control-tickets');
 const { capabilities, ids, validate } = require('openvibe-contracts');
 const { json, iso, prefixedId } = require('./util');
@@ -43,6 +44,19 @@ const WATCH_MAX_PAYLOAD = 4 * 1024;   // a watcher only ever sends join/leave
 // A machine's answer to a computer command (exec output, a file, a screen) is at most 512 KB of JSON in its ack
 // (OpenVibe Link protocol.MaxAckData), so a device frame may be that large; ws closes a socket on a larger frame.
 const DEVICE_MAX_PAYLOAD = 640 * 1024;
+// Machine-to-machine relay (Contracts 0.409.0, link.access-grant-token@1): Bot forwards an opaque body between two
+// paired machines only while Network's signed grant names both and the target, and only for the scopes it carries.
+// The target's Link verifies the same token itself and caps everything at its own local level.
+const RELAY_SCOPES = new Set(['agent', 'send', 'screen', 'desk', 'computer', 'worker']);
+const COMPUTER_LEVELS = Object.freeze({ observe: 0, ask: 1, trusted: 2, full: 3 });
+const RELAY_MAX_BODY = 256 * 1024;
+// The audit verb Network stores for a scope's first use in a relay: both owners read one line per use.
+const RELAY_SCOPE_ACTION = Object.freeze({ agent: 'message', send: 'send', screen: 'watch', desk: 'use', computer: 'control', worker: 'run' });
+// An agent task delivered to a machine (Network's POST /api/v1/agents/:id/tasks → Bot) and its answer.
+const AGENT_TASK_RE = /^tsk_[A-Za-z0-9_-]{8,80}$/;
+const AGENT_STATUSES = new Set(['running', 'completed', 'failed', 'cancelled']);
+const MAX_AGENT_PARTS = 20;
+const MAX_AGENT_TEXT = 8000;
 // The Link's computer plugin (plan T14/T17): the kinds a person's machine takes, the capability each needs in its
 // status, and the reply window (the owner's approval on the machine plus the program's own run). `desk` (contracts
 // 0.214.0, Link v0.15.0) starts, stops or reports the machine's private desk; screen, input and browser (and the live
@@ -130,10 +144,12 @@ function simView(sim) {
     };
 }
 
-function createRealtime({ config, keys, userAuth, log = console, now = () => Date.now() }) {
+function createRealtime({ config, keys, userAuth, log = console, now = () => Date.now(), networkSend = null }) {
     let domain = null;
     const tickets = createControlTickets({ now });   // the embedded panel's Drive (server/control-tickets.js)
     const deviceConns = new Map();     // device_id → conn
+    const relays = new Map();          // relay id → one open grant relay between two machines (relay.open)
+    const agentTasks = new Map();      // task id → { deviceId, at } an agent.task delivered to a machine
     const subsByRobot = new Map();     // robot_id → Set<conn>
     const pendingCmds = new Map();     // device-facing command id (server-minted) → pending
     const results = new Map();         // operator key (who + their id) → { result, reason, at }
@@ -379,11 +395,192 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         if (!conn || !conn.device) return;
         const current = deviceConns.get(conn.device.id);
         if (current === conn) deviceConns.delete(conn.device.id);
+        // A relay has two live sockets; when either goes, both ends hear it is closed instead of writing into a gap.
+        for (const session of [...relays.values()]) if (session.from === conn || session.to === conn) closeRelay(session, 'offline');
         if (!conn.online) return;
         conn.online = false;
         if (silent) return;
         reportOnline(conn, false);
         for (const robotId of deviceRobotIds(conn.device)) broadcast(robotId);
+    }
+
+    // ── Machine-to-machine relay (stage 1: Network's grant, Bot's pipe) ───────────────────────────────
+    /**
+     * The one open socket of a machine principal (`lnk_…`), online. A relay names both machines by Network's id, not
+     * Bot's device id, because the grant token does.
+     */
+    function linkConn(principal) {
+        for (const c of deviceConns.values()) if (c.online && c.node && c.node.principal === principal) return c;
+        return null;
+    }
+    /** The level a machine's own computer plugin runs at (its owner's setting), or null when it has not said. */
+    function linkComputerLevel(conn) {
+        const status = conn && conn.status;
+        const sensors = status && status.telemetry && status.telemetry.sensors;
+        const offered = status && status.capabilities && status.capabilities.computer;
+        if (!offered && !(sensors && typeof sensors.computer_level === 'string')) return null;
+        if (sensors && typeof sensors.computer_level === 'string') return sensors.computer_level;
+        const pick = offered && typeof offered === 'object' ? (offered.files || offered.terminal || offered.screen || {}) : {};
+        return typeof pick.level === 'string' ? pick.level : null;
+    }
+    /**
+     * Verify a grant token minted by Network (`link.access-grant-token@1`): RS256 with Network's published key,
+     * issuer Network, audience the target machine. Returns the claims or null. The target's Link checks the same token
+     * again with the same public key: Bot is a relay, never the authority.
+     */
+    async function verifyGrantToken(token, audience) {
+        if (typeof token !== 'string' || token.length < 32 || token.length > 4096) return null;
+        let kid = null;
+        try { kid = JSON.parse(Buffer.from(token.split('.')[0], 'base64url').toString('utf8')).kid || null; } catch { return null; }
+        const candidates = await keys.keysFor(kid);
+        for (const k of candidates) {
+            let claims;
+            try { claims = jwt.verify(token, k.key, { algorithms: ['RS256'], issuer: config.network.issuer, audience }); } catch { continue; }
+            const v = validate('link.access-grant-token@1', claims);
+            if (!v.valid) return null;
+            return claims;
+        }
+        return null;
+    }
+    function closeRelay(session, reason) {
+        if (!session || !relays.has(session.id)) return false;
+        relays.delete(session.id);
+        for (const conn of [session.from, session.to]) sendFrame(conn, 'relay.closed', { relay: session.id, reason });
+        return true;
+    }
+    /**
+     * Tell Network one scope was used under a grant, for the audit line both owners read
+     * (`GET /api/v1/me/nodes/access-audit`). Never awaited and never fatal: a relay must not stop because the
+     * ledger is briefly down, and the token's short expiry still bounds it.
+     */
+    function auditRelayUse(session, scope) {
+        if (!networkSend) return;
+        const body = { from_principal: session.fromPrincipal, to_principal: session.toPrincipal,
+            scope, action: RELAY_SCOPE_ACTION[scope] || scope };
+        Promise.resolve().then(() => networkSend(`/internal/link-access/grants/${encodeURIComponent(session.grantId)}/use`, body))
+            .then((res) => { if (res && !res.ok) log.warn(`[Bot] relay audit ${session.grantId} ${scope}: ${res.status}`); })
+            .catch((e) => log.warn(`[Bot] relay audit ${session.grantId} ${scope}: ${e.message}`));
+    }
+    /**
+     * relay.open: { to: 'lnk_B', grant_token }. The asking machine is the socket's own Link principal; the token must
+     * name it as `sub` and the target as `aud`, in date. The target is told the relay id and the same token so its
+     * own Link verifies it too.
+     */
+    async function onRelayOpen(conn, msg) {
+        if (!conn.node) return sendError(conn, 'bot.relay_link_only', 'only a paired machine may open a relay');
+        const to = String(msg.to || '');
+        if (!/^lnk_[0-9A-HJKMNP-TV-Z]{26}$/.test(to)) return sendError(conn, 'bot.relay_target', 'to must be a machine principal (lnk_…)');
+        if (to === conn.node.principal) return sendError(conn, 'bot.relay_self', 'a machine cannot relay to itself');
+        const target = linkConn(to);
+        if (!target) return sendError(conn, 'bot.relay_target_offline', 'the receiving machine is not connected');
+        const claims = await verifyGrantToken(msg.grant_token, to);
+        if (!claims || claims.sub !== conn.node.principal) {
+            return sendError(conn, 'bot.relay_grant_denied', 'no live Network grant lets this machine relay to that one');
+        }
+        const relayId = prefixedId('rly', now());
+        const session = { id: relayId, grantId: claims.grant_id, scopes: new Set(claims.scopes), usedScopes: new Set(),
+            from: conn, fromPrincipal: conn.node.principal, to: target, toPrincipal: to, expiresAt: claims.exp * 1000, openedAt: now() };
+        relays.set(relayId, session);
+        const opened = { relay: relayId, to, grant_token: msg.grant_token, scopes: claims.scopes,
+            expires_at: iso(session.expiresAt), from: session.fromPrincipal };
+        sendFrame(conn, 'relay.opened', opened);
+        sendFrame(target, 'relay.opened', opened);
+        return undefined;
+    }
+    /**
+     * relay.frame: { relay, scope, body }. Checked on every frame in both directions: the relay is open, the sender is
+     * one of its two machines, the scope is in the grant and the grant is still in date. For `computer` the asking
+     * frame names the level it wants and Bot refuses one above the target's own; the target's Link caps it again.
+     */
+    function onRelayFrame(conn, msg) {
+        const session = relays.get(String(msg.relay || ''));
+        if (!session) return sendError(conn, 'bot.relay_unknown', 'the relay is closed');
+        const outbound = conn === session.from;
+        if (!outbound && conn !== session.to) return sendError(conn, 'bot.relay_forbidden', 'this machine is not part of the relay');
+        if (now() >= session.expiresAt) { closeRelay(session, 'expired'); return sendError(conn, 'bot.relay_expired', 'the grant token expired'); }
+        const scope = String(msg.scope || '');
+        if (!RELAY_SCOPES.has(scope) || !session.scopes.has(scope)) {
+            return sendError(conn, 'bot.relay_scope_denied', `the grant does not include ${scope || 'that scope'}`);
+        }
+        let body;
+        try { body = msg.body; } catch { body = undefined; }
+        let size = 0;
+        try { size = Buffer.byteLength(JSON.stringify(body === undefined ? null : body), 'utf8'); } catch { size = RELAY_MAX_BODY + 1; }
+        if (body === undefined || size > RELAY_MAX_BODY) {
+            return sendError(conn, 'bot.relay_body', `a relayed body is required and at most ${RELAY_MAX_BODY} bytes`);
+        }
+        if (outbound && scope === 'computer') {
+            const offered = session.to.status && session.to.status.capabilities && session.to.status.capabilities.computer;
+            if (session.to.computerAllowed === false || !offered) {
+                return sendError(conn, 'bot.relay_computer_off', 'the receiving machine does not offer its computer');
+            }
+            const have = linkComputerLevel(session.to);
+            const asked = body && typeof body.level === 'string' ? body.level : 'ask';
+            if (!(asked in COMPUTER_LEVELS)) return sendError(conn, 'bot.relay_computer_level', 'level must be observe, ask, trusted or full');
+            const own = COMPUTER_LEVELS[have] === undefined ? COMPUTER_LEVELS.ask : COMPUTER_LEVELS[have];
+            if (COMPUTER_LEVELS[asked] > own) {
+                return sendError(conn, 'bot.relay_computer_level', `the receiving machine allows up to ${have || 'ask'}; ${asked} is above it`);
+            }
+        }
+        sendFrame(outbound ? session.to : session.from, 'relay.frame', {
+            relay: session.id, from: outbound ? session.fromPrincipal : session.toPrincipal, scope, body,
+        });
+        if (outbound || !session.usedScopes.has(scope)) {
+            // One audit line per scope per relay, however many frames cross it; both directions use the same grant.
+            if (!session.usedScopes.has(scope)) { session.usedScopes.add(scope); auditRelayUse(session, scope); }
+        }
+        return undefined;
+    }
+    function onRelayClose(conn, msg) {
+        const session = relays.get(String(msg.relay || ''));
+        if (!session) return sendError(conn, 'bot.relay_unknown', 'the relay is already closed');
+        if (conn !== session.from && conn !== session.to) return sendError(conn, 'bot.relay_forbidden', 'this machine is not part of the relay');
+        closeRelay(session, 'closed');
+        return undefined;
+    }
+    /** Network's network.link.access.revoked@1: every relay under that grant closes now, both ends told why. */
+    function revokeGrant(grantId) {
+        const key = String(grantId || '');
+        let closed = 0;
+        for (const session of [...relays.values()]) if (session.grantId === key) { closeRelay(session, 'revoked'); closed++; }
+        return closed;
+    }
+    /** Network's POST /api/v1/machines/:id/relay → an `agent.task` frame on the machine. Never queued for an offline one. */
+    function deliverAgentTask(deviceId, task) {
+        const conn = deviceConns.get(String(deviceId || ''));
+        if (!conn || !conn.online || !conn.node) return false;
+        if (!task || typeof task !== 'object' || !AGENT_TASK_RE.test(String(task.id || ''))) return false;
+        agentTasks.set(task.id, { deviceId: conn.device.id, at: now() });
+        return sendFrame(conn, 'agent.task', { task });
+    }
+    /**
+     * agent.task_result: { task_id, status, result }. Only the machine the task was delivered to may answer, and only
+     * Network records the answer (the task's row and its event); Bot holds no task state of its own.
+     */
+    async function onAgentTaskResult(conn, msg) {
+        const taskId = String(msg.task_id || '');
+        const delivered = agentTasks.get(taskId);
+        if (!AGENT_TASK_RE.test(taskId) || !delivered || delivered.deviceId !== conn.device.id) {
+            return sendError(conn, 'bot.agent_task_unknown', 'no agent task was delivered to this machine under that id');
+        }
+        const status = String(msg.status || '');
+        if (!AGENT_STATUSES.has(status)) return sendError(conn, 'bot.bad_frame', 'status must be running, completed, failed or cancelled');
+        let result = msg.result;
+        if (result != null) {
+            const parts = result && result.parts;
+            if (!Array.isArray(parts) || parts.length < 1 || parts.length > MAX_AGENT_PARTS
+                || parts.some((p) => !p || p.type !== 'text' || typeof p.text !== 'string' || p.text.length > MAX_AGENT_TEXT)) {
+                return sendError(conn, 'bot.bad_frame', 'result must be text parts of at most 8000 characters');
+            }
+            result = { parts: parts.map((p) => ({ type: 'text', text: p.text })) };
+        }
+        if (!networkSend) return sendError(conn, 'bot.network_unavailable', 'the network cannot record the answer now');
+        let res;
+        try { res = await networkSend(`/api/v1/agents/tasks/${encodeURIComponent(taskId)}/result`, { status, ...(result ? { result } : {}) }); }
+        catch (e) { return sendError(conn, 'bot.network_unavailable', `the answer was not recorded: ${e.message}`); }
+        if (!res || !res.ok) return sendError(conn, 'bot.agent_result_refused', 'the network did not accept the answer');
+        if (status !== 'running') agentTasks.delete(taskId);
+        return sendFrame(conn, 'agent.task_result_ack', { task_id: taskId, status });
     }
 
     /**
@@ -433,6 +630,11 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             case 'ack': case 'nack': return onAck(conn, msg);
             case 'estop_state': return onEstopState(conn, msg);
             case 'voice_ask': return onVoiceAsk(conn, msg);
+            // Machine-to-machine relay (Contracts 0.409.0) and Network's agent tasks to a machine.
+            case 'relay.open': return onRelayOpen(conn, msg);
+            case 'relay.frame': return onRelayFrame(conn, msg);
+            case 'relay.close': return onRelayClose(conn, msg);
+            case 'agent.task_result': return onAgentTaskResult(conn, msg);
             // Jobs (platform.job-frame@1). Out: job, job_cancel, job_exit_ack (server/jobs/dispatch.js); in:
             case 'job_started': case 'job_stdout': case 'job_usage': case 'job_exit': return jobFrame(conn, msg);
             default: return sendError(conn, 'bot.unknown_message', `unknown type ${msg.type}`);
@@ -1088,6 +1290,10 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     }
 
     function checkHeartbeats() {
+        // A relay never outlives its grant token; an agent task nobody answered is forgotten after an hour.
+        const at = now();
+        for (const session of [...relays.values()]) if (at >= session.expiresAt) closeRelay(session, 'expired');
+        for (const [taskId, task] of agentTasks) if (at - task.at > 3_600_000) agentTasks.delete(taskId);
         for (const conn of [...deviceConns.values()]) {
             if (conn.node && now() > conn.node.reauthBy) {
                 // The Link token lapsed with no valid reauth: the machine must authenticate again.
@@ -1131,6 +1337,9 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         issueControlTicket(principal, robotId) { return tickets.issue(principal, robotId); },
         isOnline, deviceState, sendToDevice, sendToRobotDevices, broadcast, closeDevice, robotState, refreshConfig, pushEstop, closeWatchers, dropSubject, operatorCommand,
         machineCommand, machineScreen, computerOf, machineChanged,
+        // Network's grant relay and agent tasks (Contracts 0.409.0): close every relay under a revoked grant, and
+        // hand an agent.task to the machine it names.
+        revokeGrant, deliverAgentTask, relayCount: () => relays.size,
         // Real devices only: a simulator is not a machine anyone runs.
         onlineCount() { let n = 0; for (const c of deviceConns.values()) if (c.online && !c.sim) n++; return n; },
         protectedSessions() {

@@ -65,7 +65,12 @@ function createApp(opts = {}) {
     const outbox = opts.outbox || createBotOutbox({ db, config, fetchImpl: opts.eventsFetch, now, log });
     // Job usage readings → Billing (server/jobs/metering.js); started by server/index.js with the other jobs.
     const usage = opts.usage || createUsageRelay({ db, config, fetchImpl: opts.billingFetch || fetchImpl, now, log });
-    const hub = opts.hub || createRealtime({ config, keys, userAuth, log, now });
+    // Bot's own client-credentials voice to Network's internal routes (grant-use audit, agent task answers). null
+    // without a client secret: the relay still works and the ledger keeps the lines it already has.
+    const networkSend = opts.networkSend || (config.oauth.clientSecret
+        ? createNetworkSender({ networkInternalUrl: config.network.internalUrl, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret, fetch: fetchImpl })
+        : null);
+    const hub = opts.hub || createRealtime({ config, keys, userAuth, log, now, networkSend });
     const nodes = opts.nodes || createNodePrincipals(config, { fetchImpl });
     const identity = opts.identity || createIdentity(config, { fetchImpl });
     const openre = opts.openre !== undefined ? opts.openre : createOpenRe(config, { fetchImpl });
@@ -148,12 +153,20 @@ function createApp(opts = {}) {
     // consumer over account-data.js. It reads the raw body itself (the v2 signature covers it) and refuses a request that
     // came through a proxy. The sender posts to Network's internal routes with Bot's own token.
     const accountData = accountDataLib.create({ domain, log });
-    const accountSend = opts.accountSend || (config.oauth.clientSecret
-        ? createNetworkSender({ networkInternalUrl: config.network.internalUrl, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret, fetch: fetchImpl })
-        : async () => { throw new Error('OV_OAUTH_CLIENT_SECRET is not set: Bot cannot answer account events'); });
+    const accountSend = opts.accountSend || networkSend
+        || (async () => { throw new Error('OV_OAUTH_CLIENT_SECRET is not set: Bot cannot answer account events'); });
     // network.link.revoked (a person's paired machine revoked on Network): its devices are revoked and a live session is
     // closed at once, instead of at the machine's next reauth deadline.
     const onEvent = async (ev) => {
+        // network.link.access.revoked (Contracts 0.409.0): either owner ended a machine grant. Close every relay under
+        // it at once, so neither machine can send under a token Network has already revoked.
+        if (ev && ev.event_type === 'network.link.access.revoked') {
+            const grantId = String((ev.payload && ev.payload.grant_id) || '');
+            if (!/^grt_[A-Za-z0-9_-]{8,80}$/.test(grantId)) return 'applied';
+            const closed = hub.revokeGrant(grantId);
+            if (closed) log.log(`[Bot] grant ${grantId} revoked on Network: ${closed} relay(s) closed`);
+            return 'applied';
+        }
         if (ev && ev.event_type === 'network.link.revoked') {
             const principal = String((ev.payload && ev.payload.principal_id) || '');
             if (!/^lnk_[0-9A-HJKMNP-TV-Z]{26}$/.test(principal)) return 'applied';

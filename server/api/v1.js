@@ -37,6 +37,7 @@
  * | POST   /pair                                    | — (one-time code)      | the agent (code is the credential)  |
  * | POST   /claims                                  | — (anyone)             | a device asking to be added: a code |
  * | POST   /machines/:id/watch-links               | bot.machine.watch_link | the owner, or their agent for them |
+ * | POST   /machines/:id/relay                     | bot.machine.relay      | Network: an agent.task for the machine|
  * | POST   /machines/:id/agent-computer, watch-probe| — (the owner or the network's hub) | as the person |
  * | POST   /machines/:id/screen                    | — (the owner or the network's hub) | the owner only |
  * | GET    /machines/:id/desks, /shares            | — (the owner or the network's hub) | the owner only |
@@ -73,6 +74,8 @@ const CAP = {
     machine: 'bot.machine.manage',
     // A watch link to a machine's desk (plan L55): the owner's agent shows the desk it works on, inside a chat.
     watchLink: 'bot.machine.watch_link',
+    // Network's machine-access relay (Contracts 0.409.0): an agent task for a machine's own agent.
+    relay: 'bot.machine.relay',
 };
 
 /** Services that act as a person's agent (plan T15/T17): they drive a robot only where its owner turned agent_control on. */
@@ -643,6 +646,20 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
             detail: result.reason || null, ctx: req.ov, extra: { delivery: result.delivery, retry: result.retry },
         });
         res.json({ machine_id: device.id, ...result });
+    }));
+    // Network's relay of an agent task to a machine's own agent (Contracts 0.409.0, agent.task@1). Network already
+    // checked the sender's agent and any machine grant; Bot only checks the machine is the person's and hands the
+    // frame to its Link. The Link queues it for the local agent and answers with agent.task_result on the socket.
+    r.post('/machines/:id/relay', commandControl, wrap(async (req, res) => {
+        if (req.principal.kind !== 'service') fail(403, 'bot.forbidden', 'a machine relay is a service-to-service call');
+        if (!apiAuth.granted(req.principal, CAP.relay)) fail(403, 'capability.denied', `${CAP.relay} not granted`);
+        if (req.body?.type !== 'agent.task') fail(422, 'bot.invalid_input', 'only an agent.task is relayed');
+        const subject = actedFor(req);
+        const device = await domain.devices.get(String(req.params.id || '').slice(0, 64));
+        const ownerSubject = device && !device.revoked_at ? await domain.devices.ownerOf(device) : null;
+        if (!ownerSubject || ownerSubject !== subject) fail(404, 'bot.device_not_found', 'no such machine of yours');
+        if (!hub.deliverAgentTask(device.id, req.body?.task)) fail(409, 'bot.device_offline', 'the machine is offline or the task has no valid id');
+        res.status(201).json({ machine_id: device.id, delivered: true });
     }));
     // Who has a desk right now (Desks plan D4): an agent that asked its person to take over a step (a sign-in, a
     // CAPTCHA, a payment) waits for them to take it, then to stop. Read only; the person's own input is what moves it.
