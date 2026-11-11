@@ -23,7 +23,8 @@ const allowedFor = (profile, role) => [...(DEFAULT_ALLOW[role] || []).filter((k)
                 assert.doesNotMatch(renderWidget(w, { profile: p, allowed_commands: allowedFor(p, 'owner') }), / disabled/, `${p.id}: ${w.type} is disabled for the owner`);
                 assert.match(renderWidget(w, { profile: p, allowed_commands: [] }), / disabled/, `${p.id}: ${w.type} is enabled with no allowed kind`);
             }
-            assert.ok(html.includes('<script src="/panel/panel.js" defer></script>'));
+            assert.match(html, /<script src="\/panel\/panel\.js\?v=[0-9a-f]{10}" defer><\/script>/, 'the client by its content hash');
+            assert.match(html, /<link rel="stylesheet" href="\/panel\/panel\.css\?v=[0-9a-f]{10}">/, 'the stylesheet by its content hash');
             assert.doesNotMatch(html, /<script>|style="/, 'nothing inline (CSP default-src self)');
         }
     });
