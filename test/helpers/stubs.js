@@ -86,6 +86,16 @@ async function startNetwork() {
         const now = Math.floor(Date.now() / 1000);
         return serviceAuth.signServiceToken({ iss: issuer, sub: `link:${principal}`, actor_type: 'link', aud, cap: [], iat: now, exp: now + expSec, jti: `tok_${crypto.randomBytes(12).toString('hex')}` }, privatePem);
     }
+    /** A machine-access grant token (link.access-grant-token@1): Network signs the claims the Link verifies itself. */
+    function signGrant({ from, to, scopes = ['agent'], grantId = null, expSec = 300 } = {}) {
+        const nowSec = Math.floor(Date.now() / 1000);
+        return jwt.sign({ iss: issuer, aud: to, sub: from, jti: `tok_${crypto.randomBytes(12).toString('hex')}`,
+            grant_id: grantId || `grt_${crypto.randomBytes(10).toString('hex')}`, scopes, iat: nowSec, exp: nowSec + expSec },
+            privatePem, { algorithm: 'RS256', header: { kid: 'test-network-1', typ: 'JWT' } });
+    }
+    // What Bot told Network: one scoped use per relayed scope (the audit line both owners read), and each agent task
+    // answer. They are asserted by test/machine-access-relay.test.js.
+    const ledger = { uses: [], results: [] };
     /** The calling service (svc:<id> → <id>) of a valid network.link.manage token for openvibe.network, or null. */
     function nodeManager(req) {
         const h = String(req.headers.authorization || '');
@@ -192,6 +202,16 @@ async function startNetwork() {
             }
             return send(res, 200, n.view);
         }
+        const use = /^\/internal\/link-access\/grants\/([^/]+)\/use$/.exec(idn.pathname);
+        if (use && req.method === 'POST') {
+            ledger.uses.push({ grant_id: decodeURIComponent(use[1]), body: JSON.parse((await readBody(req)) || '{}') });
+            return send(res, 200, { grant: { id: decodeURIComponent(use[1]) } });
+        }
+        const result = /^\/api\/v1\/agents\/tasks\/([^/]+)\/result$/.exec(idn.pathname);
+        if (result && req.method === 'POST') {
+            ledger.results.push({ task_id: decodeURIComponent(result[1]), body: JSON.parse((await readBody(req)) || '{}') });
+            return send(res, 200, { task: { id: decodeURIComponent(result[1]), status: 'completed' } });
+        }
         send(res, 404, { error: 'not found' });
     });
     const url = await listen(server);
@@ -202,7 +222,7 @@ async function startNetwork() {
         codes.set(code, { access_token: access_token || signUser({ subject: 'usr_test', username: 'someone' }), refresh_token });
         return code;
     }
-    return { url, publicPem, signService, signUser, newUser, addNode, signNode, nodes, revokes, pairings, statuses, tokenCalls, issueCode, failPairings, users, failIdentity: (status) => { identityFailure = status; }, close: () => new Promise((r) => server.close(r)) };
+    return { url, publicPem, signService, signUser, newUser, addNode, signNode, signGrant, ledger, nodes, revokes, pairings, statuses, tokenCalls, issueCode, failPairings, users, failIdentity: (status) => { identityFailure = status; }, close: () => new Promise((r) => server.close(r)) };
 }
 
 async function startEvents() {
