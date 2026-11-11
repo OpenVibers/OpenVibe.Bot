@@ -7,7 +7,7 @@
   --bg: var(--bg-primary, #0d1117); --surface: var(--bg-card, #161b22); --raised: color-mix(in srgb, var(--surface) 84%, var(--text) 16%);
   --line: var(--border, #2d3540); --text: var(--text-primary, #e6edf3); --muted: var(--text-secondary, #8b96a3);
   --accent: #3d8bfd; --accent-ink: var(--on-accent, #fff); --ok: var(--success, #3fb950);
-  --warn: var(--warning, #d29922); --danger: var(--danger, #e5484d); --danger-deep: #a3191e;
+  --warn: var(--warning, #d29922); --danger: #e5484d; --danger-deep: #a3191e;
   /* Filled controls with white text use the strong shades: white on --accent is 3.3:1 and on --danger 3.9:1, under
      WCAG AA's 4.5:1; these are 5.2:1 and 5.0:1 (the network's readable accent fills). */
   --fill-accent: var(--accent-strong, #2563eb); --on-fill-accent: var(--on-accent-strong, #fff); --fill-danger: #d0343a;

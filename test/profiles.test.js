@@ -99,7 +99,7 @@ function samples(profile, kind, names) {
         const p = profiles.get('looi');
         assert.strictEqual(p.kind, 'bridge');
         assert.deepStrictEqual(p.capabilities.slice().sort(), ['battery', 'drive.differential', 'head']);
-        assert.deepStrictEqual(p.mapping, { driver: 'looi', plugin: 'looi' });
+        assert.deepStrictEqual(p.mapping, { driver: 'looi', plugin: 'looi', actions: ['headlight'] });
         assert.deepStrictEqual(Object.keys(p.commands).sort(), ['actuator', 'drive', 'halt'], 'halt is in every profile');
         assert.deepStrictEqual(p.commands.drive.axes, { throttle: [-1, 1], steer: [-1, 1] });
         assert.deepStrictEqual(p.commands.actuator.names, { head: { type: 'number', range: [-1, 1] } });
@@ -107,6 +107,9 @@ function samples(profile, kind, names) {
         const { renderWidget } = require('../server/web/render');
         const head = renderWidget(p.widgets.find((w) => w.type === 'head'), { profile: p, allowed_commands: ['actuator'] });
         assert.match(head, /data-actuator="head" data-hold-repeat="90"/, 'the slider carries its repeat');
+        assert.ok(!head.includes('data-headlight'), 'no headlight without the action allow');
+        const withHeadlight = renderWidget(p.widgets.find((w) => w.type === 'head'), { profile: p, allowed_commands: ['actuator', 'headlight'] });
+        assert.match(withHeadlight, /data-headlight/, 'the headlight sits in the head card beside the slider');
         assert.ok(!p.camera, 'no camera of its own');
         // 500 ms since 2026-11-11 (Maticus: held drive expired on ordinary Wi-Fi jitter at 300); still short.
         assert.ok(p.limits.max_speed <= 0.5 && p.limits.max_command_ms <= 500, 'a desk robot starts slow, with short commands');

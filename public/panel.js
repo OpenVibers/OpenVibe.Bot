@@ -323,7 +323,7 @@
         window.dispatchEvent(new CustomEvent('ov-bot-command', { detail: { kind, value } }));
         sentAt.set(id, performance.now());
         if (sentAt.size > 200) sentAt.delete(sentAt.keys().next().value);
-        return true;
+        return id;
     }
     const quality = (ms, ok, poor) => (ms == null ? 'none' : ms <= ok ? 'good' : ms <= poor ? 'fair' : 'poor');
     function roundTrip(id, result) {
@@ -1019,6 +1019,123 @@
     });
     $$('[data-rgb-off]').forEach((el) => el.addEventListener('click', () => send('actuator', { name: el.dataset.rgbOff, value: null })));
     $$('[data-bool]').forEach((el) => el.addEventListener('change', () => send('actuator', { name: el.dataset.bool, value: el.checked })));
+
+    // ── LOOI headlights ───────────────────────────────────────────────────────────────────────────────
+    // The driver's telemetry is the truth: sensors.p7_headlight {commanded, pending, physical_state_verified}.
+    // A press sends the opposite explicit state; Unknown offers Turn on and Turn off. The pending state is shown
+    // until telemetry says it settled, and a refusal never changes the displayed state.
+    const headlightEl = $('[data-headlight]');
+    const headlightIds = new Set();
+    const hl = { commanded: null, pending: false, verified: false, target: null, choices: false, timer: null };
+    const hlStateEl = headlightEl && $('[data-headlight-state]', headlightEl);
+    const hlToggle = headlightEl && $('[data-headlight-toggle]', headlightEl);
+    const hlChoices = headlightEl && $('[data-headlight-choices]', headlightEl);
+    const hlUnconfirmed = headlightEl && $('[data-headlight-unconfirmed]', headlightEl);
+    const hlBadge = $('[data-headlight-note]');
+    function hlNotice(text) {
+        if (!hlBadge) return;
+        hlBadge.textContent = text || '';
+        hlBadge.hidden = !text;
+    }
+    function paintHeadlight() {
+        if (!headlightEl || !hlStateEl) return;
+        const on = hl.target != null ? hl.target : hl.commanded;
+        const state = hl.pending
+            ? (on === true ? 'Turning on…' : on === false ? 'Turning off…' : 'Unknown')
+            : (hl.commanded === true ? 'On' : hl.commanded === false ? 'Off' : 'Unknown');
+        hlStateEl.textContent = state;
+        if (hlUnconfirmed) hlUnconfirmed.hidden = hl.verified;
+        const unknown = !hl.pending && hl.commanded === null;
+        if (hlChoices) hlChoices.hidden = !(unknown && hl.choices);
+        hlToggle.setAttribute('aria-expanded', String(!!(unknown && hl.choices)));
+        hlToggle.setAttribute('aria-label', `Headlights: ${state}. ${hl.pending ? 'Waiting for the robot.' : unknown ? 'Choose Turn on or Turn off.' : `Press to turn ${hl.commanded ? 'off' : 'on'}.`}`);
+        hlToggle.disabled = hl.pending;
+    }
+    function sendHeadlight(on) {
+        if (hl.pending || !joined) return;
+        hlNotice('');
+        hl.pending = true;
+        hl.target = on;
+        hl.choices = false;
+        paintHeadlight();
+        const id = send('headlight', { on });
+        if (!id) { hl.pending = false; hl.target = null; paintHeadlight(); return; }
+        headlightIds.add(id);
+        if (headlightIds.size > 100) headlightIds.delete(headlightIds.values().next().value);
+        clearTimeout(hl.timer);
+        // No automatic retry: if no telemetry arrives, stop claiming it is turning, and keep the state that was shown.
+        hl.timer = setTimeout(() => { if (hl.pending) { hl.pending = false; hl.target = null; paintHeadlight(); } }, 2000);
+    }
+    function headlightAck(m) {
+        clearTimeout(hl.timer);
+        hl.timer = null;
+        if (m.result === 'ack' && m.data && m.data.stage === 'headlight_pending' && m.data.admitted === true) {
+            hlNotice('');
+            if (!hl.pending) { hl.pending = true; paintHeadlight(); }
+            return;
+        }
+        if (m.result === 'ack' && !m.data) {
+            // An older/plain ack means accepted; keep the pending state only while telemetry may still arrive.
+            hl.timer = setTimeout(() => { if (hl.pending) { hl.pending = false; hl.target = null; paintHeadlight(); } }, 2000);
+            return;
+        }
+        if (m.result === 'ack' && m.data && m.data.stage === 'headlight_refused' && m.data.admitted === false) {
+            hl.pending = false; hl.target = null;
+            hlNotice('Busy, try again in a moment.');
+            paintHeadlight();
+            return;
+        }
+        if (m.result === 'nack') {
+            hl.pending = false; hl.target = null;
+            hlNotice(`The robot refused: ${m.reason || 'no reason given'}`);
+            paintHeadlight();
+            return;
+        }
+        if (m.result === 'refused') {
+            hl.pending = false; hl.target = null;
+            const busy = ['bot.headlight_busy', 'bot.cooldown', 'bot.command_pending'].includes(m.code);
+            hlNotice(busy ? 'Busy, try again in a moment.' : (m.reason || 'It was refused.'));
+            paintHeadlight();
+            return;
+        }
+        if (m.result === 'expired') {
+            hl.pending = false; hl.target = null;
+            paintHeadlight();
+        }
+    }
+    /** Paint the commanded/pending state from the driver's telemetry (the only state the robot actually reports). */
+    function headlightTelemetry(sensors) {
+        if (!headlightEl) return;
+        const h = sensors && sensors.p7_headlight;
+        if (!h || typeof h !== 'object') return;
+        if (h.commanded === true || h.commanded === false || h.commanded === null) hl.commanded = h.commanded;
+        hl.pending = h.pending === true;
+        hl.verified = h.physical_state_verified === true;
+        if (!hl.pending) {
+            hl.target = null;
+            clearTimeout(hl.timer);
+            hl.timer = null;
+        }
+        paintHeadlight();
+    }
+    if (headlightEl) {
+        hlToggle.addEventListener('click', () => {
+            if (hl.pending) return;
+            if (hl.commanded === null) {
+                hl.choices = !hl.choices;
+                paintHeadlight();
+                if (hl.choices) {
+                    const first = $('[data-headlight-on]', headlightEl);
+                    if (first) first.focus();
+                }
+                return;
+            }
+            sendHeadlight(!hl.commanded);
+        });
+        $('[data-headlight-on]', headlightEl).addEventListener('click', () => sendHeadlight(true));
+        $('[data-headlight-off]', headlightEl).addEventListener('click', () => sendHeadlight(false));
+        paintHeadlight();
+    }
     $$('form[data-say]').forEach((f) => f.addEventListener('submit', (e) => {
         e.preventDefault();
         const text = f.elements.text.value.trim();
@@ -1069,10 +1186,13 @@
 
     // ── State ─────────────────────────────────────────────────────────────────────────────────────────
     function enableControls() {
+        for (const el of $$('[data-headlight] button')) el.disabled = !(joined && allowed.includes('headlight'));
         for (const section of $$('[data-command]')) {
             const ok = joined && allowed.includes(JSON.parse(section.dataset.command).kind);
             // The pad's arrangement is this person's own and works offline: it is never a control of the robot.
-            for (const el of $$('button, input, select', section)) el.disabled = !ok;
+            // A custom action in the card (LOOI's headlights) has its own kind: never disable it from the actuator's
+            // state. The join below enables it only when the panel may send headlights.
+            for (const el of $$('button, input, select', section)) if (!el.closest('[data-headlight]')) el.disabled = !ok;
             for (const el of $$('[data-joystick], [data-button-stick], [data-ptz-stick]', section)) { if (ok) el.removeAttribute('aria-disabled'); else el.setAttribute('aria-disabled', 'true'); }
         }
         announceControls();
@@ -1201,6 +1321,7 @@
         for (const el of $$('[data-battery]')) el.value = state.battery != null ? state.battery : 0;
         for (const el of $$('[data-battery-text]')) el.textContent = state.battery != null ? `${Math.round(state.battery * 100)} %` : '—';
         const sensors = state.telemetry && state.telemetry.sensors;
+        headlightTelemetry(sensors);
         for (const el of $$('[data-telemetry]')) {
             const [key, value] = sensors ? sensorValue(sensors, el.dataset.telemetry) : [null, null];
             el.textContent = readout(key != null ? value : null, key);
@@ -1279,6 +1400,7 @@
             paintTurn(m.state && m.state.queue);
         } else if (m.type === 'command_result') {
             roundTrip(m.id, m.result);
+            if (m.id && headlightIds.delete(m.id)) { headlightAck(m); return; }
             if (m.result === 'refused' && m.code !== 'bot.cooldown') notice(m.reason || m.code);
             else if (m.result === 'nack') { const t = nackText(m.reason); if (t) notice(t); }
             else if (m.result === 'ack') notice('');
