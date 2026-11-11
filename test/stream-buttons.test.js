@@ -98,7 +98,7 @@ const { renderPanel, renderEmbedRefused } = require('../server/web/render');
         assert.ok(js.includes('const fromParent = framed && e.source === window.parent && PARENTS.includes(e.origin);'), 'takes it from that page only');
         assert.ok(js.includes('const fromPopup = e.origin === location.origin && popup && e.source === popup;'), 'or from its own popup');
         const refused = renderEmbedRefused({ robotId: 'rob_d1', parentOrigins: ['https://openvibe.live'] });
-        assert.ok(refused.includes('src="/panel/refused.js"') && refused.includes('data-parent-origins="https://openvibe.live"'));
+        assert.ok(refused.includes('src="/panel/refused.js?v=') && refused.includes('data-parent-origins="https://openvibe.live"'));
         assert.ok(refused.includes('/panel/rob_d1#on-stream') && refused.includes('Put the buttons under my OpenVibe.Live stream'));
         const rjs = fs.readFileSync(path.join(__dirname, '..', 'public', 'refused.js'), 'utf8');
         assert.ok(rjs.includes("window.parent.postMessage({ type: 'ov-bot-embed-refused', robot_id: robotId }, origin)"));

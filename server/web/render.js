@@ -65,6 +65,24 @@ const icon = (name, cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24" ar
 const AXIS_ICONS = { throttle: ['down', 'up'], y: ['down', 'up'], steer: ['left', 'right'], x: ['left', 'right'], rotation: ['ccw', 'cw'], pan: ['left', 'right'], tilt: ['down', 'up'], zoom: ['minus', 'plus'] };
 const AXIS_NAME = { throttle: 'Forward / back', y: 'Forward / back', steer: 'Steer', x: 'Sideways', rotation: 'Turn on the spot', pan: 'Pan', tilt: 'Tilt', zoom: 'Zoom' };
 
+/*
+ * The panel's own files by their content (2026-11-11: Bot #393 shipped new markup, and the edge kept serving the old
+ * panel.css under its plain address for a while, so the new stick drew without its styles). Each address carries the
+ * file's hash, so a deploy is a new address and a cached copy can only ever be the right one.
+ */
+const _assetHash = new Map();
+function versioned(src) {
+    const m = /^\/panel\/([a-z0-9-]+\.(?:js|css))$/.exec(String(src));
+    if (!m) return src;
+    if (!_assetHash.has(m[1])) {
+        let h = '';
+        try { h = require('crypto').createHash('sha1').update(require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'public', m[1]))).digest('hex').slice(0, 10); } catch { h = ''; }
+        _assetHash.set(m[1], h);
+    }
+    const h = _assetHash.get(m[1]);
+    return h ? `${src}?v=${h}` : src;
+}
+
 function page(title, body, { scripts = [], bodyClass = '', description = null, canonical = null, robots = null, htmlClass = '', htmlAttrs = '', colorScheme = 'dark' } = {}) {
     return `<!doctype html>
 <html lang="en"${htmlClass ? ` class="${esc(htmlClass)}"` : ''}${htmlAttrs}>
@@ -83,11 +101,11 @@ function page(title, body, { scripts = [], bodyClass = '', description = null, c
 <meta property="og:image" content="https://openvibe.bot${esc(social.url('bot'))}">
 <meta name="twitter:card" content="summary_large_image">` : ''}
 <link rel="stylesheet" href="${require('openvibe-shared/serve').url('kit.css')}">
-<link rel="stylesheet" href="/panel/panel.css">
+<link rel="stylesheet" href="${versioned('/panel/panel.css')}">
 </head>
 <body${bodyClass ? ` class="${esc(bodyClass)}"` : ''}>
 ${body}
-${scripts.map((s) => `<script src="${esc(s)}" defer></script>`).join('\n')}
+${scripts.map((s) => `<script src="${esc(versioned(s))}" defer></script>`).join('\n')}
 </body>
 </html>
 `;
