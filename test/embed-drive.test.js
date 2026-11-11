@@ -35,7 +35,7 @@ const { renderPanel } = require('../server/web/render');
     await check('the framed watcher gets a Drive button and a hidden e-stop; the client takes tickets from its own popup only', () => {
         const SIM = { id: 'sim.rover', name: 'Rover', commands: { drive: { axes: { throttle: [-1, 1], steer: [-1, 1] } } }, widgets: [{ type: 'drive', label: 'Drive', command: { kind: 'drive' } }] };
         const html = renderPanel({ robot: { id: 'rob_d1', name: 'Rover', profile_id: 'sim.rover', estop: { latched: false } }, profile: SIM, role: 'watcher', allowed_commands: [], mode: 'embed', signedIn: false });
-        assert.ok(html.includes('data-drive>') && html.includes('data-drive-bar'));
+        assert.ok(html.includes('data-drive data-drive-bar>'), 'Drive is its own bar: it goes when the controls are taken');
         assert.ok(html.includes('data-estop hidden>'), 'the e-stop waits for an owner or operator join');
         const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'panel.js'), 'utf8');
         // Only its own popup, or the allowed page around the frame (stream-buttons.test.js), hands it a ticket.

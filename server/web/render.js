@@ -57,6 +57,7 @@ const PATHS = {
     plug: '<path d="M9 2v5M15 2v5M6 7h12v4a6 6 0 0 1-12 0zM12 17v5"/>',
     gamepad: '<path d="M7 7h10a4 4 0 0 1 4 4l.8 5a2.6 2.6 0 0 1-4.6 2L15 15H9l-2.2 3a2.6 2.6 0 0 1-4.6-2L3 11a4 4 0 0 1 4-4z"/><path d="M7.5 10v3M6 11.5h3M16 11h.01M18 13h.01"/>',
     check: '<path d="M20 6 9 17l-5-5"/>',
+    external: '<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
 };
 const icon = (name, cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${PATHS[name] || ''}</svg>`;
 /** Hold-button icons by axis: [negative, positive]. */
@@ -626,23 +627,32 @@ function overlaySlider(profile, allowed) {
 }
 
 const botPill = (robot) => `<span class="bot-pill bot-control" data-bot-pill data-online-pill data-state="connecting" data-bot-hit><span class="dot"></span><b class="bot-pill-name">${esc(robot.name)}</b><span class="bot-pill-state" data-bot-state>Connecting…</span></span>`;
-const botEstop = (role) => (ESTOP_ROLES.has(role)
-    ? `<button type="button" class="bot-estop bot-control" data-estop data-bot-hit aria-label="E-stop" title="E-stop">${icon('stop')}</button>` : '');
+// A watcher (the anonymous embed on a stream) takes the controls with Drive, as on the full panel; the e-stop waits,
+// hidden, for the join that makes them an operator (public/panel.js onFrame), and the line under the controls says
+// what the page around answered (sign in there, or the owner decides who drives). Ask 353, 2026-11-11: on a phone over
+// the stream there was no way to start driving at all.
+const botEstop = (role, canDrive = false) => (ESTOP_ROLES.has(role)
+    ? `<button type="button" class="bot-estop bot-control" data-estop data-bot-hit aria-label="E-stop" title="E-stop">${icon('stop')}</button>`
+    : canDrive ? `<button type="button" class="bot-estop bot-control" data-estop data-bot-hit aria-label="E-stop" title="E-stop" hidden>${icon('stop')}</button>` : '');
+const botDrive = (canDrive) => (canDrive
+    ? `<button type="button" class="bot-drive bot-control" data-drive data-drive-bar data-bot-hit title="Take the controls">${icon('gamepad')}<span>Drive</span></button>` : '');
+const botNotice = '<p class="bot-notice bot-control" data-notice data-bot-hit role="alert" hidden></p>';
 const botMore = '<button type="button" class="bot-more bot-control" data-bot-more data-bot-hit aria-label="More controls" title="Open the full panel"><span aria-hidden="true">•••</span></button>';
 
 /** The overlay/compact page: a transparent surface with only the controls, no topbar, header or widgets. */
-function renderBotSurface({ robot, profile, role, allowed_commands = [], holdResendMs = 150, view = 'overlay', parentOrigins = [] }) {
+function renderBotSurface({ robot, profile, role, allowed_commands = [], holdResendMs = 150, view = 'overlay', parentOrigins = [], signedIn = true }) {
     const stick = overlayStickMarkup(profile, allowed_commands);
     const slider = overlaySlider(profile, allowed_commands);
-    const stop = botEstop(role);
+    const canDrive = role === 'watcher' && !signedIn;
+    const stop = botEstop(role, canDrive) + botDrive(canDrive);
     const sliderLabel = slider ? esc(humanName(slider.name)) : '';
     const sliderMarkup = slider
         ? `<div class="bot-slider bot-control" data-bot-hit><section class="widget bot-widget" data-command="${data(slider.widget.command)}"><label class="control bot-range-label"><span class="sr-only">${sliderLabel}</span>${numberRange(slider.name, slider.actuator, slider.enabled, profile.id)}</label></section></div>`
         : '';
     const stickMarkup = stick ? `<div class="bot-stick bot-control" data-bot-hit>${stick}</div>` : '';
     const body = view === 'compact'
-        ? `<div class="bot-compact" data-bot-compact>${botPill(robot)}${stickMarkup}${sliderMarkup}${stop}${botMore}</div>`
-        : `<div class="bot-overlay" data-bot-overlay>${botPill(robot)}${stickMarkup}${sliderMarkup}${stop}${botMore}</div>`;
+        ? `<div class="bot-compact" data-bot-compact${slider ? '' : ' data-no-slider'}>${botPill(robot)}${stickMarkup}${sliderMarkup}${stop}${botMore}${botNotice}</div>`
+        : `<div class="bot-overlay" data-bot-overlay>${botPill(robot)}${stickMarkup}${sliderMarkup}${stop}${botMore}${botNotice}</div>`;
     return `<main id="panel" class="bot-surface" tabindex="0" data-robot-id="${esc(robot.id)}" data-role="${esc(role)}" data-hold-ms="${esc(holdResendMs)}" data-allowed="${data(allowed_commands)}" data-bot-view="${esc(view)}"${parentOrigins.length ? ` data-parent-origins="${esc(parentOrigins.join(' '))}"` : ''}>${body}</main>`;
 }
 
@@ -651,7 +661,7 @@ function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs
     const botView = embed ? botViewOf(view) : 'panel';
     if (embed && botView !== 'panel') {
         const [minWidth, minHeight] = BOT_VIEW_MIN[botView];
-        return page(robot.name, renderBotSurface({ robot, profile, role, allowed_commands, holdResendMs, view: botView, parentOrigins }), {
+        return page(robot.name, renderBotSurface({ robot, profile, role, allowed_commands, holdResendMs, view: botView, parentOrigins, signedIn }), {
             scripts: panelScripts(profile, false, true),
             bodyClass: `embed-page bot-mode-${botView}`,
             htmlClass: `embed-page bot-mode-${botView}`,
@@ -678,9 +688,9 @@ ${embed ? '' : tryIt ? topbar('<span class="crumb">Try the panel</span>', '/') :
 ${kit.pageHead({ title: `${robot.name}`, icon: 'gear', back: embed ? null : { href: '/', label: 'Home' } })}
 <p class="meta"><span class="pill online" data-online-pill data-state="connecting"><span class="dot"></span><span data-online-label>Connecting…</span></span> <span class="pill">${esc(profile.name || robot.profile_id)}</span> <span class="pill role" data-role-label>${esc(ROLE_LABEL[role] || role)}</span></p>
 ${turnStrip(robot, role)}
+${embed && role === 'watcher' && !signedIn ? `<p class="embed-sign-in"><button type="button" class="button primary" data-drive data-drive-bar>${icon('gamepad')}<span>Drive</span></button> <a class="button embed-open" href="/panel/${esc(robot.id)}" target="_blank" rel="noopener" title="Open on openvibe.bot">${icon('external')}<span>Open on openvibe.bot</span></a></p>` : ''}
 </div>
 ${tryIt ? tryIntro() : ''}
-${embed && role === 'watcher' && !signedIn ? `<p class="embed-sign-in" data-drive-bar><button type="button" class="button primary" data-drive>${icon('gamepad')}<span>Drive</span></button> ${outLink(`/panel/${robot.id}`, 'Open on openvibe.bot')}</p>` : ''}
 <p class="notice" data-device-fault role="status" hidden></p>
 <p class="notice" data-notice role="alert" hidden></p>
 <div class="widgets">
