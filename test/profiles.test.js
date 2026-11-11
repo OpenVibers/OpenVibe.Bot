@@ -108,7 +108,8 @@ function samples(profile, kind, names) {
         const head = renderWidget(p.widgets.find((w) => w.type === 'head'), { profile: p, allowed_commands: ['actuator'] });
         assert.match(head, /data-actuator="head" data-hold-repeat="90"/, 'the slider carries its repeat');
         assert.ok(!p.camera, 'no camera of its own');
-        assert.ok(p.limits.max_speed <= 0.5 && p.limits.max_command_ms <= 300, 'a desk robot starts slow, with short commands');
+        // 500 ms since 2026-11-11 (Maticus: held drive expired on ordinary Wi-Fi jitter at 300); still short.
+        assert.ok(p.limits.max_speed <= 0.5 && p.limits.max_command_ms <= 500, 'a desk robot starts slow, with short commands');
     });
 
     await check('camera.onvif is PTZ only; sim.rover is a whole rover (drive, camera, range and line sensors, battery, headlights, horn)', () => {

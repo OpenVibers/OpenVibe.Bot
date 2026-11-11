@@ -666,3 +666,14 @@ body.bot-mode-compact .bot-compact :is(.bot-more, .bot-estop) { background: colo
 body.bot-mode-compact .bot-compact .bot-estop { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 70%, transparent); }
 body.bot-mode-compact .bot-compact .bot-drive { background: var(--fill-accent); border-color: var(--fill-accent); color: var(--on-fill-accent); }
 body.bot-mode-compact .bot-compact .bot-notice { color: var(--warn); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+
+/* A control still locked (no Drive yet): it takes the press (its inputs pass it to their box, panel.js asks for the
+   controls) and says so with a small lock at its corner. */
+#panel[data-role="watcher"] [data-command] input:disabled,
+#panel[data-role="watcher"] [data-command] button:disabled { pointer-events: none; }
+#panel[data-role="watcher"]:has([data-drive]:not([hidden])) :is(.bot-stick, .bot-slider, .widget-drive .drive-pad) { cursor: pointer; position: relative; }
+#panel[data-role="watcher"]:has([data-drive]:not([hidden])) :is(.bot-stick, .widget-drive .drive-pad)::after {
+  content: ""; position: absolute; right: 6%; top: 6%; width: 18px; height: 18px; border-radius: 50%; pointer-events: none;
+  background: color-mix(in srgb, var(--fill-accent) 85%, transparent) center / 11px 11px no-repeat
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.6' stroke-linecap='round'%3E%3Crect x='5' y='11' width='14' height='9' rx='2'/%3E%3Cpath d='M8 11V8a4 4 0 0 1 8 0v3'/%3E%3C/svg%3E");
+}

@@ -32,8 +32,8 @@ const { boot, check, done } = require('./helpers/app');
         const r = await t.call('GET', `/api/v1/robots/${robot.id}`, { user: alex });
         assert.strictEqual(r.status, 200, r.text);
         assert.strictEqual(r.json.robot.owner_subject, alex.subject);
-        assert.deepStrictEqual(r.json.robot.effective_limits, { max_speed: 0.4, max_turn: 0.6, max_command_ms: 300, heartbeat_ms: 1000 });
-        assert.deepStrictEqual(r.json.robot.limits_source.profile, { max_speed: 0.5, max_turn: 0.6, max_command_ms: 300, heartbeat_ms: 1000 });
+        assert.deepStrictEqual(r.json.robot.effective_limits, { max_speed: 0.4, max_turn: 0.6, max_command_ms: 500, heartbeat_ms: 1000 });
+        assert.deepStrictEqual(r.json.robot.limits_source.profile, { max_speed: 0.5, max_turn: 0.6, max_command_ms: 500, heartbeat_ms: 1000 });
         assert.deepStrictEqual(r.json.robot.limits_source.robot, { max_speed: 0.4 }, 'only the owner\'s overrides');
     });
 
@@ -41,7 +41,7 @@ const { boot, check, done } = require('./helpers/app');
         const { robot } = await t.robot(alex, { profile_id: 'looi' });
         const r = await t.call('GET', `/api/v1/robots/${robot.id}`, { user: alex });
         assert.deepStrictEqual(r.json.robot.limits, {});
-        assert.deepStrictEqual(r.json.robot.effective_limits, { max_speed: 0.5, max_turn: 0.6, max_command_ms: 300, heartbeat_ms: 1000 });
+        assert.deepStrictEqual(r.json.robot.effective_limits, { max_speed: 0.5, max_turn: 0.6, max_command_ms: 500, heartbeat_ms: 1000 });
         assert.deepStrictEqual(r.json.robot.limits_source.robot, {});
     });
 
