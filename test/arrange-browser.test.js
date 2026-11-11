@@ -104,7 +104,7 @@ const server = http.createServer((req, res) => {
         assert.ok(await p2until(`localStorage.getItem('ov-bot-pad-prefs') === null`), 'the old store is retired after one migration');
         const migrated = JSON.parse(await p2.evaluate(`document.getElementById('ov-arrange-data').textContent`));
         assert.deepEqual(migrated.layout.parts.find((p) => p.id === 'stop').place, { x: 0, y: 0, w: 2, h: 2 }, 'Stop takes the left hand');
-        assert.deepEqual(migrated.layout.parts.find((p) => p.id === 'stick').place, { x: 2, y: 0, w: 3, h: 3 }, 'the pad takes its larger size');
+        assert.deepEqual(migrated.layout.parts.find((p) => p.id === 'stick').place, { x: 0, y: 2, w: 3, h: 3 }, 'the pad takes its larger size, moved clear of Stop on a phone');
         assert.equal(migrated.layout.parts.find((p) => p.id === 'battery').visible, false, 'the readouts are folded');
         assert.ok(await p2until(`!!document.querySelector('.widgets[data-ov-arranged]')`), 'the migrated layout is drawn on the parts');
         assert.equal(JSON.parse(await p2.evaluate(`document.getElementById('ov-arrange-data').textContent`)).layoutSource, 'default', 'the page was drawn from the default before the migration');

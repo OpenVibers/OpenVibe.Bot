@@ -923,7 +923,19 @@
                 const x = stick.place.x; stick.place.x = stop.place.x; stop.place.x = x;
             }
         }
-        if (prefs.size === 'l') set('stick', (p) => { if (p.place && p.place.x != null) { p.place.w = Math.max(p.place.w, 3); p.place.h = Math.max(p.place.h, 3); } });
+        if (prefs.size === 'l') {
+            const cols = data.catalog && data.catalog.grid ? data.catalog.grid.columns[data.device] : 4;
+            const stick = (data.layout.parts || []).find((p) => p.id === 'stick');
+            const stop = (data.layout.parts || []).find((p) => p.id === 'stop');
+            if (stick && stick.place && stick.place.x != null) {
+                stick.place.w = Math.min(3, cols); stick.place.h = 3;
+                stick.place.x = Math.max(0, Math.min(stick.place.x, cols - stick.place.w));
+                if (stop && stop.place && stick.place.x < stop.place.x + stop.place.w && stick.place.x + stick.place.w > stop.place.x
+                    && stick.place.y < stop.place.y + stop.place.h && stick.place.y + stick.place.h > stop.place.y) {
+                    stick.place.x = 0; stick.place.y = stop.place.y + stop.place.h;
+                }
+            }
+        }
         if (prefs.readouts === 'off') for (const id of ['battery', 'latency', 'telemetry']) set(id, (p) => { p.visible = false; });
         got.el.textContent = JSON.stringify(data);
         // Put it on this page's already-rendered parts too, so the person sees their old arrangement at once.
