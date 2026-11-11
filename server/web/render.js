@@ -57,6 +57,7 @@ const PATHS = {
     robot: '<rect x="4" y="8" width="16" height="11" rx="2.5"/><path d="M12 4v4M9 13h.01M15 13h.01M2 13v2M22 13v2"/>',
     plug: '<path d="M9 2v5M15 2v5M6 7h12v4a6 6 0 0 1-12 0zM12 17v5"/>',
     gamepad: '<path d="M7 7h10a4 4 0 0 1 4 4l.8 5a2.6 2.6 0 0 1-4.6 2L15 15H9l-2.2 3a2.6 2.6 0 0 1-4.6-2L3 11a4 4 0 0 1 4-4z"/><path d="M7.5 10v3M6 11.5h3M16 11h.01M18 13h.01"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
     check: '<path d="M20 6 9 17l-5-5"/>',
     external: '<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
 };
@@ -173,6 +174,23 @@ function padPrefs() {
 /** An actuator's name as a label: backpack_lights → Backpack lights. */
 const humanName = (name) => { const s = String(name).replace(/_/g, ' '); return s.charAt(0).toUpperCase() + s.slice(1); };
 
+/** A profile's custom side actions, from the open `mapping.actions` (the closed `commands` contract cannot name them). */
+const profileActions = (profile) => (profile && profile.mapping && Array.isArray(profile.mapping.actions) ? profile.mapping.actions : []);
+const headlightAction = (profile) => profileActions(profile).includes('headlight');
+
+/**
+ * The LOOI headlights control: one labelled button, its state (On / Off / Unknown / Turning on… / Turning off…), the
+ * unconfirmed note, and the two explicit choices when the commanded state is unknown. public/panel.js sends
+ * {"kind":"headlight","value":{"on":true|false}}; this markup carries no state from the browser.
+ */
+function headlightControl() {
+    return `<div class="control headlight" data-headlight>`
+        + `<button type="button" class="headlight-toggle" data-headlight-toggle aria-expanded="false">${icon('sun')}<span class="control-name">Headlights</span> <span class="headlight-state" data-headlight-state>Unknown</span></button>`
+        + `<span class="headlight-unconfirmed" data-headlight-unconfirmed>Not confirmed on the robot</span>`
+        + `<span class="headlight-choices" data-headlight-choices hidden><button type="button" data-headlight-on>Turn on</button> <button type="button" data-headlight-off>Turn off</button></span>`
+        + `</div><p class="headlight-note" data-headlight-note role="alert" hidden></p>`;
+}
+
 /** One control per actuator the widget drives, by the actuator's declared type. */
 /**
  * Sliders that repeat while held (2026-11-09, the LOOI bridge's short head-target leases): by profile and actuator, the
@@ -280,7 +298,11 @@ function renderWidget(w, { profile = {}, allowed_commands = [], signaling_url = 
         }
         case 'pan-tilt': case 'servo': case 'head': case 'lift': case 'lights': case 'horn': {
             const names = (commands.actuator && commands.actuator.names) || {};
-            inner = `<div class="controls">${(w.command && w.command.names ? w.command.names : []).filter((n) => names[n]).map((n) => actuatorControl(n, names[n], enabled, profile.id)).join('')}</div>`;
+            const parts = (w.command && w.command.names ? w.command.names : []).filter((n) => names[n]).map((n) => actuatorControl(n, names[n], enabled, profile.id));
+            // A profile may declare a custom side action in its open mapping (LOOI's headlight). It sits beside the
+            // head slider, only for someone the gate allows; with no permission it is not drawn at all, not disabled.
+            if (w.type === 'head' && headlightAction(profile) && allowed_commands.includes('headlight')) parts.push(headlightControl());
+            inner = `<div class="controls">${parts.join('')}</div>`;
             break;
         }
         case 'speaker': {

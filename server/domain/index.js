@@ -24,11 +24,11 @@ const { ENVELOPE } = require('../events/outbox');
 const USER_SUBJECT = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 
 const DEFAULT_ALLOW = {
-    owner: ['drive', 'actuator', 'ptz', 'say', 'display', 'button', 'point', 'halt'],
-    operator: ['drive', 'actuator', 'ptz', 'say', 'display', 'button', 'point', 'halt'],
+    owner: ['drive', 'actuator', 'ptz', 'say', 'display', 'button', 'point', 'headlight', 'halt'],
+    operator: ['drive', 'actuator', 'ptz', 'say', 'display', 'button', 'point', 'headlight', 'halt'],
     queue: ['drive', 'button', 'point', 'halt'],
 };
-const KINDS = new Set(['drive', 'actuator', 'ptz', 'say', 'display', 'button', 'point', 'halt']);
+const KINDS = new Set(['drive', 'actuator', 'ptz', 'say', 'display', 'button', 'point', 'headlight', 'halt']);
 const MOTION = new Set(['drive', 'actuator', 'ptz']);
 const CONTROL_ROLES = new Set(['owner', 'operator', 'queue']);
 // Drive axes the owner's max_turn caps; every other drive axis is capped by max_speed.
@@ -1317,9 +1317,27 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         lastCommandAt.set(`${robotId}|${subject}|${kind}`, now());
         if (lastCommandAt.size > 4096) lastCommandAt.delete(lastCommandAt.keys().next().value);
     };
+    // Headlights: at most two accepted in any rolling second, one budget per robot. Link keeps the same budget
+    // with the owner's local controls; this one stops a browser double-click before it reaches the Node.
+    const headlightAt = new Map();
+    const spendHeadlight = (robotId, at) => {
+        const seen = headlightAt.get(robotId) || [];
+        if (seen.length >= 2 && at - seen[0] < 1000) return false;
+        seen.push(at);
+        if (seen.length > 2) seen.shift();
+        headlightAt.set(robotId, seen);
+        if (headlightAt.size > 4096) headlightAt.delete(headlightAt.keys().next().value);
+        return true;
+    };
 
-    /** The command kinds the robot's profile takes (`halt` always). */
-    const profileTakes = (profile, kind) => kind === 'halt' || !!(profile && profile.commands && profile.commands[kind]);
+    /**
+     * The command kinds the robot's profile takes (`halt` always). A profile may also declare a custom action in
+     * its open `mapping.actions` (LOOI's `headlight`): the panel action is gated like a command, but the robot-profile
+     * contract keeps `commands` closed, so the mapping is where a driver's side action is declared.
+     */
+    const profileTakes = (profile, kind) => kind === 'halt' || !!(profile && (
+        (profile.commands && profile.commands[kind])
+        || (profile.mapping && Array.isArray(profile.mapping.actions) && profile.mapping.actions.includes(kind))));
     /**
      * What `role` may send to this robot: the owner's allowlist for the role (or the default), cut to the
      * kinds the profile takes. Every role that may drive also gets `halt`, which no allowlist removes.
@@ -1327,7 +1345,10 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     const allowedFor = (robot, role, profile = null) => {
         const rl = json(robot.limits, {});
         const fromOwner = rl.allow && Array.isArray(rl.allow[role]) ? rl.allow[role] : null;
-        const kinds = (fromOwner || DEFAULT_ALLOW[role] || []).filter((k) => k !== 'halt' && profileTakes(profile, k));
+        // Headlights are the owner's and People Operators' only, whatever an allow list says: never the queue,
+        // never a viewer. Every role that may drive also gets halt, which no allow list removes.
+        const kinds = (fromOwner || DEFAULT_ALLOW[role] || []).filter((k) => k !== 'halt' && profileTakes(profile, k)
+            && (k !== 'headlight' || role === 'owner' || role === 'operator'));
         return CONTROL_ROLES.has(role) ? [...kinds, 'halt'] : kinds;
     };
 
@@ -1383,6 +1404,13 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
             if (hold && !['down', 'up'].includes(v.state)) fail(422, 'bot.invalid_input', 'a hold button needs down or up');
             if (!hold && Object.hasOwn(v, 'state')) fail(422, 'bot.invalid_input', 'a plain button takes no state');
             return hold ? { name, state: v.state } : { name };
+        }
+        if (kind === 'headlight') {
+            // Explicit, never a toggle: exactly {"on": true|false}.
+            if (Object.keys(v).length !== 1 || Object.keys(v)[0] !== 'on' || typeof v.on !== 'boolean') {
+                fail(422, 'bot.invalid_input', 'headlight needs exactly on: true or false');
+            }
+            return { on: v.on };
         }
         if (kind === 'point') {
             if (Object.keys(v).some((k) => k !== 'x' && k !== 'y') ||
@@ -1490,6 +1518,10 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
             // Owner takeover: the holder's turn pauses and the robot halts before this command goes (takeOver).
             await takeOver(robotId, subject, role);
         }
+        // The panel action must never become a queue or viewer path, even if an old allow list named it.
+        if (kind === 'headlight' && role !== 'owner' && role !== 'operator') {
+            return { ok: false, code: 'bot.command_not_allowed', reason: 'headlights are for the owner and operators', robot, role };
+        }
         let built;
         try { built = buildValue(kind, value, eff, profile); } catch (e) { return { ok: false, code: e.code || 'bot.invalid_input', reason: e.detail || e.message, robot, role }; }
         const specificMs = kind === 'button' ? profile.commands.button.names[built.name].cooldown_ms || 0
@@ -1501,13 +1533,22 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         }
         if (cooled) markCooldown(robotId, subject, kind);
         if (specificMs > 0 && !release && !repeatedHold) markCooldown(robotId, subject, specificKey);
-        const deadlineMs = (MOTION.has(kind) || (kind === 'button' && built.state === 'down'))
-            ? now() + clampNum(requestedMs != null ? requestedMs : eff.maxCommandMs, 1, eff.maxCommandMs, eff.maxCommandMs)
-            : null;
+        const at = now();
+        if (kind === 'headlight' && !spendHeadlight(robotId, at)) {
+            return { ok: false, code: 'bot.headlight_busy', reason: 'busy', robot, role };
+        }
+        // A headlight is minted with its own numbers, not the profile's motion cap: a 300 ms original lifetime and a
+        // 250 ms deadline. The Node maps the original expiry onto its shared clock and keeps 200 ms of it on receipt.
+        const deadlineMs = kind === 'headlight' ? at + 250
+            : (MOTION.has(kind) || (kind === 'button' && built.state === 'down'))
+                ? at + clampNum(requestedMs != null ? requestedMs : eff.maxCommandMs, 1, eff.maxCommandMs, eff.maxCommandMs)
+                : null;
+        const expiresAtMs = kind === 'headlight' ? at + 300 : null;
+        const issuedAtMs = kind === 'headlight' ? at : null;
         if (activeKey && built.state === 'down') activeButtons.set(activeKey, deadlineMs);
         if (activeKey && built.state === 'up') activeButtons.delete(activeKey);
         if (activeButtons.size > 4096) activeButtons.delete(activeButtons.keys().next().value);
-        return { ok: true, robot, profile, role, kind, value: built, deadlineMs, limits: eff, epoch };
+        return { ok: true, robot, profile, role, kind, value: built, deadlineMs, expiresAtMs, issuedAtMs, limits: eff, epoch };
     }
 
     return {
