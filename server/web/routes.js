@@ -978,7 +978,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
             arrange = {
                 catalog, layout: stored || fallbackLayout, device,
                 signedIn: !!signedIn, layoutSource: stored ? 'account' : 'default',
-                save: `/panel/${robot.id}/arrange`, suggest: `/panel/${robot.id}/arrange/suggest`, share: `/panel/${robot.id}/arrange/share`,
+                save: `/panel/${robot.id}/arrange`, suggest: `/panel/${robot.id}/arrange/suggest`, share: `/panel/${robot.id}/arrange/share`, reset: `/panel/${robot.id}/arrange/reset`,
                 author: req.viewer ? { name: req.viewer.username || req.viewer.name || 'Me' } : null,
             };
         } else {
@@ -991,7 +991,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
             arrange = {
                 catalog, parts: surface.partsOf(profile), layout: stored || fallbackLayout, device,
                 signedIn: !!signedIn, layoutSource: stored ? 'account' : 'default', src,
-                save: `/panel/${robot.id}/arrange`, suggest: `/panel/${robot.id}/arrange/suggest`, share: `/panel/${robot.id}/arrange/share`,
+                save: `/panel/${robot.id}/arrange`, suggest: `/panel/${robot.id}/arrange/suggest`, share: `/panel/${robot.id}/arrange/share`, reset: `/panel/${robot.id}/arrange/reset`,
                 author: req.viewer ? { name: req.viewer.username || req.viewer.name || 'Me' } : null,
             };
         }
@@ -1177,6 +1177,19 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
             if (!surfaceId || !device || !words) return res.status(422).json({ ok: false, reasons: ['Say how you want it first.'] });
             const out = await layoutStore.suggestLayout({ config, token: arrangeToken(req), surface: surfaceId, device, words, layout: req.body.layout || null, catalog: req.body.catalog || null });
             res.json(out);
+        } catch (e) { arrangeError(res, e); }
+    });
+    r.post('/panel/:id/arrange/reset', arrangeBody, async (req, res) => {
+        res.setHeader('Cache-Control', 'no-store');
+        try {
+            if (!sameOrigin(req)) return res.status(403).json({ ok: false, reasons: ['Cross-site resets are refused.'] });
+            requireUser(req);
+            const robot = await domain.robots.get(req.params.id);
+            if (!robot) return res.status(404).json({ ok: false, reasons: ['No such robot.'] });
+            const surfaceId = arrangeSurface(req.body && req.body.surface);
+            const device = arrangeDevice(req.body && req.body.device);
+            if (!surfaceId || !device) return res.status(422).json({ ok: false, reasons: ['Missing surface or device.'] });
+            res.json(await layoutStore.resetLayout({ config, token: arrangeToken(req), surface: surfaceId, device }));
         } catch (e) { arrangeError(res, e); }
     });
     r.post('/panel/:id/arrange/share', arrangeBody, async (req, res) => {

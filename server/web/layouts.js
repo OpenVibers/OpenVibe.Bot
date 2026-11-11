@@ -68,4 +68,12 @@ async function shareLayout({ config, token, surface, device, layout, catalog, fe
     return r.out;
 }
 
-module.exports = { activeLayout, saveLayout, suggestLayout, shareLayout, TIMEOUT_MS };
+/** Clear the active layout for this surface/device: Network keeps the saved row, the product draws its default. */
+async function resetLayout({ config, token, surface, device, fetchImpl }) {
+    const r = await call(config, token, 'POST', `/api/v1/me/layouts/${encodeURIComponent(surface)}/reset?device=${encodeURIComponent(device)}`, {}, fetchImpl, WRITE_TIMEOUT_MS);
+    if (r.status === 404) return { ok: true };
+    if (!r.ok) throw new Error((r.out && (r.out.detail || r.out.error)) || `Network answered ${r.status}`);
+    return { ok: true };
+}
+
+module.exports = { activeLayout, saveLayout, suggestLayout, shareLayout, resetLayout, TIMEOUT_MS };

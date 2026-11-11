@@ -990,6 +990,11 @@
                     data.layout = layout; got.el.textContent = JSON.stringify(data); saved = true;
                     return out;
                 },
+                onReset: async () => {
+                    const out = await post(data.reset, { surface: data.surface, device: data.device });
+                    data.layout = window.ovArrange.layout(); data.layoutSource = 'default'; got.el.textContent = JSON.stringify(data); saved = true;
+                    return out;
+                },
                 onClose: () => { opening = false; if (saved) setTimeout(() => location.reload(), 60); },
                 confirm: () => true,
             });

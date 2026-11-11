@@ -33,6 +33,10 @@ const answer = (status, body) => async (url, init) => {
 
     await assert.rejects(() => layouts.saveLayout({ config, token: 't', surface: 'bot.controls', device: 'phone', layout, catalog, fetchImpl: answer(422, { detail: 'Stop has to stay visible.' }) }), /Stop has to stay visible\./);
 
+    assert.deepEqual(await layouts.resetLayout({ config, token: 't', surface: 'bot.controls', device: 'phone', fetchImpl: answer(204, null) }), { ok: true });
+    assert.match(seen.at(-1).url, /\/api\/v1\/me\/layouts\/bot\.controls\/reset\?device=phone$/);
+    assert.deepEqual(await layouts.resetLayout({ config, token: 't', surface: 'bot.controls', device: 'phone', fetchImpl: answer(404, { code: 'layout.none' }) }), { ok: true }, 'nothing to reset is the default already');
+
     const shared = await layouts.shareLayout({ config, token: 't', surface: 'bot.controls', device: 'phone', layout, catalog, fetchImpl: (url, init) => {
         if (init.method === 'PUT') return answer(200, { ...layout, id: 'lay_abc' })(url, init);
         return answer(200, { url: '/api/v1/layouts/shared/tok_1' })(url, init);
