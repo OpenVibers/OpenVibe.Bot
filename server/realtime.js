@@ -699,6 +699,16 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             // break a robot's telemetry. The domain ignores an event that is not a known step.
             domain.devices.recordFirstRun(conn.device.id, msg.events).catch((e) => log.warn(`[Bot] first-run steps: ${e.message}`));
         }
+        // The robot's own commander view: only a roster member the card knows, and only a strictly valid frame.
+        const commander = robotCommander(msg.sensors);
+        if (commander) {
+            for (const robotId of deviceRobotIds(conn.device)) {
+                const members = operatorMembers.get(robotId);
+                if (!members || !members.has(commander.subject)) continue;
+                stampOperatorActivity(robotId, commander.subject, commander.channel, commander.atMs, 'robot', commander.kind);
+                queueOperatorsState(robotId);
+            }
+        }
         for (const robotId of deviceRobotIds(conn.device)) broadcast(robotId);
     }
 
@@ -1224,7 +1234,8 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     function deviceState(deviceId) { const c = deviceConns.get(deviceId); return c ? { online: c.online, rtt_ms: c.rttMs, telemetry: c.telemetry, status: c.status } : { online: false, rtt_ms: null, telemetry: null, status: null }; }
 
     // A device may report battery the legacy way (a 0..1 fraction) or the Node's top-level percent (0..100), or as
-    // OpenVibe Link does ({volts, percent}). The LOOI tray's p7_battery.pct is a last resort, marked provisional.
+    // OpenVibe Link does ({volts, percent}). The LOOI tray's p7_battery.pct is a last resort; its `at` and
+    // `unverified` fields tell the panel how fresh that reading is ("read at connect" when unverified).
     // A missing reading is null, never 0: the panel shows a dash and "unknown" rather than a made-up empty battery.
     const clampPct = (v) => Math.min(100, Math.max(0, Number(v)));
     function batteryFraction(telemetry) {
@@ -1237,26 +1248,48 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     }
 
     // ── The Operators card (Maticus's 2026-11-12 LOOI spec) ─────────────────────────────────────────
-    // Bot stamps each admitted command itself, so the card's activity is Bot's own truth even before the tray
-    // publishes sensors.p7_commander. In memory: a restart loses "1s ago", never an authority or an audit row.
+    // Bot stamps each admitted command itself, so the card's activity is Bot's own truth. The tray's
+    // sensors.p7_commander is the robot's own view of the same person: it is recorded with source "robot",
+    // and when both exist for one channel the newer `at` wins. In memory: a restart loses "1s ago", never an
+    // authority or an audit row.
     const operatorActivity = new Map();   // robot_id → Map(subject → { last, drive_at, head_at, lights_at })
+    const operatorMembers = new Map();    // robot_id → Set(subject) the last roster the card knew
     const operatorsSentAt = new Map();    // robot_id → when the last operators_state went out (ms)
     const operatorsTimer = new Map();     // robot_id → a pending throttled broadcast
     const channelOf = (kind) => (kind === 'drive' ? 'drive' : kind === 'actuator' ? 'head' : kind === 'headlight' ? 'lights'
         : kind === 'button' ? 'button' : kind === 'say' ? 'say' : kind === 'display' ? 'display' : kind === 'ptz' ? 'ptz' : 'other');
-    function noteOperatorActivity(robotId, subject, kind) {
-        if (!subject) return;
+    const ROBOT_CHANNELS = { drive: 'drive', head: 'head', headlight: 'lights' };
+    const ROBOT_ROLES = new Set(['owner', 'mod', 'operator']);
+    const CHANNEL_FIELD = { drive: 'drive_at', head: 'head_at', lights: 'lights_at' };
+    /** Record one activity stamp; an older `at` for the same channel never replaces a newer one. */
+    function stampOperatorActivity(robotId, subject, channel, atMs, source, kind) {
         let bySubject = operatorActivity.get(robotId);
         if (!bySubject) { bySubject = new Map(); operatorActivity.set(robotId, bySubject); }
-        const at = now();
-        const channel = channelOf(kind);
         const rec = bySubject.get(subject) || { last: null, drive_at: null, head_at: null, lights_at: null };
-        rec.last = { kind, channel, at: iso(at) };
-        if (channel === 'drive') rec.drive_at = iso(at);
-        if (channel === 'head') rec.head_at = iso(at);
-        if (channel === 'lights') rec.lights_at = iso(at);
+        const at = iso(atMs);
+        const field = CHANNEL_FIELD[channel];
+        const channelAt = field ? Date.parse(rec[field]) : NaN;
+        if (field && (!Number.isFinite(channelAt) || atMs > channelAt)) rec[field] = at;
+        const lastAt = rec.last ? Date.parse(rec.last.at) : NaN;
+        if (!Number.isFinite(lastAt) || atMs > lastAt) rec.last = { kind, channel, at, source };
         bySubject.set(subject, rec);
         if (bySubject.size > 256) bySubject.delete(bySubject.keys().next().value);
+    }
+    function noteOperatorActivity(robotId, subject, kind) {
+        if (!subject) return;
+        stampOperatorActivity(robotId, subject, channelOf(kind), now(), 'bot', kind);
+    }
+    /** A tray's p7_commander, strictly checked; anything invalid is ignored and never an error. */
+    function robotCommander(sensors) {
+        const c = sensors && sensors.p7_commander;
+        if (!c || typeof c !== 'object' || Array.isArray(c)) return null;
+        if (typeof c.subject !== 'string' || !c.subject || c.subject.length > 200) return null;
+        if (!ROBOT_ROLES.has(c.role)) return null;
+        const channel = ROBOT_CHANNELS[c.channel];
+        if (!channel) return null;
+        const atMs = typeof c.at === 'number' ? c.at : typeof c.at === 'string' ? Date.parse(c.at) : NaN;
+        if (!Number.isFinite(atMs) || atMs > now() + 5000) return null;
+        return { subject: c.subject, channel, atMs, kind: c.channel };
     }
     function operatorActivityOf(robotId) {
         const out = {};
@@ -1265,6 +1298,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     }
     async function operatorsState(robotId) {
         const [members, policy] = await Promise.all([domain.operators.list(robotId), domain.operators.policy(robotId)]);
+        operatorMembers.set(robotId, new Set(members.map((m) => m.subject)));
         return {
             sole: policy.sole_subject ? { subject: policy.sole_subject, by: policy.sole_by, at: policy.sole_at } : null,
             members: members.map((m) => ({ subject: m.subject, role: m.role, enabled: m.enabled !== false })),
@@ -1342,8 +1376,8 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         const sensors = t && t.sensors && typeof t.sensors === 'object' ? t.sensors : {};
         const picked = {};
         for (const k of readouts) if (Object.prototype.hasOwnProperty.call(sensors, k)) picked[k] = sensors[k];
-        // The tray's provisional battery reading rides along so the panel can say "provisional, at connect" to a
-        // watcher too. It is a reading, never a command.
+        // The tray's battery reading (and its `at`/`unverified` freshness) rides along so the panel can say
+        // "read at connect" or "updated 12s ago" to a watcher too. It is a reading, never a command.
         if (sensors.p7_battery !== undefined) picked.p7_battery = sensors.p7_battery;
         // A simulated rover's pose and lights draw its camera (public/sim-view.js); a real device has no `sim`.
         const sim = t && t.sim && typeof t.sim === 'object' && t.sim.pose ? simView(t.sim) : null;

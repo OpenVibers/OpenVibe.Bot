@@ -1242,6 +1242,23 @@
                 roleBtn.textContent = m.role === 'operator' ? 'Make Mod' : 'Make Operator';
             }
         }
+        // The robot's own view, while it is fresh: one quiet line under the roster. Text only, never markup.
+        const robotLine = $('[data-operators-robot]', opsCard);
+        if (robotLine) {
+            const nowMs = Date.parse(ops.now) || Date.now();
+            let view = null;
+            for (const m of ops.members) {
+                const rec = ops.activity[m.subject];
+                const last = rec && rec.last;
+                if (!last || last.source !== 'robot') continue;
+                const at = Date.parse(last.at);
+                if (!Number.isFinite(at) || nowMs - at >= 5000) continue;
+                if (!view || at > view.at) view = { at, last, name: opsName(m.subject) };
+            }
+            const channel = view && ['drive', 'head', 'lights'].includes(view.last.channel) ? view.last.channel : null;
+            robotLine.textContent = view && channel ? `The robot follows: ${view.name} (${channel})` : '';
+            robotLine.hidden = !robotLine.textContent;
+        }
     }
     if (opsCard) {
         // Age "1s ago" and the Live badge even when no new command arrives (both are read from Bot's stamp).
@@ -1407,18 +1424,33 @@
         pill.dataset.state = dataState;
     }
     // Battery | Latency. A missing reading is a dash, an empty bar and the word unknown, never 0 %; a voltage is
-    // never invented. The tray's unverified FED8 read is a quiet provisional note, not a second number.
+    // never invented. The tray's reading says how fresh it is: "read at connect" for an unverified FED8 read, or
+    // "updated 12s ago" from its `at`. No `at` and not unverified: no note.
+    function batteryAge(at) {
+        const then = typeof at === 'number' ? at : Date.parse(at);
+        if (!Number.isFinite(then)) return '';
+        const ms = Math.max(0, Date.now() - then);
+        return ms < 60000 ? `${Math.floor(ms / 1000)}s` : `${Math.floor(ms / 60000)}m`;
+    }
     function paintBattery(state) {
         const fraction = state.battery;
         const sensors = state.telemetry && state.telemetry.sensors;
-        const provisional = !!(sensors && sensors.p7_battery && sensors.p7_battery.unverified === true);
+        const p7 = sensors && sensors.p7_battery && typeof sensors.p7_battery === 'object' ? sensors.p7_battery : null;
+        let freshness = '';
+        if (fraction != null && p7) {
+            if (p7.unverified === true) freshness = 'read at connect';
+            else if (p7.at != null) {
+                const age = batteryAge(p7.at);
+                if (age) freshness = `updated ${age} ago`;
+            }
+        }
         for (const el of $$('[data-battery]')) {
             if (fraction == null) { el.removeAttribute('value'); el.dataset.state = 'unknown'; }
             else { el.value = String(Math.max(0, Math.min(1, fraction))); el.dataset.state = 'known'; }
         }
         for (const el of $$('[data-battery-text]')) el.textContent = fraction != null ? `${Math.round(fraction * 100)} %` : '—';
         for (const el of $$('[data-battery-note]')) { el.textContent = fraction != null ? '' : 'unknown'; el.hidden = fraction != null; }
-        for (const el of $$('[data-battery-provisional]')) el.hidden = !provisional;
+        for (const el of $$('[data-battery-freshness]')) { el.textContent = freshness; el.hidden = !freshness; }
     }
     function paint(state) {
         if (!state) return;
