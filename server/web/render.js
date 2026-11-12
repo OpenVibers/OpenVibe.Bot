@@ -321,11 +321,11 @@ function renderWidget(w, { profile = {}, allowed_commands = [], signaling_url = 
             break;
         case 'battery':
             // The LOOI status row: a big percentage, a fill bar, a dash and the word "unknown" when there is no
-            // reading (never 0 %), and a quiet provisional note when the tray sent an unverified FED8 read.
+            // reading (never 0 %), and a quiet freshness note ("read at connect" or "updated 12s ago").
             inner = '<div class="battery">'
                 + '<div class="battery-head"><output class="readout" data-battery-text>—</output><span class="battery-note" data-battery-note>unknown</span></div>'
                 + '<meter min="0" max="1" low="0.25" high="0.6" optimum="1" data-battery></meter>'
-                + '<span class="battery-provisional" data-battery-provisional hidden>provisional, at connect</span>'
+                + '<span class="battery-freshness" data-battery-freshness hidden></span>'
                 + '</div>';
             break;
         case 'latency':
@@ -642,6 +642,7 @@ ${canManage ? `<button type="button" class="ops-mode-btn" data-operators-clear${
 ${rows}
 ${viewerRow}
 </ul>
+<p class="ops-robot" data-operators-robot hidden></p>
 <p class="ops-footer">Everyone returns shared control to all enabled operators. Sole control admits only that person's commands; others get a clear refusal. Toggles apply immediately, with no tray restart. The tray's own Stop stays local. The owner always overrides.</p>
 </section>`;
 }

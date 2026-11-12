@@ -54,7 +54,7 @@ require('../server/realtime');
     }
     const looi = loadProfiles().get('looi');
 
-    await check('the battery reads the Node top-level percent (0..100), a dash/unknown when missing, and p7 provisional', async () => {
+    await check('the battery prefers the Node top-level percent (0..100), falls back to p7, and is null when missing', async () => {
         const { robot, pairing } = await t.robot(alex, { profile_id: 'looi' });
         const dev = await deviceFor(robot.id, pairing.code);
         const a = await op(alex);
@@ -65,17 +65,69 @@ require('../server/realtime');
         const html = await (await get(`/panel/${robot.id}`, alex)).text();
         assert.ok(html.includes('data-status-row'), 'Battery | Latency is one compact status row');
         assert.ok(html.includes('data-battery-note>unknown'), 'the initial meter says unknown, never 0 %');
-        assert.ok(html.includes('data-battery-provisional'), 'the provisional note is in the markup');
+        assert.ok(html.includes('data-battery-freshness'), 'the freshness note is in the markup');
         // A full 100 is 100 %, not 1 %: a number above 1 is a percent, not the legacy fraction.
         dev.send({ type: 'telemetry', battery: 100, events: [{ kind: 'battery_full' }], sensors: { p7_battery: { pct: 100, usb: true, raw: '6401', unverified: true } } });
         const full = await a.waitFor((m) => m.type === 'robot_state' && m.state.telemetry && m.state.telemetry.battery === 100);
         assert.strictEqual(full.state.battery, 1);
-        assert.strictEqual(full.state.telemetry.sensors.p7_battery.unverified, true, 'the raw provisional reading reaches the panel state');
+        assert.strictEqual(full.state.telemetry.sensors.p7_battery.unverified, true, 'the unverified reading reaches the panel state');
+        // With no top-level battery, the tray's pct is the reading (and its at rides along for the freshness note).
+        const at = new Date(Date.now() - 12000).toISOString();
+        dev.send({ type: 'telemetry', events: [{ kind: 'battery_poll' }], sensors: { p7_battery: { pct: 37, at } } });
+        const p7 = await a.waitFor((m) => m.type === 'robot_state' && m.state.telemetry && m.state.telemetry.sensors && m.state.telemetry.sensors.p7_battery && m.state.telemetry.sensors.p7_battery.pct === 37);
+        assert.strictEqual(p7.state.battery, 0.37, 'p7 pct is a 0..1 fraction');
+        assert.strictEqual(p7.state.telemetry.sensors.p7_battery.at, at, 'the poll time reaches the panel');
         // Missing is null (a dash and an empty bar), never a made-up 0.
         dev.send({ type: 'telemetry', events: [{ kind: 'battery_clear' }], sensors: { cleared: true } });
         const none = await a.waitFor((m) => m.type === 'robot_state' && m.state.telemetry && m.state.telemetry.sensors && m.state.telemetry.sensors.cleared === true);
         assert.strictEqual(none.state.battery, null, 'no battery field is null, not 0');
         a.close(); dev.close();
+    });
+
+    await check('the robot’s own commander view is source robot; invalid views change nothing and Bot wins when newer', async () => {
+        const { robot, pairing } = await t.robot(alex, { profile_id: 'looi' });
+        await invite(robot.id, bob.subject, 'operator');
+        const dev = await deviceFor(robot.id, pairing.code);
+        const a = await op(alex); const b = await op(bob);
+        await join(a, robot.id); await join(b, robot.id);
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        const headAt = new Date(Date.now() - 2000).toISOString();
+        dev.send({ type: 'telemetry', events: [{ kind: 'commander' }],
+            sensors: { p7_commander: { subject: bob.subject, role: 'operator', channel: 'head', at: headAt } } });
+        const robotView = await a.waitFor((m) => m.type === 'operators_state' && m.operators.activity && m.operators.activity[bob.subject]
+            && m.operators.activity[bob.subject].last && m.operators.activity[bob.subject].last.source === 'robot');
+        const rec = robotView.operators.activity[bob.subject];
+        assert.deepStrictEqual([rec.last.channel, rec.last.kind, rec.last.at, rec.head_at], ['head', 'head', headAt, headAt]);
+        // An unknown channel, a channel report an hour ahead, an invalid role and a stranger change nothing.
+        const seen = a.messages.length;
+        for (const p7 of [
+            { subject: bob.subject, role: 'operator', channel: 'wheels', at: new Date().toISOString() },
+            { subject: bob.subject, role: 'operator', channel: 'drive', at: new Date(Date.now() + 3600000).toISOString() },
+            { subject: bob.subject, role: 'viewer', channel: 'drive', at: new Date().toISOString() },
+            { subject: 'stranger', role: 'operator', channel: 'drive', at: new Date().toISOString() },
+            { subject: 42, role: 'operator', channel: 'drive', at: new Date().toISOString() },
+        ]) dev.send({ type: 'telemetry', events: [{ kind: 'commander_check' }], sensors: { p7_commander: p7 } });
+        await wait(700);
+        assert.strictEqual(a.messages.slice(seen).filter((m) => m.type === 'operators_state').length, 0, 'invalid views never broadcast');
+        // Bot's own head stamp is newer than the robot's view: Bot's at and source stay.
+        cmd(b, { id: 'commander-bot', kind: 'actuator', value: { name: 'head', value: 0.4 } });
+        const head = await dev.waitFor((m) => m.type === 'command' && m.ref === 'commander-bot');
+        dev.send({ type: 'ack', id: head.id });
+        await result(b, 'commander-bot');
+        const botView = await a.waitFor((m) => m.type === 'operators_state' && m.operators.activity && m.operators.activity[bob.subject]
+            && m.operators.activity[bob.subject].last && m.operators.activity[bob.subject].last.source === 'bot');
+        const botHeadAt = botView.operators.activity[bob.subject].head_at;
+        assert.ok(Date.parse(botHeadAt) > Date.parse(headAt), 'the newer Bot stamp is the head time');
+        // The robot reporting its older head view again does not take the newer stamp back.
+        const beforeOld = a.messages.length;
+        dev.send({ type: 'telemetry', events: [{ kind: 'commander_old' }],
+            sensors: { p7_commander: { subject: bob.subject, role: 'operator', channel: 'head', at: headAt } } });
+        await wait(700);
+        const states = a.messages.slice(beforeOld).filter((m) => m.type === 'operators_state');
+        const latest = states[states.length - 1] || botView;
+        assert.strictEqual(latest.operators.activity[bob.subject].last.source, 'bot', 'an older robot view never wins');
+        assert.strictEqual(latest.operators.activity[bob.subject].head_at, botHeadAt);
+        a.close(); b.close(); dev.close();
     });
 
     await check('sole control admits only that subject; others are refused with a visible message; the owner overrides', async () => {
