@@ -267,6 +267,11 @@ function loadConfig(env = process.env) {
             intervalMs: Math.max(100, int(env.BOT_BILLING_INTERVAL_MS, 2000)),
             timeoutMs: Math.max(100, int(env.BOT_BILLING_TIMEOUT_MS, 5000)),
         },
+        // OpenVibe.AI's meter for the models that run on people's own machines (server/ai-meter.js): each `ai`
+        // command's answer goes to AI's POST /api/v1/usage/calls as ai.call-report@1. Bot mints its own Network
+        // service token for audience openvibe.ai (ai.usage.report) from its OAuth client; OV_AI_INTERNAL_URL
+        // unset, or no client secret, keeps metering off (the command path is unchanged).
+        ai: { internalUrl: trim(env.OV_AI_INTERNAL_URL || '') },
         // The one-line installer the owner copies next to the pairing code. scriptUrl is what the command
         // prints; sourceUrl is where GET /install sends the client (302). Bot keeps no copy of the script:
         // it redirects to OpenVibe Link's canonical one, and only this config (never a query parameter)
