@@ -972,7 +972,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
                 hasStick: !!overlayStickMarkup(profile, role === 'watcher' ? [] : domain.control.allowedFor(robot, role, profile)),
                 canDrive,
             });
-            const storedRaw = signedIn && token ? await layoutStore.activeLayout({ config, token, surface: catalog.id, device }) : null;
+            const storedRaw = role === 'owner' && token ? await layoutStore.activeLayout({ config, token, surface: catalog.id, device }) : null;
             const fallbackLayout = surface.overlayDefaultLayout(catalog, device);
             const stored = usable(catalog, storedRaw, fallbackLayout);
             arrange = {
@@ -983,7 +983,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
             };
         } else {
             const catalog = surface.controlsCatalog(profile);
-            const storedRaw = signedIn && token ? await layoutStore.activeLayout({ config, token, surface: catalog.id, device }) : null;
+            const storedRaw = role === 'owner' && token ? await layoutStore.activeLayout({ config, token, surface: catalog.id, device }) : null;
             const fallbackLayout = surface.defaultLayout(catalog, device);
             const stored = usable(catalog, storedRaw, fallbackLayout);
             let src = null;
