@@ -144,6 +144,9 @@ function simView(sim) {
     };
 }
 
+/** How long a restart waits for every client's close in reply to its 1012 before it drops the rest (11-12). */
+const CLOSE_HANDSHAKE_MS = 600;
+
 function createRealtime({ config, keys, userAuth, log = console, now = () => Date.now(), networkSend = null }) {
     let domain = null;
     const tickets = createControlTickets({ now });   // the embedded panel's Drive (server/control-tickets.js)
@@ -1482,10 +1485,27 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             // 1012 Service Restart (RFC 6455's registry), not 1001 Going Away: Bot stops only to start again (a deploy takes
             // about a second), so every client should reconnect at once and then back off. LOOI's node read the old 1001
             // as link_lost and stayed down after a deploy on 2026-11-10 at 12:24:05 UTC.
-            for (const conn of [...deviceConns.values()]) { try { conn.ws.close(1012, 'restarting: reconnect now'); } catch { /* gone */ } }
-            for (const set of subsByRobot.values()) for (const conn of set) { try { conn.ws.close(1012, 'restarting: reconnect now'); } catch { /* gone */ } }
-            for (const conn of watchConns) { try { conn.ws.close(1012, 'restarting: reconnect now'); } catch { /* gone */ } }
+            // Then wait (at most CLOSE_HANDSHAKE_MS) for each client's close in reply before the process goes on to exit:
+            // a process that exits with the client's frames unread resets the connection, and a reset can lose the
+            // close frame on the way, so the device saw "no close frame" instead of 1012 (Maticus, 11-12). A client that
+            // does not answer in time is dropped as before.
+            const sockets = [...new Set([
+                ...[...deviceConns.values()].map((c) => c.ws),
+                ...[...subsByRobot.values()].flatMap((set) => [...set].map((c) => c.ws)),
+                ...[...watchConns].map((c) => c.ws),
+            ])].filter(Boolean);
+            const answered = sockets.map((ws) => new Promise((resolve) => {
+                if (ws.readyState === 3 || typeof ws.once !== 'function') resolve();
+                else ws.once('close', () => resolve());
+                try { ws.close(1012, 'restarting: reconnect now'); } catch { resolve(); }
+            }));
             deviceConns.clear(); subsByRobot.clear(); watchConns.clear(); watchersByAddr.clear();
+            if (answered.length) {
+                let timer = null;
+                await Promise.race([Promise.all(answered), new Promise((r) => { timer = setTimeout(r, CLOSE_HANDSHAKE_MS); })]);
+                clearTimeout(timer);
+                for (const ws of sockets) { if (ws.readyState !== 3 && typeof ws.terminate === 'function') { try { ws.terminate(); } catch { /* gone */ } } }
+            }
             await Promise.all([
                 new Promise((r) => deviceWss.close(r)), new Promise((r) => controlWss.close(r)), new Promise((r) => watchWss.close(r)),
             ]).catch(() => {});
