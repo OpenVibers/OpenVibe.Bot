@@ -221,7 +221,7 @@ ${model.community ? `<section class="dir-sec card"><h2>From the community</h2><p
 <li>Signed by OpenVibe.Bot (Ed25519, key <code>${esc(model.community.key_id || '')}</code>): ${link(`/api/v1/profiles/${model.id}`, 'the profile and its signature')} · ${link('/api/v1/profiles/signing-key', 'the public key')}</li>
 <li>Check it on your machine before you install the driver (OpenVibe Link v0.6.0 or later): <code>openvibe-link profile verify ${esc(model.id)}${model.community.key_id ? ` --key-id ${esc(model.community.key_id)}` : ''}</code></li></ul>
 <p class="muted">Install the driver from its source on the robot's computer; OpenVibe.Bot never runs it.</p></section>` : ''}
-<section class="dir-sec card"><h2>Safety</h2><p class="muted">Every command passes Bot's gate: roles, the owner's limits and cooldowns, and a latched e-stop the owner or a Mod clears (the tray's own STOP and ARM stay local). The device stops the motors by itself when commands stop arriving, without asking the network.</p></section>`;
+<section class="dir-sec card"><h2>Safety</h2><p class="muted">Every command passes Bot's gate: roles, the owner's limits and cooldowns. A Stop is one optional button that sends the robot's own stop command; the tray's own Stop stays local. The device stops the motors by itself when commands stop arriving, without asking the network.</p></section>`;
     return shell({ config, path: `/models/${model.id}`, title: model.name, description: `${model.name} on OpenVibe.Bot: how it connects, the panel it gets and how to set it up.`, body });
 }
 
@@ -235,7 +235,7 @@ function renderRobotPage({ config, robot, model, owner = null, state = null, rol
 <p class="muted">${esc(POLICY_WORDS[robot.access_policy] || '')}</p>
 ${member || turn ? `<p class="dir-actions">${member || turn}</p>` : ''}</div>
 <div class="dir-live"><iframe src="/panel/${esc(robot.id)}/embed" title="${esc(robot.name)}: live panel" loading="lazy" allow="autoplay; gamepad"></iframe></div>
-<p class="muted dir-note">Watching is open to everyone; driving follows the owner's rules and passes the same gate and e-stop as on its own panel.</p>`;
+<p class="muted dir-note">Watching is open to everyone; driving follows the owner's rules and passes the same gate as on its own panel.</p>`;
     return shell({ config, path: `/r/${robot.id}`, title: robot.name, description: `${robot.name}, a ${model.name} on OpenVibe.Bot. ${POLICY_WORDS[robot.access_policy] || ''}`.trim(), body });
 }
 

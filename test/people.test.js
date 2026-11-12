@@ -66,7 +66,7 @@ function identityStub() {
     await check('the owner sees the People card and adding @bob lists them, and the API agrees', async () => {
         const html = await (await get(`/panel/${robot.id}`, alex)).text();
         assert.ok(html.includes('class="setting-card people"') && html.includes('id="people-h"'));
-        assert.ok(html.includes('<p class="setting-note">Operators drive and can press the e-stop; viewers watch.</p>'));
+        assert.ok(html.includes('<p class="setting-note">Operators drive; viewers watch.</p>'));
         assert.ok(html.includes('<li class="person"><span class="who"><b>You</b><small>Owner</small></span></li>'));
         assert.ok(html.includes(`<form class="people-add" method="post" action="/robots/${robot.id}/operators">`));
         assert.ok(html.includes('name="username" placeholder="@username" required maxlength="41"'));

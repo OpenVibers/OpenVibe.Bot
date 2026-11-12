@@ -7,9 +7,9 @@
  * arena's kinematics (public/sim-world.js) at the page's frame rate.
  *
  * It keeps the gate's rules that a driver would feel: only the profile's command kinds; drive axes and actuator
- * values shaped to the profile's ranges (as server/domain does); a latched e-stop that refuses everything but halt
- * until it is cleared; and the device's deadman: a motion command lapses max_command_ms after it was sent unless
- * a newer one arrives (the panel re-sends a held control every 150 ms). Bumping into something stops the wheels.
+ * values shaped to the profile's ranges (as server/domain does); the device's deadman: a motion command lapses
+ * max_command_ms after it was sent unless a newer one arrives (the panel re-sends a held control every 150 ms);
+ * and the machine's own Stop (halt). Bumping into something stops the wheels.
  *
  * window.OVSimLocal exposes the pose, the headlights and the horn to the camera view (public/sim-view.js).
  */
@@ -28,7 +28,7 @@
 
     const rover = {
         pose: { ...W.START }, drive: {}, deadline: 0, headlights: null, horn: null, hornUntil: 0,
-        battery: 100, estop: false, bumped: false,
+        battery: 100, bumped: false,
     };
     const clamp = (v, lo, hi) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : 0; };
     const noteHz = (note) => {
@@ -78,14 +78,13 @@
     function state() {
         return {
             robot_id: main.dataset.robotId, online: true,
-            estop: { latched: rover.estop, by: null, at: null },
             latency_ms: 12, battery: rover.battery / 100,
             telemetry: {
                 battery: { percent: Math.round(rover.battery) },
                 sensors: { distance_cm: W.distanceCm(rover.pose), line: W.line(rover.pose) },
                 sim: { pose: { ...rover.pose }, drive: { ...rover.drive }, headlights: rover.headlights, horn: rover.horn, bumped: rover.bumped },
             },
-            status: null, device_estop: null, queue: null,
+            status: null, queue: null,
         };
     }
 
@@ -98,7 +97,7 @@
         if (rover.deadline && now > rover.deadline) halt();               // the deadman
         if (rover.hornUntil && now > rover.hornUntil) { rover.horn = null; rover.hornUntil = 0; }
         const moving = Object.values(rover.drive).some((x) => x);
-        if (moving && !rover.estop) {
+        if (moving) {
             const r = W.step(rover.pose, rover.drive, dt);
             rover.pose = r.pose;
             if (r.bumped && !rover.bumped) halt();                        // the bumper stops the wheels
@@ -137,14 +136,11 @@
                 return;
             }
             if (!this.joined) return this.deliver({ type: 'error', code: 'bot.not_joined', detail: 'join first' });
-            if (m.type === 'estop') { rover.estop = true; halt(); rover.horn = null; return broadcast(); }
-            if (m.type === 'estop_clear') { rover.estop = false; return broadcast(); }
             if (m.type !== 'command') return;
             const id = String(m.id || '');
             const kind = String(m.kind || '');
             const reply = (fields) => this.deliver({ type: 'command_result', id, ...fields }, 10 + Math.round(Math.random() * 14));
             if (!ALLOWED.includes(kind)) return reply({ result: 'refused', code: 'bot.command_not_allowed', reason: `${kind} is not something this robot does` });
-            if (rover.estop && kind !== 'halt') return reply({ result: 'refused', code: 'bot.estopped', reason: 'The e-stop is latched. Clear it to drive again.' });
             const shaped = shape(kind, m.value);
             if (shaped.refused) return reply({ result: 'refused', code: 'bot.invalid_input', reason: shaped.refused });
             apply(kind, shaped.value);

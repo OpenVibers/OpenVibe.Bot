@@ -5,14 +5,14 @@ robot's site allows (`BOT_EMBED_ORIGINS`; the robot's `data-parent-origins` list
 
 | view | query | what it draws |
 |---|---|---|
-| `panel` | `/embed` or `?mode=panel` | the whole panel: header, camera, every widget, the e-stop and the readouts. This is the default and what existing pages get. |
-| `overlay` | `?mode=overlay` | a transparent page that fills its frame and draws only the live controls: the robot's name and state (online, your turn, someone else driving, e-stop on) as one pill at the top left, the first stick in a 132 px circle at the bottom left, the first slider as a 44 × 132 vertical track at the bottom right, the e-stop as a 44 px round button at the top right, and a “more” button under it. Safe-area insets are applied. |
-| `compact` | `?mode=compact` | one row for a narrow card: the same pill, a 96 px stick, the same slider across, the e-stop and “more”. |
+| `panel` | `/embed` or `?mode=panel` | the whole panel: header, camera, every widget, the optional Stop and the readouts. This is the default and what existing pages get. |
+| `overlay` | `?mode=overlay` | a transparent page that fills its frame and draws only the live controls: the robot's name and state (online, your turn, someone else driving) as one pill at the top left, the first stick in a 132 px circle at the bottom left, the first slider as a 44 × 132 vertical track at the bottom right, and a “more” button at the top right. Safe-area insets are applied. |
+| `compact` | `?mode=compact` | one row for a narrow card: the same pill, a 96 px stick, the same slider across and “more”. |
 
 Which stick and slider exist comes from the robot's profile (`server/profiles/*.json`): the first `drive`, `ptz` or
 direction-button widget with a stick, and the first `number` actuator a widget drives. A robot with neither still gets
-the pill, the e-stop (for its owner and operators) and “more”. A viewer sees the pill and “more” until they take the
-controls the same way the full panel lets them.
+the pill and “more”. A viewer sees the pill and “more” until they take the controls the same way the full panel lets
+them. Stop is one optional part of a full panel's layout, off until a person adds it.
 
 Typical iframe:
 
@@ -70,8 +70,7 @@ window.addEventListener('message', (e) => {
 `clip-path` participates in hit testing: a press outside every rectangle reaches the video (or whatever is behind the
 frame) and the player's own controls keep working. Put the frame in a layer above the video and **below** the player's
 controls bar, unmute pill and chat button, and leave the bottom bar's height out of the layer, e.g.
-`position:absolute; inset:0 0 var(--player-bar-height, 64px) 0; z-index:4`. The overlay's e-stop and pill then sit
-above the picture but under those page controls. In full screen, keep the frame inside the element that goes full
+`position:absolute; inset:0 0 var(--player-bar-height, 64px) 0; z-index:4`. The overlay's pill and more button then sit above the picture but under those page controls. In full screen, keep the frame inside the element that goes full
 screen (`requestFullscreen` on the player box), so the controls stay over the picture.
 
 Do not use `pointer-events: none` on the iframe element itself as a click-through trick: it turns the controls off too.
@@ -80,7 +79,7 @@ Do not use `pointer-events: none` on the iframe element itself as a click-throug
 
 - The frame is sandboxed exactly as above and accepts parent messages only from `data-parent-origins`.
 - The page accepts frame messages only from the Bot origin **and** that exact iframe, and only the shapes below.
-- A page never sends `estop`, `drive`, `actuator` or any other command to the frame: only OpenVibe.Bot's panel sends
+- A page never sends `stop`, `halt`, `drive`, `actuator` or any other command to the frame: only OpenVibe.Bot's panel sends
   commands, through Bot's own gate, as the viewer. Chat commands on a bound OpenVibe.Live channel go through the
   channel route in Live, never through this protocol.
 - Treat `hit` as layout data only: clamp it and ignore anything malformed.

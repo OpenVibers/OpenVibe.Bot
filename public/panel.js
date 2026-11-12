@@ -15,14 +15,14 @@
  *   keyboard  arrows/WASD drive, Space stops; Q/E tilt the head where the robot has one (else they rotate)
  *   gamepad   polled on requestAnimationFrame only while a pad is connected and the page has focus: left stick
  *             (and d-pad) drive, right stick rotates when the drive has a rotation axis, A = the first tone,
- *             B = stop, Start = e-stop; gamepaddisconnected releases it all
+ *             B = Stop; gamepaddisconnected releases it all
  *   latency   round trip from a command's id to its result on /control (rolling median) + telemetry age
  *   camera    each tile the server marked with a live OpenRestream session's signaling URL plays it: the
  *             mediasoup-client viewer flow OpenVibe.Live runs, reconnecting with backoff; a tile with no
  *             URL is left as the server drew it
  *
  * A watcher (data-role="watcher": the embed's anonymous, read-only view) joins on /watch instead and only paints
- * the state it is sent: no command, e-stop or clear frame is ever sent from it. Its Drive button opens
+ * the state it is sent: no command or stop frame is ever sent from it. Its Drive button opens
  * /panel/:id/drive, a first-party popup with the openvibe.bot session the frame cannot see; the popup posts back a
  * one-time ticket (same origin only), and the panel re-joins on /control offering it as a subprotocol. Each join
  * made that way carries the next ticket, so a dropped socket reconnects; when none is left it watches again.
@@ -35,13 +35,12 @@
     const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
     const wsUrl = (path = '/control') => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${path}`;
 
-    // The camera pins under the sticky e-stop bar on phones (public/panel.css): the bar's height, kept current as it
-    // wraps, rotates or shows the latched note.
-    const banner = $('[data-estop-banner]');
-    if (banner) {
-        const setTop = () => document.documentElement.style.setProperty('--banner-h', `${banner.offsetHeight}px`);
+    // The camera pins under the page header on phones (public/panel.css): keep its height in --top-h.
+    const pageTop = $('.panel-top');
+    if (pageTop) {
+        const setTop = () => document.documentElement.style.setProperty('--top-h', `${pageTop.offsetHeight}px`);
         setTop();
-        if ('ResizeObserver' in window) new ResizeObserver(setTop).observe(banner); else window.addEventListener('resize', setTop);
+        if ('ResizeObserver' in window) new ResizeObserver(setTop).observe(pageTop); else window.addEventListener('resize', setTop);
     }
 
     for (const b of $$('[data-copy]')) {
@@ -445,7 +444,7 @@
         el.addEventListener('contextmenu', (e) => e.preventDefault());
     }
     function releaseAll() {
-        // Held slider repeats stop too (the e-stop, blur, a hidden page): the slider code listens for this.
+        // Held slider repeats stop too (Stop, blur, a hidden page): the slider code listens for this.
         try { window.dispatchEvent(new Event('ov-bot-release-all')); } catch { /* */ }
         for (const [kind, h] of [...holds]) for (const source of [...h.src.keys()]) {
             if (source instanceof Element) releaseButton(source); else holdRelease(kind, source);
@@ -641,7 +640,7 @@
     // each one step on from the slider's own value, clamped to its range, and the slider moves with it, so a drag after the
     // keys starts where the head is going (the slider sends absolute targets: no jump). Release sends nothing: head 0 is
     // Center, not stop, and the last command's lease bounds what is left of the move. Q and E together: nothing. Blur, a
-    // hidden page, pagehide, STOP, the e-stop and a lost socket stop it (releaseAll and stopDrive).
+    // hidden page, pagehide, Stop and a lost socket stop it (releaseAll and stopDrive).
     const HEAD_KEYS = { KeyQ: 1, KeyE: -1 };
     const headSlider = () => $('[data-actuator="head"]');
     const head = { down: new Set(), timer: null };
@@ -736,14 +735,11 @@
     document.addEventListener('keyup', onKeyUp);
 
     function stopDrive() {
-        headReleaseAll();
-        const h = holds.get(DRIVE);
-        if (h) for (const source of [...h.src.keys()]) { if (source instanceof Element) releaseButton(source); else holdRelease(DRIVE, source); }
-        for (const s of sticks) s.release();
-        send(DRIVE, {});   // every declared axis absent → 0
+        // The machine's own Stop (halt): release every local hold, then send the one command that stops it.
+        releaseAll();
+        send('halt', {});
     }
     $$('[data-stop]').forEach((el) => el.addEventListener('click', stopDrive));
-    function estop() { releaseAll(); raw({ type: 'estop' }); }
 
     // ── Gamepad ───────────────────────────────────────────────────────────────────────────────────────
     const PAD_DPAD = { 12: 'ArrowUp', 13: 'ArrowDown', 14: 'ArrowLeft', 15: 'ArrowRight' };
@@ -754,7 +750,7 @@
         loop: 0,
         down: new Set(),      // buttons held at the last poll
         tone: null,           // the tone button A holds
-        // After a reset (blur, a hidden page, the e-stop) nothing is pressed again until the pad is let go of
+        // After a reset (blur, a hidden page, Stop) nothing is pressed again until the pad is let go of
         // entirely: a stick still pushed or a button still held does not undo a release.
         latched: false,
         dir: null,            // the direction button the pad holds (a robot made of buttons)
@@ -787,7 +783,7 @@
         const now = new Set(p.buttons.map((b, i) => (b && b.pressed ? i : -1)).filter((i) => i >= 0));
         if (buttonDrive) {
             // A robot made of buttons: the left stick or the D-pad points at a direction, and its button is pressed.
-            // Like the drive: after a reset nothing is pressed again until the pad is let go of; B lets go; Start is the e-stop.
+            // Like the drive: after a reset nothing is pressed again until the pad is let go of; B lets go.
             const ok = g.focused && !document.hidden && joined && allowed.includes('button');
             let want = stickDir(dead(ax(0), PAD_DEADZONE), -dead(ax(1), PAD_DEADZONE));
             if (!want) for (const [b, d] of Object.entries({ 12: 'up', 13: 'down', 14: 'left', 15: 'right' })) if (now.has(Number(b))) { want = d; break; }
@@ -795,8 +791,6 @@
                 if (!pad.latched) pad.reset();
             } else if (pad.latched) {
                 if (!want && !now.size) pad.latched = false;
-            } else if (now.has(9) && !pad.down.has(9) && $('[data-estop]:not([hidden])')) {
-                estop();
             } else if (now.has(1) && !pad.down.has(1)) {
                 pad.reset();
             } else if (want !== pad.dir) {
@@ -822,7 +816,6 @@
                 if (PAD_DPAD[b]) keyPress(PAD_DPAD[b], `pad:${b}`);
                 else if (b === 0) { pad.tone = $$('[data-tone]').find((el) => !el.disabled) || null; if (pad.tone) pressTone(pad.tone); }
                 else if (b === 1) { stopDrive(); pad.reset(); }     // a stick still pushed does not drive on
-                else if (b === 9 && $('[data-estop]:not([hidden])')) estop();
             }
             for (const b of pad.down) if (!now.has(b)) {
                 if (PAD_DPAD[b]) keyRelease(PAD_DPAD[b], `pad:${b}`);
@@ -900,7 +893,7 @@
     // ── Make your own controls: the Arrange editor and the Controls v2 store's one migration ─────────────
     // The panel is drawn with the person's ui.layout@1 on the server (never a flash of the default). Arrange
     // loads openvibe-shared/ov-arrange.js only when pressed; the editor works on these real parts. The old
-    // browser store (ov-bot-pad-prefs: Stop's hand, pad size, readouts) becomes a layout once, then goes.
+    // browser store (ov-bot-pad-prefs: pad size, readouts) becomes a layout once, then goes.
     const arrangeData = () => {
         const el = document.getElementById('ov-arrange-data');
         if (!el) return null;
@@ -916,24 +909,12 @@
         try { prefs = JSON.parse(raw) || {}; } catch { return; }
         const { data } = got;
         const set = (id, fn) => { const e = (data.layout.parts || []).find((p) => p.id === id); if (e) fn(e); };
-        if (prefs.hand === 'left') {
-            const stick = (data.layout.parts || []).find((p) => p.id === 'stick');
-            const stop = (data.layout.parts || []).find((p) => p.id === 'stop');
-            if (stick && stop && stick.place && stop.place && stick.place.x != null && stop.place.x != null) {
-                const x = stick.place.x; stick.place.x = stop.place.x; stop.place.x = x;
-            }
-        }
         if (prefs.size === 'l') {
             const cols = data.catalog && data.catalog.grid ? data.catalog.grid.columns[data.device] : 4;
             const stick = (data.layout.parts || []).find((p) => p.id === 'stick');
-            const stop = (data.layout.parts || []).find((p) => p.id === 'stop');
             if (stick && stick.place && stick.place.x != null) {
                 stick.place.w = Math.min(3, cols); stick.place.h = 3;
                 stick.place.x = Math.max(0, Math.min(stick.place.x, cols - stick.place.w));
-                if (stop && stop.place && stick.place.x < stop.place.x + stop.place.w && stick.place.x + stick.place.w > stop.place.x
-                    && stick.place.y < stop.place.y + stop.place.h && stick.place.y + stick.place.h > stop.place.y) {
-                    stick.place.x = 0; stick.place.y = stop.place.y + stop.place.h;
-                }
             }
         }
         if (prefs.readouts === 'off') for (const id of ['battery', 'latency', 'telemetry']) set(id, (p) => { p.visible = false; });
@@ -979,6 +960,7 @@
             if (!surfaceEl) { opening = false; return; }
             window.ovArrange = window.OVArrange.open({
                 surface: surfaceEl, catalog: data.catalog, layout: data.layout, device: data.device,
+                defaults: () => data.defaultLayout && JSON.parse(JSON.stringify(data.defaultLayout)),
                 onSave: async (layout) => {
                     const out = await post(data.save, { surface: data.surface, device: data.device, catalog: data.catalog, layout });
                     data.layout = layout; got.el.textContent = JSON.stringify(data); saved = true;
@@ -998,6 +980,32 @@
                 onClose: () => { opening = false; if (saved) setTimeout(() => location.reload(), 60); },
                 confirm: () => true,
             });
+            // The parts palette has one optional part here: Stop. It is off until a person adds it, and it is
+            // just a plain button that sends the robot's own Stop (halt). The editor's Save keeps the change.
+            const bar = document.querySelector('.ov-arrange-bar .ov-arrange-actions');
+            const editorial = window.ovArrange;
+            if (bar && editorial && (data.catalog.parts || []).some((p) => p.id === 'stop')) {
+                const add = document.createElement('button');
+                add.type = 'button'; add.className = 'ovk-btn ovk-btn--quiet'; add.dataset.addStop = 'true';
+                const sync = () => {
+                    const part = (editorial.layout().parts || []).find((p) => p.id === 'stop');
+                    const on = !!(part && part.visible !== false);
+                    add.textContent = on ? 'Stop added' : 'Add Stop';
+                    add.disabled = on;
+                };
+                add.addEventListener('click', () => {
+                    const layout = editorial.layout();
+                    const part = (layout.parts || []).find((p) => p.id === 'stop');
+                    if (!part) return;
+                    part.visible = true;
+                    editorial.apply(layout);
+                    sync();
+                    const save = document.querySelector('.ov-arrange-bar [data-save]');
+                    if (save) { save.disabled = false; save.click(); }
+                });
+                bar.insertBefore(add, bar.firstChild);
+                sync();
+            }
         };
         btn.addEventListener('click', () => {
             if (opening) return;
@@ -1145,7 +1153,7 @@
     }
     // ── Operators (Maticus's 2026-11-12 LOOI spec) ──────────────────────────────────────────────────
     // The server draws the roster. This keeps it current from `operators_state` (Bot's own stamps for activity),
-    // sends a toggle / sole / role / panel E-STOP, and shows the refusal in the same notice line as a command's.
+    // sends a toggle / sole / role, and shows the refusal in the same notice line as a command's.
     const opsCard = $('[data-operators]');
     const opsNames = new Map();
     if (opsCard) for (const row of $$('[data-operator-subject]', opsCard)) opsNames.set(row.dataset.operatorSubject, row.dataset.operatorName || row.dataset.operatorSubject);
@@ -1176,21 +1184,6 @@
         if (!joined) { notice('Join the robot first.'); return; }
         raw({ type: 'operators', action, ...fields });
     }
-    function paintOperatorsEstop(state) {
-        if (!opsCard) return;
-        const box = $('[data-operators-estop-box]', opsCard);
-        const latched = !!(state && state.estop && state.estop.latched);
-        if (box) box.dataset.latched = latched ? 'true' : 'false';
-        const note = $('[data-operators-estop-note]', opsCard);
-        if (note) note.innerHTML = latched
-            ? '<b>Panel E-STOP is tripped.</b> A Mod may clear it. That never clears the tray STOP latch or ARM; the robot cannot move until the owner clears STOP and re-arms on the tray.'
-            : '<b>Panel E-STOP is clear.</b> A Mod may trip it, or clear it after a panel stop. That never clears the tray STOP latch or ARM.';
-        const btn = $('[data-operators-estop]', opsCard);
-        if (btn) {
-            btn.textContent = latched ? 'Clear panel E-STOP' : 'Trip panel E-STOP';
-            btn.hidden = !(myRole === 'owner' || myRole === 'mod');
-        }
-    }
     function paintOperators(state, keepNow = false) {
         if (!opsCard || !state) return;
         ops.sole = state.sole || null;
@@ -1215,9 +1208,9 @@
             if (tag) tag.textContent = m.role === 'owner' ? (row.dataset.operatorYou === 'true' ? 'OWNER · YOU' : 'OWNER') : (OPS_ROLE[m.role] || m.role);
             const sub = $('[data-operator-sub]', row);
             if (sub) sub.textContent = m.role === 'owner'
-                ? 'Always has override, local STOP, and ARM'
+                ? 'Always has override.'
                 : m.role === 'mod'
-                    ? 'Can manage operators and clear the panel E-STOP. Cannot change speed, mode, or Viewer access, or promote Mods.'
+                    ? 'Can switch Operators on or off and give or clear sole control. Cannot change speed, mode, or Viewer access, or promote Mods.'
                     : 'Can drive and tilt the head while switched on.';
             const rec = ops.activity[m.subject];
             const active = m.enabled !== false && (opsFresh(rec, 'drive') || opsFresh(rec, 'head'));
@@ -1261,11 +1254,6 @@
             if (soleBtn) { opsSend('sole', { subject: soleBtn.dataset.soleActive === 'true' ? null : soleBtn.dataset.operatorSole }); return; }
             const roleBtn = btn.closest('[data-operator-role]');
             if (roleBtn) { opsSend('role', { subject: roleBtn.dataset.subject, role: roleBtn.dataset.operatorRoleSet }); return; }
-            if (btn.closest('[data-operators-estop]')) {
-                const box = $('[data-operators-estop-box]', opsCard);
-                if (box && box.dataset.latched === 'true') raw({ type: 'estop_clear' });
-                else estop();
-            }
         });
         opsCard.addEventListener('change', (e) => {
             const toggle = e.target.closest && e.target.closest('[data-operator-toggle]');
@@ -1285,8 +1273,6 @@
         if (face) send('display', { face });
         else if (text) send('display', { text });
     }));
-    $$('[data-estop]').forEach((el) => el.addEventListener('click', estop));
-    $$('[data-estop-clear]').forEach((el) => el.addEventListener('click', () => raw({ type: 'estop_clear' })));
 
     // Each camera tile takes its camera's shape (CSSOM, so the CSP's no-inline rule holds).
     for (const cam of $$('[data-resolution]')) {
@@ -1314,7 +1300,7 @@
     main.addEventListener('pointerdown', (e) => {
         if (!watcher || driving) return;
         const t = e.target && e.target.closest ? e.target.closest('[data-command], .bot-stick, .bot-slider') : null;
-        if (!t || (e.target.closest && e.target.closest('[data-drive], [data-bot-more], [data-estop]'))) return;
+        if (!t || (e.target.closest && e.target.closest('[data-drive], [data-bot-more]'))) return;
         const drive = $('[data-drive]:not([hidden])');
         if (!drive) return;
         e.preventDefault();
@@ -1360,7 +1346,6 @@
     // What a device's refusal means, in words (a nack's fault code). A deadline that passed in transit is not news.
     const NACK_TEXT = {
         local_stop: 'The robot is stopped on the robot itself; release it there first.',
-        estopped: 'The e-stop is latched.',
         not_connected: 'The robot is not connected to its device.',
         no_heartbeat: 'The device lost its link to the robot.',
         not_ready: 'The robot is still starting.',
@@ -1408,16 +1393,13 @@
         const online = $('[data-online-label]');
         if (online) online.textContent = label;
     }
-    /** The overlay's one-line state: e-stop, offline, your turn, someone else's turn, or just online. */
+    /** The overlay's one-line state: offline, your turn, someone else's turn, or just online. */
     function paintBotPill(state) {
         const pill = $('[data-bot-pill]');
         if (!pill) return;
-        const latched = !!(state.estop && state.estop.latched);
-        const held = !!(state.device_estop && state.device_estop.latched && state.device_estop.local);
         const queue = state.queue;
         let label = 'Online'; let dataState = 'online';
-        if (latched || held) { label = 'E-stop on'; dataState = 'estop'; }
-        else if (!state.online) { label = 'Offline'; dataState = 'offline'; }
+        if (!state.online) { label = 'Offline'; dataState = 'offline'; }
         else if (queue && queue.active) { label = 'Your turn'; dataState = 'turn'; }
         else if (queue && queue.turn_ends_at) { label = 'Someone else driving'; dataState = 'busy'; }
         const text = $('[data-bot-state]');
@@ -1440,27 +1422,6 @@
     }
     function paint(state) {
         if (!state) return;
-        const latched = !!(state.estop && state.estop.latched);
-        // The robot's own stop (openvibe-link stop, or its driver's stop button) holds until it is released on the
-        // robot: clearing here cannot lift it, so the button waits and the note says where to release it.
-        const held = !!(state.device_estop && state.device_estop.latched && state.device_estop.local);
-        const banner = $('[data-estop-banner]');
-        if (banner) banner.dataset.latched = String(latched || held);
-        const label = $('[data-estop-state]');
-        if (label) label.textContent = held ? 'Stopped on the robot' : latched ? 'E-stop latched' : 'E-stop clear';
-        const note = $('.estop-note');
-        if (note) {
-            const why = held && state.device_estop.reason ? ` (${state.device_estop.reason})` : '';
-            note.textContent = held ? ` — its local stop${why} holds until it is released on the robot (openvibe-link resume); then the owner or a Mod clears it here.`
-                : latched ? ' — the robot stays still until the owner or a Mod clears it.' : '';
-        }
-        const clear = $('[data-estop-clear]');
-        if (clear) {
-            clear.hidden = !latched;
-            clear.disabled = held;
-            clear.title = held ? 'Release the stop on the robot first' : '';
-        }
-        if (latched || held) releaseAll();
         paintFaults(state);
         setOnline(state.online ? 'online' : 'offline', state.online ? 'Online' : 'Device offline');
         paintBotPill(state);
@@ -1474,7 +1435,6 @@
             el.dataset.quality = quality(state.latency_ms, 120, 300);
         }
         paintBattery(state);
-        paintOperatorsEstop(state);
         const sensors = state.telemetry && state.telemetry.sensors;
         headlightTelemetry(sensors);
         for (const el of $$('[data-telemetry]')) {
@@ -1543,7 +1503,6 @@
             const label = $('[data-role-label]');
             myRole = m.role || myRole;
             if (label && m.role) label.textContent = { owner: 'Owner', mod: 'Mod', operator: 'Operator', viewer: 'Viewer', watcher: 'Watching', queue: 'In the queue' }[m.role] || m.role;
-            for (const el of $$('[data-estop]')) el.hidden = !(m.role === 'owner' || m.role === 'mod' || m.role === 'operator');
             notice('');
             enableControls();
             paint(m.state);
@@ -1606,7 +1565,6 @@
     function stopDriving(text) {
         driving = false; watcher = true; ticket = null;
         announceControls();
-        for (const el of $$('[data-estop]')) el.hidden = true;
         const label = $('[data-role-label]');
         if (label) label.textContent = 'Watching';
         const bar = $('[data-drive-bar]');

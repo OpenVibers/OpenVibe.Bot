@@ -8,7 +8,7 @@ const surface = require('../server/web/surface');
 const profile = require('../server/profiles/looi.json');
 const { validate } = require('openvibe-sdk/ui-layout');
 
-const robot = { id: 'r1', name: 'Looi', profile_id: profile.id, access_policy: 'private', estop: { latched: false } };
+const robot = { id: 'r1', name: 'Looi', profile_id: profile.id, access_policy: 'private' };
 const allowed = Object.keys(profile.commands);
 const catalog = surface.controlsCatalog(profile);
 const defaults = surface.defaultLayout(catalog, 'phone');
@@ -30,7 +30,8 @@ assert.ok(/data-arrange-src="\/shared\/ov-arrange\.js\?v=abc"/.test(html), 'it n
 assert.ok(!/<script[^>]+ov-arrange\.js/.test(html), 'the editor is not loaded until Arrange is pressed');
 assert.ok(html.includes('id="ov-arrange-data"'), 'the catalog and layout reach the client as data');
 assert.ok(!html.includes('pad-prefs'), 'the old sliders-icon arrangement menu is gone');
-assert.ok(html.includes('data-ov-part="stop"') && html.includes('data-ov-part="stick"') && html.includes('data-ov-part="head"'), 'the real parts are marked');
+assert.ok(html.includes('data-ov-part="stop"') && html.includes('data-ov-part="stick"') && html.includes('data-ov-part="head"'), 'the real parts are marked, Stop hidden by default');
+assert.ok(/data-ov-part="stop"[^>]*hidden/.test(html) || /hidden[^>]*data-ov-part="stop"/.test(html), 'Stop is off until a layout adds it');
 assert.ok(html.includes('data-ov-surface="bot.controls"'), 'the panel names its surface');
 assert.ok(!html.includes('data-ov-arranged="true"'), 'without a stored layout the page keeps its own look (the editor applies the grid when opened)');
 
@@ -57,10 +58,10 @@ const overlay = render.renderPanel({
         signedIn: false, layoutSource: 'default', save: '/panel/r1/arrange', suggest: '/panel/r1/arrange/suggest', share: '/panel/r1/arrange/share',
     },
 });
-for (const id of ['pill', 'stick', 'slider', 'estop', 'more']) assert.ok(overlay.includes(`data-ov-part="${id}"`), `the overlay marks ${id}`);
-assert.ok(overlay.includes('data-ov-role-hidden="true"'), 'the watcher’s e-stop stays role-hidden until Drive');
+for (const id of ['pill', 'stick', 'slider', 'more']) assert.ok(overlay.includes(`data-ov-part="${id}"`), `the overlay marks ${id}`);
+assert.ok(!overlay.includes('data-ov-part="stop"'), 'the overlay has no Stop until a layout adds it');
 assert.ok(overlay.includes('id="ov-arrange-data"'), 'the overlay carries its catalog and layout too');
-assert.ok(overlayCatalog.parts.find((p) => p.id === 'estop').required, 'the overlay catalog makes the e-stop required');
+assert.strictEqual(overlayCatalog.parts.find((p) => p.id === 'stop').required, false, 'the overlay Stop is optional');
 
 // The default layouts are what the SDK would accept, the one check every surface shares.
 assert.deepEqual(validate(catalog, defaults), { ok: true, reasons: [] });

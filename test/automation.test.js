@@ -65,20 +65,12 @@ const world = require('../public/sim-world');
         assert.ok(audit.some((a) => a.kind === 'drive' && a.operator_subject === alex.subject && a.result === 'ack'), 'each step is on the record as the owner\'s');
     });
 
-    await check('one routine at a time; removing a running routine stops it; the e-stop stops one with its reason', async () => {
+    await check('one routine at a time; removing a running routine stops it', async () => {
         const long = (await api('POST', '/routines', alex, { name: 'Long', steps: 'forward 5' })).json.routine;
         assert.strictEqual((await api('POST', `/routines/${long.id}/run`, alex)).status, 202);
         assert.strictEqual((await api('POST', `/routines/${long.id}/run`, alex)).status, 409, 'already running');
         assert.strictEqual((await api('DELETE', `/routines/${long.id}`, alex)).status, 204);
         assert.ok(await poll(() => !routines.isRunning(robot.id)), 'it stopped');
-        const again = (await api('POST', '/routines', alex, { name: 'Again', steps: 'forward 5' })).json.routine;
-        await api('POST', `/routines/${again.id}/run`, alex);
-        await t.wait(400);
-        assert.strictEqual((await api('POST', '/estop', alex)).status, 200);
-        const stopped = await poll(async () => { const r = await routineOf(again.id); return r.last_result.startsWith('stopped') ? r : null; });
-        assert.ok(stopped, 'the e-stop stopped it');
-        assert.match(stopped.last_result, /stopped: .*(e-stop|estop|latched)/i);
-        assert.strictEqual((await api('POST', '/estop/clear', alex)).status, 200);
     });
 
     await check('a schedule runs when due and moves on; an "each time it comes online" routine runs on the robot\'s return', async () => {
@@ -98,7 +90,7 @@ const world = require('../public/sim-world');
     await check('someone else\'s robot: no routines, no webhooks, read or write', async () => {
         assert.strictEqual((await api('GET', '/routines', bob)).status, 403);
         assert.strictEqual((await api('POST', '/routines', bob, { name: 'x', steps: 'forward 1' })).status, 403);
-        assert.strictEqual((await api('POST', '/webhooks', bob, { url: 'https://hooks.example.com/x', events: ['bot.estop.set'] })).status, 403);
+        assert.strictEqual((await api('POST', '/webhooks', bob, { url: 'https://hooks.example.com/x', events: ['bot.command.refused'] })).status, 403);
         const bad = await api('POST', '/routines', alex, { name: 'Bad', steps: 'say hello' });
         assert.deepStrictEqual([bad.status, bad.json.code], [422, 'bot.invalid_routine']);
     });
@@ -106,10 +98,10 @@ const world = require('../public/sim-world');
     let secret; let hookId;
     await check('webhooks: https and public only, at most five, the secret once', async () => {
         for (const url of ['http://hooks.example.com/x', 'https://localhost/x', 'https://10.1.2.3/x', 'https://user:pw@hooks.example.com/x']) {
-            assert.strictEqual((await api('POST', '/webhooks', alex, { url, events: ['bot.estop.set'] })).status, 422, url);
+            assert.strictEqual((await api('POST', '/webhooks', alex, { url, events: ['bot.command.refused'] })).status, 422, url);
         }
         assert.strictEqual((await api('POST', '/webhooks', alex, { url: 'https://hooks.example.com/x', events: ['bot.robot.exploded'] })).status, 422);
-        const made = await api('POST', '/webhooks', alex, { url: 'https://hooks.example.com/robot', events: ['bot.estop.set', 'bot.estop.cleared'] });
+        const made = await api('POST', '/webhooks', alex, { url: 'https://hooks.example.com/robot', events: ['bot.command.refused', 'bot.robot.online'] });
         assert.strictEqual(made.status, 201, made.text);
         secret = made.json.secret;
         hookId = made.json.webhook.id;
@@ -122,7 +114,7 @@ const world = require('../public/sim-world');
 
     await check('an event writes a delivery with it; the sender signs it like Events and retries a failing receiver', async () => {
         await t.db.query("DELETE FROM robot_webhook_deliveries");
-        assert.strictEqual((await api('POST', '/estop', alex)).status, 200);
+        await t.domain.audit.record({ robotId: robot.id, subject: alex.subject, kind: 'drive', value: {}, result: 'refused', reason: 'test' });
         const rows = await t.db.many("SELECT * FROM robot_webhook_deliveries WHERE webhook_id = $1", [hookId]);
         assert.strictEqual(rows.length, 1, 'one delivery, written with the event');
         const got = [];
@@ -132,10 +124,10 @@ const world = require('../public/sim-world');
         const first = got[0];
         assert.strictEqual(first.url, 'https://hooks.example.com/robot');
         const body = JSON.parse(first.body);
-        assert.deepStrictEqual([body.type, body.robot_id], ['bot.estop.set', robot.id]);
+        assert.deepStrictEqual([body.type, body.robot_id], ['bot.command.refused', robot.id]);
         assert.ok(verifyDeliveryV2(first.body, first.headers, secret), 'the signature verifies with the hook\'s secret');
         assert.ok(!verifyDeliveryV2(first.body, first.headers, 'whsec_wrong'), 'and with nothing else');
-        assert.strictEqual(first.headers['X-OpenVibe-Event'], 'bot.estop.set');
+        assert.strictEqual(first.headers['X-OpenVibe-Event'], 'bot.command.refused');
         let row = await t.db.maybe('SELECT * FROM robot_webhook_deliveries WHERE id = $1', [rows[0].id]);
         assert.deepStrictEqual([row.state, row.attempts, row.last_status], ['pending', 1, 500]);
         assert.ok(Date.parse(row.due_at) > Date.now() + (BACKOFF_S[0] - 2) * 1000, 'retried after 30 s');
@@ -146,9 +138,9 @@ const world = require('../public/sim-world');
         row = await t.db.maybe('SELECT * FROM robot_webhook_deliveries WHERE id = $1', [rows[0].id]);
         assert.deepStrictEqual([row.state, row.attempts], ['failed', BACKOFF_S.length + 1], 'it gives up');
         answer = 204;
-        assert.strictEqual((await api('POST', '/estop/clear', alex)).status, 200);
+        await t.domain.audit.record({ robotId: robot.id, subject: alex.subject, kind: 'drive', value: {}, result: 'refused', reason: 'test again' });
         await sender.sendDue();
-        const cleared = await t.db.maybe("SELECT * FROM robot_webhook_deliveries WHERE webhook_id = $1 AND event_type = 'bot.estop.cleared'", [hookId]);
+        const cleared = await t.db.maybe("SELECT * FROM robot_webhook_deliveries WHERE webhook_id = $1 AND event_type = 'bot.command.refused' AND id <> $2", [hookId, rows[0].id]);
         assert.deepStrictEqual([cleared.state, cleared.last_status], ['delivered', 204]);
     });
 

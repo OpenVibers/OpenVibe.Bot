@@ -45,11 +45,10 @@ const { boot, check, done } = require('./helpers/app');
         assert.strictEqual((await t.call('GET', `/api/v1/robots/${robot.id}`, { user: alex })).json.robot.agent_control, true);
     });
 
-    await check('the agent reads the robot for its owner: online, the e-stop, and the steps this robot takes', async () => {
+    await check('the agent reads the robot for its owner: online, and the steps this robot takes', async () => {
         const r = await asAgent('GET', '/steps', alex);
         assert.strictEqual(r.status, 200, r.text);
         assert.strictEqual(r.json.online, true);
-        assert.strictEqual(r.json.estop.latched, false);
         assert.strictEqual(r.json.name, 'Desk rover');
         assert.ok(r.json.steps.includes('forward 2') && r.json.steps.includes('headlights #ff8800'), r.json.steps.join(', '));
         assert.deepStrictEqual([r.json.max_steps, r.json.max_seconds], [20, 30]);
@@ -92,12 +91,7 @@ const { boot, check, done } = require('./helpers/app');
         assert.match(long.json.detail, /30 seconds/);
     });
 
-    await check('the e-stop stops the agent with its reason; turning the switch off refuses it again', async () => {
-        assert.strictEqual((await t.call('POST', `/api/v1/robots/${robot.id}/estop`, { user: alex })).status, 200);
-        const r = await asAgent('POST', '/steps', alex, { steps: 'forward 0.3' });
-        assert.strictEqual(r.status, 200, r.text);
-        assert.match(r.json.result, /^stopped: /);
-        assert.strictEqual((await asAgent('GET', '/steps', alex)).json.estop.latched, true);
+    await check('turning the agent switch off refuses it again', async () => {
         assert.strictEqual((await post(`/robots/${robot.id}/agent`, alex, 'agent_control=off')).status, 303);
         refused(await asAgent('POST', '/steps', alex, { steps: 'forward 0.3' }), 403, 'bot.agent_not_allowed');
     });

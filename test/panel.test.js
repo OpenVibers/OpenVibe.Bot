@@ -1,6 +1,6 @@
 'use strict';
 // The five-minute path and the profile-rendered panel (plan T15 step 3): every profile's widgets render from
-// the profile alone, the e-stop is the owner's and an operator's, the signed-in pages answer as the gate does,
+// the profile alone, Stop is one optional part, the signed-in pages answer as the gate does,
 // and a `sim` robot is driven by the in-process simulator (telemetry, acks, the deadman).
 const assert = require('assert');
 const { boot, check, done } = require('./helpers/app');
@@ -8,7 +8,7 @@ const { loadProfiles } = require('../server/profiles');
 const { renderPanel, renderWidget, renderRobotsPage, renderPairingPage, camerasOf, esc } = require('../server/web/render');
 const { DEFAULT_ALLOW } = require('../server/domain');
 
-const robotFor = (profile, extra = {}) => ({ id: 'rob_1', name: 'Rover', profile_id: profile.id, estop: { latched: false }, ...extra });
+const robotFor = (profile, extra = {}) => ({ id: 'rob_1', name: 'Rover', profile_id: profile.id, ...extra });
 const allowedFor = (profile, role) => [...(DEFAULT_ALLOW[role] || []).filter((k) => k !== 'halt' && profile.commands[k]), ...(DEFAULT_ALLOW[role] ? ['halt'] : [])];
 
 (async () => {
@@ -21,7 +21,7 @@ const allowedFor = (profile, role) => [...(DEFAULT_ALLOW[role] || []).filter((k)
             for (const w of p.widgets) assert.ok(html.includes(`data-widget="${w.type}"`), `${p.id}: no ${w.type} widget`);
             for (const w of p.widgets.filter((x) => x.command)) {
                 assert.doesNotMatch(renderWidget(w, { profile: p, allowed_commands: allowedFor(p, 'owner') }), / disabled/, `${p.id}: ${w.type} is disabled for the owner`);
-                assert.match(renderWidget(w, { profile: p, allowed_commands: [] }), / disabled/, `${p.id}: ${w.type} is enabled with no allowed kind`);
+                assert.match(renderWidget(w, { profile: p, allowed_commands: [] }), /( disabled|aria-disabled="true")/, `${p.id}: ${w.type} is enabled with no allowed kind`);
             }
             assert.match(html, /<script src="\/panel\/panel\.js\?v=[0-9a-f]{10}" defer><\/script>/, 'the client by its content hash');
             assert.match(html, /<link rel="stylesheet" href="\/panel\/panel\.css\?v=[0-9a-f]{10}">/, 'the stylesheet by its content hash');
@@ -29,15 +29,14 @@ const allowedFor = (profile, role) => [...(DEFAULT_ALLOW[role] || []).filter((k)
         }
     });
 
-    await check('the e-stop is shown to the owner and an operator; only the owner gets the clear', () => {
+    await check('the panel has no red stop bar; Stop is one optional part, off by default', () => {
         const p = profiles.find((x) => x.id === 'sim.rover');
-        const html = (role) => renderPanel({ robot: robotFor(p, { estop: { latched: true } }), profile: p, role, allowed_commands: allowedFor(p, role) });
-        assert.ok(html('owner').includes('data-estop>') && html('owner').includes('data-estop-clear'));
-        assert.ok(html('operator').includes('data-estop>') && !html('operator').includes('data-estop-clear'));
-        for (const role of ['viewer', 'queue']) {
-            assert.ok(!html(role).includes('data-estop>') && !html(role).includes('data-estop-clear'), `${role} sees an e-stop button`);
-            assert.ok(html(role).includes('data-estop-banner data-latched="true"'), `${role} does not see the latched banner`);
+        const html = (role) => renderPanel({ robot: robotFor(p), profile: p, role, allowed_commands: allowedFor(p, role) });
+        for (const role of ['owner', 'operator', 'viewer', 'queue']) {
+            assert.ok(!html(role).includes('data-estop'), `${role} sees no stop bar`);
+            assert.ok(!/<header class="[^"]*stop/.test(html(role)), `${role} sees no stop header`);
         }
+        assert.ok(!html('owner').includes('data-stop'), 'the default panel has no Stop button');
         assert.match(renderWidget(p.widgets.find((w) => w.command), { profile: p, allowed_commands: [] }), /disabled/);
     });
 
@@ -89,7 +88,7 @@ const allowedFor = (profile, role) => [...(DEFAULT_ALLOW[role] || []).filter((k)
                 assert.ok(stick.length >= 1 && stick.every((a) => axes[a]), p.id);
                 assert.deepStrictEqual(attr(html, 'data-axes'), axes, p.id);
                 for (const a of Object.keys(axes)) assert.strictEqual(html.includes(`data-axis="${a}"`), !stick.includes(a), `${p.id}: ${a}`);
-                assert.ok(html.includes('data-stop'));
+                assert.ok(!html.includes('data-stop'), 'no Stop in the default drive pad');
                 assert.match(renderWidget(w, { profile: p, allowed_commands: [] }), /data-joystick="[^"]+" [^>]*aria-disabled="true"/);
             }
         }
@@ -185,7 +184,7 @@ const allowedFor = (profile, role) => [...(DEFAULT_ALLOW[role] || []).filter((k)
         assert.strictEqual(page.headers.get('cache-control'), 'no-store');
         const html = await page.text();
         for (const w of ['drive', 'camera', 'latency']) assert.ok(html.includes(`data-widget="${w}"`), w);
-        assert.ok(html.includes(`data-robot-id="${simId}"`) && html.includes('data-role="owner"') && html.includes('data-estop>'));
+        assert.ok(html.includes(`data-robot-id="${simId}"`) && html.includes('data-role="owner"'));
         const list = await (await get('/robots', alex)).text();
         assert.ok(list.includes(`/panel/${simId}`));
         await t.wait(50);
@@ -263,7 +262,7 @@ const allowedFor = (profile, role) => [...(DEFAULT_ALLOW[role] || []).filter((k)
     await check('a viewer member gets the panel with nothing to drive; a stranger on a queue robot gets the queue role', async () => {
         await t.call('POST', `/api/v1/robots/${simId}/operators`, { user: alex, body: { subject: carol.subject, role: 'viewer' } });
         const html = await (await get(`/panel/${simId}`, carol)).text();
-        assert.ok(html.includes('data-role="viewer"') && html.includes('data-allowed="[]"') && !html.includes('data-estop>'));
+        assert.ok(html.includes('data-role="viewer"') && html.includes('data-allowed="[]"'));
         const { robot } = await t.robot(alex, { name: 'Queue', access_policy: 'queue' });
         const q = await (await get(`/panel/${robot.id}`, bob)).text();
         assert.ok(q.includes('data-role="queue"'));

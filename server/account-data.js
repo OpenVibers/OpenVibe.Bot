@@ -10,7 +10,7 @@
  *                       (domain.devices.revoke): run jobs reference devices and are billing records, so the device
  *                       row stays, revoked, without its name.
  *   elsewhere           their operator role and queue place on other people's robots go; their id leaves other
- *                       robots' command history (operator_subject), e-stop marks, pairing codes and invitations.
+ *                       robots' command history (operator_subject), pairing codes and invitations.
  *   their machines      the worker machines they added (no robot, plan T14/T16) are exported, then revoked and kept
  *                       without a name or an owner (run jobs reference them).
  *   kept                run jobs they started: usage seconds reported to Billing, counted as retained.
@@ -25,7 +25,6 @@ const TABLES = [
     { table: 'robot_operators', subject: 'subject', file: 'operating.json', columns: ['robot_id', 'role', 'created_at'] },
     { table: 'robot_queue', subject: 'subject', file: null },
     { table: 'command_audit', subject: 'operator_subject', file: 'commands.json', columns: ['robot_id', 'kind', 'result', 'reason', 'at'], order: 'at', erase: anonymize },
-    { table: 'robots', subject: 'estop_by', file: null, erase: anonymize },
     { table: 'pairing_codes', subject: 'created_by', file: null, erase: anonymize },
     { table: 'robot_operators', subject: 'added_by', file: null, erase: anonymize },
     // Sole control names the person it admits and who granted it; the audit names the actor and the subject. Both are

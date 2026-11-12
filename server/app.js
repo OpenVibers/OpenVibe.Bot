@@ -178,11 +178,11 @@ function createApp(opts = {}) {
     };
     app.post('/internal/events', accountData.consumer({ secrets: config.events.secrets, send: accountSend, onEvent, log }));
 
-    // ── OpenVibe.Live's kill switch reaches the robot (Agent Streams S7) ──
-    // When an agent stream ends, Live e-stops the robot its channel is bound to. The call is loopback-only (nginx
-    // answers 404 for /internal/) and carries the deployment's shared secret; it can only latch the e-stop, never
-    // clear it. No person token, no chat token, and no route in the public API reaches this.
-    app.post('/internal/robots/:id/estop', express.json({ limit: '4kb' }), async (req, res) => {
+    // ── OpenVibe.Live's stop reaches the robot (Agent Streams S7) ──
+    // When an agent stream ends, Live sends the robot its own Stop (halt). The call is loopback-only (nginx answers
+    // 404 for /internal/) and carries the deployment's shared secret. No person token, no chat token, and no route
+    // in the public API reaches this.
+    app.post('/internal/robots/:id/stop', express.json({ limit: '4kb' }), async (req, res) => {
         const secret = String(process.env.BOT_KILL_SECRET || '');
         const given = String(req.get('x-ov-bot-kill') || '');
         const a = Buffer.from(given);
@@ -195,10 +195,11 @@ function createApp(opts = {}) {
         try {
             const robot = await domain.robots.get(id);
             if (!robot) return res.status(404).json({ error: 'bot.robot_not_found' });
-            if (!robot.estop_latched) await domain.estop.set(id, { latched: true, by: 'openvibe.live', principalKind: 'service' });
-            return res.json({ ok: true, robot_id: id, estop: { latched: true } });
+            await hub.operatorCommand(id, { kind: 'user', subject: robot.owner_subject }, robot.owner_subject,
+                { id: `live-stop-${Date.now()}`, kind: 'halt', value: {}, ms: 5000 });
+            return res.json({ ok: true, robot_id: id, stop: true });
         } catch (err) {
-            log.error('[Bot] the kill switch failed:', err && err.message);
+            log.error('[Bot] the stop switch failed:', err && err.message);
             return res.status(500).json({ error: 'bot.kill_failed' });
         }
     });

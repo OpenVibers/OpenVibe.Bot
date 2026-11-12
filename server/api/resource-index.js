@@ -6,7 +6,7 @@
  * (openvibe-sdk 0.41 sends it for a person's own resources; an owner is a person, so an agt_ owner matches nothing).
  * Neither is in a project, so a project filter matches nothing. A malformed filter is a 400.
  *
- * Kinds: bot.robot (rob_, state ready or estopped), then bot.machine (dev_: a person's own machine, the Desks plan's
+ * Kinds: bot.robot (rob_, state ready), then bot.machine (dev_: a person's own machine, the Desks plan's
  * hosts, state online or offline). A robot's device keeps no owner of its own and is its robot's, not listed here.
  * The cursor names the kind and id of the last one, so a page that ends among the robots goes on to the machines.
  */
@@ -31,7 +31,7 @@ const consoleOf = (baseUrl, path) => (/^https:\/\//.test(String(baseUrl || '')) 
 function robotSummary(row, baseUrl = null) {
     const summary = {
         id: row.id, kind: KIND, service: SERVICE,
-        name: row.name, state: row.estop_latched ? 'estopped' : 'ready',
+        name: row.name, state: 'ready',
         created_at: new Date(row.created_at).toISOString(),
         updated_at: new Date(row.updated_at).toISOString(),
     };
@@ -104,7 +104,7 @@ function router({ db, apiAuth, hub = null, baseUrl = null }) {
         const cur = filters.cursor;
         const out = [];
         if ((!filters.kind || filters.kind === KIND) && (!cur || cur.kind === KIND)) {
-            const rows = await db.many(`SELECT id, owner_subject, name, estop_latched, created_at, updated_at
+            const rows = await db.many(`SELECT id, owner_subject, name, created_at, updated_at
                 FROM robots WHERE ($1::text IS NULL OR id > $1) AND ($3::text IS NULL OR owner_subject = $3) ORDER BY id LIMIT $2`,
             [cur ? cur.id : null, filters.limit + 1, filters.owner]);
             out.push(...rows.map((row) => robotSummary(row, baseUrl)));

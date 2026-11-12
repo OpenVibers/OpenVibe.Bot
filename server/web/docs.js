@@ -89,7 +89,7 @@ ${kit.pageHead({ title: `Write a driver`, icon: 'code', back: { href: '/', label
 <section class="card"><h2>What a driver is</h2>
 <p>A driver is a <b>separate executable</b> the OpenVibe Link core starts. It can be written in any language. The two speak <b>JSON lines over stdin/stdout</b>: one JSON object per line, UTF-8, in each direction. The core never links driver code; the robot drivers are Python 3 because their hardware libraries are.</p>
 <p>Nothing but protocol lines may go to stdout. Send diagnostics to <b>stderr</b> (the Python runtime points file descriptor 1 at stderr and keeps a private copy for the protocol, because hardware libraries print).</p>
-<p>The Link core itself speaks a different protocol to openvibe.bot (<code>bot.device-message@1</code>, ${out(`${BLOB}/docs/protocol.md`, 'protocol.md')}); a driver never speaks it. The core is the one that pairs, holds the control link, applies the e-stop and the deadman, and forwards already-validated commands to a driver.</p></section>
+<p>The Link core itself speaks a different protocol to openvibe.bot (<code>bot.device-message@1</code>, ${out(`${BLOB}/docs/protocol.md`, 'protocol.md')}); a driver never speaks it. The core is the one that pairs, holds the control link, applies the deadman and the local Stop, and forwards already-validated commands to a driver.</p></section>
 
 <section class="card"><h2>The three connection kinds</h2>
 <p>The robot's profile carries a <code>kind</code>, which says where the Link runs relative to the robot:</p>
@@ -108,7 +108,7 @@ ${kit.pageHead({ title: `Write a driver`, icon: 'code', back: { href: '/', label
 <li>The core sends <code>heartbeat</code> every 250 ms and commands as they arrive; the driver answers each command with <code>ack</code> or <code>nack</code>, and sends <code>telemetry</code>, <code>event</code> and <code>video</code> whenever it has them.</li>
 <li>On shutdown the core sends <code>stop</code> and closes stdin; the driver stops everything and exits. After 2 s it is killed.</li>
 </ol>
-<p>A driver that exits is restarted with exponential backoff (1 s doubling to 30 s, reset after a minute of uptime). It starts stopped; if the e-stop or the local kill switch is latched, the core sends <code>estop</code> right after <code>hello</code>. A driver that does not describe itself within 15 s, or stops reading stdin, is killed.</p></section>
+<p>A driver that exits is restarted with exponential backoff (1 s doubling to 30 s, reset after a minute of uptime). It starts stopped; if a local Stop is latched, the core sends <code>stop</code> right after <code>hello</code>. A driver that does not describe itself within 15 s, or stops reading stdin, is killed.</p></section>
 
 <section class="card"><h2>Messages</h2>
 <p>Every message is one JSON object on one line with an <code>op</code> field. Command <code>value</code> has already been validated and clamped to the owner's limits by the core, and <code>deadline_ms</code> is relative to receipt and already capped.</p>
@@ -117,8 +117,6 @@ ${message('hello', 'start-up: the driver answers describe; then sets up unless p
 ${message('command', 'act, then answer ack or nack with the same id', '{ "op": "command", "id": "cmd_01J8Z4M2Q0R7T9YV3K6N8P1W2X", "kind": "drive", "value": { "throttle": 0.5, "steer": 0 }, "deadline_ms": 300 }')}
 ${message('heartbeat', 'the core clock; note the time for the deadman', '{ "op": "heartbeat", "t": 1728384000000 }')}
 ${message('stop', 'stop every actuator (idempotent, safe at any time)', '{ "op": "stop" }')}
-${message('estop', 'stop every actuator and refuse motion until resume', '{ "op": "estop" }')}
-${message('resume', 'accept motion again', '{ "op": "resume" }')}
 <h3>Driver → core</h3>
 ${message('describe', 'the driver names itself and its capabilities, before hardware', '{ "op": "describe", "driver": "my_arm", "version": "0.1.0", "protocol": 1, "capabilities": { "actuator": { "names": ["shoulder", "gripper"] } }, "motion_kinds": ["drive", "actuator"] }')}
 ${message('ready', 'setup finished, every actuator stopped', '{ "op": "ready" }')}
@@ -136,11 +134,11 @@ ${message('video', 'a frame written to a file; the core reads and encodes it', '
 <li>when its <b>stdin closes</b> (EOF), then exit;</li>
 <li>when a <b>motion command's deadline passes</b> without a newer command (its own timer to <code>deadline_ms</code>);</li>
 <li>when it has <b>not heard a heartbeat for 1 s</b> (and refuse motion with <code>no_heartbeat</code> until they return);</li>
-<li>on <code>stop</code>, <code>estop</code> and a <code>halt</code> command;</li>
+<li>on <code>stop</code> and a <code>halt</code> command;</li>
 <li>when its own sensors say so (for example a cliff or a pick-up).</li>
 </ul>
-<p><code>stop</code> must be idempotent and safe at any time, including before setup. <code>estop</code> latches: keep refusing motion until the core sends <code>resume</code>. The e-stop is the owner's and is latched across reconnects by Bot; a driver never clears it.</p>
-<p><b>A stop on the robot itself.</b> If your robot or bridge has its own stop (a button, a hotkey, a sensor you trust), send <code>{"op": "local_stop", "reason": "…"}</code> (Python: <code>self.local_stop("reason")</code>), or run <code>openvibe-link stop</code> from a terminal. That sets the Link's <i>local</i> latch: every actuator stops within a quarter second, the panel shows the robot as stopped on the robot, and the owner's remote clear cannot lift it. Only <code>openvibe-link resume</code> on that machine releases it, and the owner then clears the panel's e-stop. It works even when the Link is not answering and survives restarts. Handlers must not block — slow work (speech synthesis, file I/O) goes on a thread.</p></section>
+<p><code>stop</code> must be idempotent and safe at any time, including before setup. A local Stop that your own hardware holds stays local: keep refusing motion until it is released there.</p>
+<p><b>A stop on the robot itself.</b> If your robot or bridge has its own stop (a button, a hotkey, a sensor you trust), send <code>{"op": "local_stop", "reason": "…"}</code> (Python: <code>self.local_stop("reason")</code>), or run <code>openvibe-link stop</code> from a terminal. That sets the Link's <i>local</i> Stop: every actuator stops within a quarter second, the panel shows the robot as stopped on the robot, and only <code>openvibe-link resume</code> on that machine releases it. It works even when the Link is not answering and survives restarts. The tray's own Stop stays local. Handlers must not block — slow work (speech synthesis, file I/O) goes on a thread.</p></section>
 
 <section class="card"><h2>A minimal driver in Python</h2>
 <p>The Python runtime (<code>openvibe_plugin</code>, ${out(`${TREE}/plugins/sdk`, 'plugins/sdk')}) implements every safety rule above, so a driver only says how to move its hardware. <code>motion_kinds</code> is the set of kinds the runtime stops at their deadline.</p>
@@ -211,11 +209,6 @@ for line in sys.stdin:                    # EOF means the core is gone: stop and
         last = time.monotonic()
     elif m["op"] == "stop":
         stop()
-    elif m["op"] == "estop":
-        latched = True
-        stop()
-    elif m["op"] == "resume":
-        latched = False
 stop()`)}</section>
 
 <section class="card"><h2>Test it</h2>
@@ -295,7 +288,7 @@ const WEBHOOK_VERIFY = `const { verifyDeliveryV2 } = require('openvibe-sdk/event
 app.post('/robot-events', express.text({ type: 'application/json' }), (req, res) => {
     if (!verifyDeliveryV2(req.body, req.headers, process.env.ROBOT_WEBHOOK_SECRET)) return res.status(401).end();
     const event = JSON.parse(req.body);   // { id, type, robot_id, occurred_at, data }
-    if (event.type === 'bot.estop.set') console.log('robot', event.robot_id, 'stopped');
+    if (event.type === 'bot.robot.offline') console.log('robot', event.robot_id, 'is offline');
     res.status(204).end();
 });`;
 
@@ -317,7 +310,7 @@ const STEPS_CALL = `curl -X POST https://openvibe.bot/api/v1/robots/rob_…/step
 
 function renderAutomationPage({ config }) {
     const content = `
-${kit.pageHead({ title: `Routines, webhooks and your agent`, icon: 'code', back: { href: '/', label: 'Home' } , lede: `A robot can move without anyone holding the controls, tell your own server what happened to it, and take orders from your OpenVibe.Actor agent. Every one of these goes through the same gate as a person at the panel: the robot's limits, cooldowns and e-stop apply, and the audit records each command.` })}
+${kit.pageHead({ title: `Routines, webhooks and your agent`, icon: 'code', back: { href: '/', label: 'Home' } , lede: `A robot can move without anyone holding the controls, tell your own server what happened to it, and take orders from your OpenVibe.Actor agent. Every one of these goes through the same gate as a person at the panel: the robot's limits and cooldowns apply, and the audit records each command.` })}
 
 <section class="card" aria-labelledby="steps-h"><h2 id="steps-h">Steps</h2>
 <p>Routines and the agent both speak in steps, one per line, checked against the robot's own profile. A robot takes only what it has:</p>
@@ -328,7 +321,7 @@ ${kit.pageHead({ title: `Routines, webhooks and your agent`, icon: 'code', back:
 <li><code>headlights #ff8800</code>, <code>horn A4 0.3</code>, <code>lights off</code>, <code>pan 0.5 1</code>: an actuator or a camera axis by its name in the profile, with a value and how long to hold it.</li>
 <li><code>press horn</code>: one of its buttons.</li>
 </ul>
-<p>A held step (a motion or a tone) is re-sent inside the device's deadman window and released at its end. A refused step (the e-stop, the robot going offline, a cooldown) stops the rest, with the reason.</p></section>
+<p>A held step (a motion or a tone) is re-sent inside the device's deadman window and released at its end. A refused step (the robot going offline, a cooldown) stops the rest, with the reason.</p></section>
 
 <section class="card" aria-labelledby="routines-h"><h2 id="routines-h">Routines</h2>
 <p>On a robot's panel, under <b>Routines</b>, the owner names a routine, writes its steps and picks when it runs:</p>
@@ -341,13 +334,13 @@ ${kit.pageHead({ title: `Routines, webhooks and your agent`, icon: 'code', back:
 <p>A routine runs as the owner. One routine runs on a robot at a time; removing a running routine stops it. Limits: 60 steps, 60 seconds a step, 10 minutes in all. The same list is <code>GET|POST /api/v1/robots/:id/routines</code>, <code>POST …/routines/:rid/run</code> and <code>DELETE …/routines/:rid</code>, for the owner or a service with <code>bot.robot.manage</code>.</p></section>
 
 <section class="card" aria-labelledby="hooks-h"><h2 id="hooks-h">Webhooks</h2>
-<p>Under <b>Webhooks</b>, the owner adds up to five https addresses, each for some of the robot's events: <code>bot.robot.online</code>, <code>bot.robot.offline</code>, <code>bot.estop.set</code>, <code>bot.estop.cleared</code>, <code>bot.command.refused</code>. Each hook has its own secret (<code>whsec_…</code>), shown once when it is made.</p>
+<p>Under <b>Webhooks</b>, the owner adds up to five https addresses, each for some of the robot's events: <code>bot.robot.online</code>, <code>bot.robot.offline</code>, <code>bot.command.refused</code>. Each hook has its own secret (<code>whsec_…</code>), shown once when it is made.</p>
 <p>Bot posts <code>{ id, type, robot_id, occurred_at, data }</code>, signed the way OpenVibe.Events signs a delivery (<code>X-OpenVibe-Timestamp</code>, <code>X-OpenVibe-Signature-V2</code>), only to public addresses, never following a redirect. Anything but a 2xx is retried after 30 seconds, then 2, 10, 30 and 120 minutes. Check the signature before trusting a delivery:</p>
 ${code(WEBHOOK_VERIFY)}
 <p class="muted">The API is <code>GET|POST /api/v1/robots/:id/webhooks</code> (the POST answers the secret) and <code>DELETE …/webhooks/:hid</code>.</p></section>
 
 <section class="card" aria-labelledby="agent-h"><h2 id="agent-h">Your agent</h2>
-<p>On the panel, <b>Your agent</b> has one switch: <b>Let my OpenVibe.Actor agent drive this robot</b>. It is off until the owner turns it on. With it on, a task you give ${out('https://openvibe.actor', 'OpenVibe.Actor')}, such as "drive my rover forward for a second and turn its lights green", can see your robots (online, e-stop, battery, sensors) and run steps on this one, as you. It never acts for anyone else, and turning the switch off stops it at once.</p>
+<p>On the panel, <b>Your agent</b> has one switch: <b>Let my OpenVibe.Actor agent drive this robot</b>. It is off until the owner turns it on. With it on, a task you give ${out('https://openvibe.actor', 'OpenVibe.Actor')}, such as "drive my rover forward for a second and turn its lights green", can see your robots (online, battery, sensors) and run steps on this one, as you. It never acts for anyone else, and turning the switch off stops it at once.</p>
 <p>Your own token runs steps directly, and answers when they end:</p>
 ${code(STEPS_CALL)}
 <p class="muted"><code>GET /api/v1/robots/:id/steps</code> answers the robot's state and the step words it takes. A call takes at most 20 steps and 30 seconds; the agent's calls are refused with <code>403 bot.agent_not_allowed</code> while the switch is off.</p></section>

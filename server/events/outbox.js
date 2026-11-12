@@ -5,9 +5,7 @@
  *
  *   bot.robot.online      a device authenticated and is serving its robot
  *   bot.robot.offline     no heartbeat within 2 missed intervals + the grace window
- *   bot.estop.set         the e-stop latched (by the owner, an operator or the device)
- *   bot.estop.cleared     the owner cleared the latched e-stop
- *   bot.command.refused   the gate refused a command (role, allowlist, limits, policy, e-stop, cooldown)
+ *   bot.command.refused   the gate refused a command (role, allowlist, limits, policy, cooldown)
  *
  * emitIn(t, …) runs inside the transaction that makes the change, so an event exists if and only if its
  * change committed. The relay publishes with Bot's service token (events.event.publish) only when

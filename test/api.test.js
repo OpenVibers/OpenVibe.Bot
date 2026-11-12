@@ -109,7 +109,7 @@ const { boot, check, done } = require('./helpers/app');
 
     await check('an outbox event is written for a refused command (bot.command.refused)', async () => {
         const { robot } = await t.robot(alex);
-        await t.domain.audit.record({ robotId: robot.id, subject: alex.subject, kind: 'drive', value: {}, result: 'refused', reason: 'bot.estop_latched' });
+        await t.domain.audit.record({ robotId: robot.id, subject: alex.subject, kind: 'drive', value: {}, result: 'refused', reason: 'bot.command_not_allowed' });
         const rows = await t.outboxRows('bot.command.refused');
         assert.ok(rows.length >= 1);
         assert.strictEqual(rows[rows.length - 1].source, 'bot');

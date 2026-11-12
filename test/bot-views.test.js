@@ -1,6 +1,6 @@
 'use strict';
 // The embeddable panel's three views (?mode=panel|overlay|compact): the full panel as before, a transparent
-// overlay that draws only the live controls (the first stick, the first slider, the e-stop and "more"), and one
+// overlay that draws only the live controls (the first stick, the first slider, Drive and "more"), and one
 // row for a narrow card. The controls come from the robot's own profile; a host can change the view by message.
 const assert = require('assert');
 const fs = require('fs');
@@ -20,7 +20,7 @@ const DRIVE = {
         { type: 'head', label: 'Head', order: 2, command: { kind: 'actuator', names: ['head', 'horn'] } },
     ],
 };
-const ROBOT = { id: 'rob_view1', name: 'LOOI', profile_id: 'looi.demo', estop: { latched: false } };
+const ROBOT = { id: 'rob_view1', name: 'LOOI', profile_id: 'looi.demo' };
 const render = (over = {}) => renderPanel({
     robot: ROBOT, profile: DRIVE, role: 'owner', allowed_commands: ['drive', 'actuator', 'halt'],
     mode: 'embed', signedIn: true, parentOrigins: ['https://openvibe.live'], ...over,
@@ -32,16 +32,16 @@ const render = (over = {}) => renderPanel({
         assert.ok(html.includes('<html lang="en" class="embed-page bot-mode-overlay" data-bot-view="overlay" data-bot-min-width="280" data-bot-min-height="196">'));
         assert.ok(html.includes('class="embed-page bot-mode-overlay"'));
         assert.ok(html.includes('data-bot-overlay'));
-        assert.ok(!html.includes('class="topbar"') && !html.includes('data-estop-banner') && !html.includes('class="widget-camera"'));
+        assert.ok(!html.includes('class="topbar"') && !html.includes('class="panel-top"') && !html.includes('class="widget-camera"'));
         assert.ok(html.includes('data-bot-pill') && html.includes('data-bot-state') && html.includes('>LOOI<'));
         assert.ok(html.includes('data-joystick') && html.includes('data-actuator="head"'));
-        assert.ok(html.includes('data-estop') && html.includes('data-bot-more'));
+        assert.ok(!html.includes('data-estop') && html.includes('data-bot-more'), 'no stop until a layout adds one');
         const hits = html.match(/data-bot-hit/g) || [];
-        assert.ok(hits.length >= 5, `pill, stick, slider, e-stop and more each report a hit box (${hits.length})`);
+        assert.ok(hits.length >= 4, `pill, stick, slider and more each report a hit box (${hits.length})`);
         assert.ok(!html.includes('data-hold=') && !html.includes('data-stop'), 'no pad buttons or stop row in the overlay');
     });
 
-    await check('overlay: the controls a robot has decide what it draws (first stick, first slider, e-stop by role)', () => {
+    await check('overlay: the controls a robot has decide what it draws (first stick, first slider, Drive by role)', () => {
         const ptz = {
             id: 'camera.demo', name: 'Camera',
             commands: { ptz: { axes: { pan: [-1, 1], tilt: [-1, 1], zoom: [-1, 1] } }, actuator: { names: { zoom: { type: 'number', range: [0, 3] } } } },
@@ -52,10 +52,10 @@ const render = (over = {}) => renderPanel({
         };
         const cam = renderPanel({ robot: { ...ROBOT, id: 'rob_cam1' }, profile: ptz, role: 'watcher', allowed_commands: [], mode: 'embed', view: 'overlay' });
         assert.ok(cam.includes('data-ptz-stick') && cam.includes('data-actuator="zoom"'));
-        assert.ok(!cam.includes('data-estop'), 'a signed-in watcher has no e-stop and no Drive here');
+        assert.ok(!cam.includes('data-estop') && !cam.includes('data-drive'), 'a signed-in watcher has no Stop and no Drive here');
         const anon = renderPanel({ robot: { ...ROBOT, id: 'rob_cam1' }, profile: ptz, role: 'watcher', allowed_commands: [], mode: 'embed', view: 'overlay', signedIn: false });
         assert.ok(/<button[^>]*class="bot-drive bot-control"[^>]*data-drive data-drive-bar data-bot-hit/.test(anon), 'the anonymous embed takes the controls with Drive (ask 353)');
-        assert.ok(/<button[^>]*class="bot-estop bot-control"[^>]*data-estop[^>]*hidden>/.test(anon), 'its e-stop waits, hidden, for the join');
+        assert.ok(!anon.includes('data-estop'), 'a watcher has no Stop: the palette adds it to a layout, not to this one');
         assert.ok(anon.includes('class="bot-notice bot-control" data-notice data-bot-hit role="alert" hidden'), 'and the page\'s answer has a line');
         assert.ok(cam.includes('data-bot-more'), 'but there is always a way to the full panel');
         const hornOnly = {
@@ -64,21 +64,21 @@ const render = (over = {}) => renderPanel({
         };
         const quiet = renderPanel({ robot: ROBOT, profile: hornOnly, role: 'owner', allowed_commands: ['actuator'], mode: 'embed', view: 'overlay' });
         assert.ok(!quiet.includes('data-actuator') && !quiet.includes('data-joystick'), 'a tone is not a slider, and there is no stick');
-        assert.ok(quiet.includes('data-estop') && quiet.includes('data-bot-more'));
+        assert.ok(!quiet.includes('data-estop') && quiet.includes('data-bot-more'));
     });
 
-    await check('compact: one row with the pill, a 96 px stick, the slider across, the e-stop and more', () => {
+    await check('compact: one row with the pill, a 96 px stick, the slider across and more', () => {
         const html = render({ view: 'compact' });
         assert.ok(html.includes('class="embed-page bot-mode-compact" data-bot-view="compact" data-bot-min-width="320" data-bot-min-height="112"'));
         assert.ok(html.includes('class="bot-compact"') && !html.includes('data-bot-overlay'));
         assert.ok(html.includes('data-bot-pill') && html.includes('data-joystick') && html.includes('data-actuator="head"'));
-        assert.ok(html.includes('data-estop') && html.includes('data-bot-more'));
+        assert.ok(!html.includes('data-estop') && html.includes('data-bot-more'), 'no stop until a layout adds one');
     });
 
     await check('panel is the default view: an unknown mode falls back to the full panel and its old markup', () => {
         const html = render({});
         assert.ok(html.includes('data-bot-view="panel"') && html.includes('data-bot-min-width="320"') && html.includes('data-bot-min-height="480"'));
-        assert.ok(html.includes('data-estop-banner') && html.includes('class="widgets"'));
+        assert.ok(html.includes('class="panel-top"') && html.includes('class="widgets"'));
         const weird = render({ view: '../../etc/passwd' });
         assert.ok(weird.includes('data-bot-view="panel"') && weird.includes('class="widgets"'));
     });

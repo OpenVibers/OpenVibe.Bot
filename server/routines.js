@@ -3,7 +3,7 @@
 /**
  * Robot routines (plan T15 "schedules and automations"): an owner writes a robot's steps in plain lines, Bot runs them
  * on demand, on a schedule, or when the robot comes online. Every step passes the same gate as a person's command, as
- * the robot's owner (hub.operatorCommand): the robot's limits, cooldowns and e-stop apply, and the audit has each one.
+ * the robot's owner (hub.operatorCommand): the robot's limits and cooldowns apply, and the audit has each one.
  *
  *   parseSteps(text, profile) → { steps } or throws BotError 422 with the line that is wrong. One step per line:
  *     forward [seconds] [speed]     back [s] [speed]     left [s] [speed]     right [s] [speed]     stop
@@ -18,7 +18,7 @@
  *     POST /api/v1/robots/:id/steps); at most AGENT_MAX_STEPS steps and AGENT_MAX_S seconds, nothing stored.
  *
  * A held step (a motion or a tone) is re-sent every HOLD_MS so the device's deadman never stops it early, and a zero
- * drive ends it. A refused or failed command stops the routine there (an e-stop, the robot going offline, a cooldown
+ * drive ends it. A refused or failed command stops the routine there (the robot going offline, a cooldown
  * the owner set too long); the reason is kept in last_result. One routine runs per robot at a time.
  */
 const { BotError, prefixedId, iso, text } = require('./util');
