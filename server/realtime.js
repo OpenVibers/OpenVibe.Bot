@@ -732,7 +732,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     }
 
     // A device reports its own latch. It may latch a robot it is attached to; it never clears one — latched:false
-    // is recorded as the device's report only, and the owner's latch stands until the owner clears it.
+    // is recorded as the device's report only, and Bot's panel latch stands until the owner or a Mod clears it.
     async function onEstopState(conn, msg) {
         const attached = deviceRobotIds(conn.device);
         const latched = !!msg.latched;
@@ -798,6 +798,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             case 'command': return onOperatorCommand(conn, msg);
             case 'estop': return onOperatorEstop(conn, true);
             case 'estop_clear': return onOperatorEstop(conn, false);
+            case 'operators': return onOperatorsAction(conn, msg);
             case 'give_back': return onGiveBack(conn);
             default: return sendError(conn, 'bot.unknown_message', `unknown type ${msg.type}`);
         }
@@ -825,6 +826,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             robot: domain.present.robot(robot), role, profile,
             allowed_commands: domain.control.allowedFor(robot, role, profile),
             state: await robotState(robotId, conn.subject),
+            operators: await operatorsState(robotId),
             ...(next ? { ticket: next.ticket } : {}),
         });
     }
@@ -883,6 +885,10 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             return sendFrame(conn, 'command_result', { id, result: 'refused', code: 'bot.device_offline', reason: 'the device is offline' });
         }
         lastRobotCommandAt.set(robotId, now());
+        // The Operators card's activity is Bot's own stamp: the subject, the channel and when. A lights command is
+        // non-motion and is shown as such. This is display truth; the gate above is what admitted the command.
+        noteOperatorActivity(robotId, conn.subject, decision.kind);
+        queueOperatorsState(robotId);
         // A headlight is not motion: its short deadline must not renew a drive/head movement lease.
         if (decision.deadlineMs != null && decision.kind !== 'headlight') movementLeaseUntil.set(robotId, Math.max(movementLeaseUntil.get(robotId) || 0, decision.deadlineMs));
         const p = { id: deviceCmdId, opId: id, key, deviceId: device.device.id, conn, robotId, subject: conn.subject, operatorKind: conn.principal.kind, role: decision.role, kind: decision.kind, value: decision.value, at: now(), timer: null };
@@ -1109,11 +1115,34 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         }
     }
 
-    /** `give_back`: an owner or operator who took over a queue turn hands it back now (it resumes with its time). */
+    /**
+     * One Operators card action (/control `operators`): toggle an operator, grant/clear sole control, promote or
+     * demote a Mod. The domain re-reads the actor's role and enforces the limits; the session is only a transport.
+     * Every path answers with an `operators_result` (never a silent drop), and an accepted change is broadcast at once.
+     */
+    async function onOperatorsAction(conn, msg) {
+        if (!conn.robotId) return sendError(conn, 'bot.not_joined', 'join a robot first');
+        const action = String(msg.action || '');
+        const reply = (ok, fields = {}) => sendFrame(conn, 'operators_result', { id: msg.id != null ? String(msg.id) : null, action, ok, ...fields });
+        try {
+            const result = await domain.operators.act({
+                robotId: conn.robotId, actorSubject: conn.subject, action,
+                subject: msg.subject != null ? String(msg.subject).slice(0, 64) : null,
+                enabled: msg.on === true ? true : msg.on === false ? false : null,
+                role: msg.role != null ? String(msg.role) : null,
+            });
+            await queueOperatorsState(conn.robotId, true);
+            return reply(true, result);
+        } catch (e) {
+            return reply(false, { code: e.code || 'bot.forbidden', reason: e.detail || e.message });
+        }
+    }
+
+    /** `give_back`: an owner, Mod or operator who took over a queue turn hands it back now (it resumes with its time). */
     async function onGiveBack(conn) {
         if (!conn.robotId) return sendError(conn, 'bot.not_joined', 'join a robot first');
         const role = await domain.members.roleOf(conn.robotId, conn.subject);
-        if (!['owner', 'operator'].includes(role)) return sendError(conn, 'bot.forbidden', 'only the owner or an operator takes over and gives back');
+        if (!['owner', 'mod', 'operator'].includes(role)) return sendError(conn, 'bot.forbidden', 'only the owner, a Mod or an operator takes over and gives back');
         await domain.queue.giveBack(conn.robotId);
         broadcast(conn.robotId);
         return undefined;
@@ -1122,17 +1151,26 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     async function onOperatorEstop(conn, latched) {
         if (!conn.robotId) return sendError(conn, 'bot.not_joined', 'join a robot first');
         const robotId = conn.robotId;
+        let role = null;
         try {
+            role = await domain.members.roleOf(robotId, conn.subject);
             if (latched) {
-                const role = await domain.members.roleOf(robotId, conn.subject);
-                if (!['owner', 'operator'].includes(role)) return sendError(conn, 'bot.forbidden', 'only an operator may set the e-stop');
+                if (!['owner', 'mod', 'operator'].includes(role)) return sendError(conn, 'bot.forbidden', 'only an operator, a Mod or the owner may set the panel e-stop');
                 await domain.estop.set(robotId, { latched: true, by: conn.subject, principalKind: conn.principal.kind });
             } else {
-                await domain.estop.clear(robotId, conn.subject);   // owner only; throws otherwise
+                if (!['owner', 'mod'].includes(role)) return sendError(conn, 'bot.forbidden', 'only the owner or a Mod clears the panel e-stop');
+                // This clears the panel latch only. A device's local STOP latch (device_estop.local) and ARM stay on
+                // the tray; nothing here sends a STOP clear or an ARM to the machine.
+                await domain.estop.clear(robotId, conn.subject, role);
             }
+            await domain.operators.audit({ robotId, actorSubject: conn.subject, actorKind: conn.principal.kind,
+                actorRole: role, action: latched ? 'estop.trip' : 'estop.clear', value: { latched: !!latched } });
         } catch (e) { return sendError(conn, e.code || 'bot.forbidden', e.detail || e.message); }
         await pushEstop(robotId, latched, conn.subject);
         broadcast(robotId);
+        await queueOperatorsState(robotId, true);
+        sendFrame(conn, 'operators_result', { action: latched ? 'estop.trip' : 'estop.clear', ok: true, latched: !!latched });
+        return undefined;
     }
 
     // ── Watcher side (read-only, anonymous) ───────────────────────────────────────────────────────────
@@ -1233,12 +1271,80 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     function closeDevice(deviceId, reason = 'revoked') { const c = deviceConns.get(deviceId); if (c) { try { c.ws.close(4003, reason); } catch { /* gone */ } dropDevice(c); } }
     function deviceState(deviceId) { const c = deviceConns.get(deviceId); return c ? { online: c.online, rtt_ms: c.rttMs, telemetry: c.telemetry, status: c.status } : { online: false, rtt_ms: null, telemetry: null, status: null }; }
 
-    // A device may report battery the legacy way (a 0..1 fraction) or as OpenVibe Link does ({volts, percent}).
+    // A device may report battery the legacy way (a 0..1 fraction) or the Node's top-level percent (0..100), or as
+    // OpenVibe Link does ({volts, percent}). The LOOI tray's p7_battery.pct is a last resort, marked provisional.
+    // A missing reading is null, never 0: the panel shows a dash and "unknown" rather than a made-up empty battery.
+    const clampPct = (v) => Math.min(100, Math.max(0, Number(v)));
     function batteryFraction(telemetry) {
         const b = telemetry ? telemetry.battery : null;
-        if (Number.isFinite(b)) return b;
-        if (b && typeof b === 'object' && Number.isFinite(b.percent)) return Math.min(1, Math.max(0, b.percent / 100));
+        if (Number.isFinite(b)) return b >= 0 && b <= 1 ? b : clampPct(b) / 100;
+        if (b && typeof b === 'object' && Number.isFinite(b.percent)) return clampPct(b.percent) / 100;
+        const p7 = telemetry && telemetry.sensors && telemetry.sensors.p7_battery;
+        if (p7 && typeof p7 === 'object' && Number.isFinite(p7.pct)) return clampPct(p7.pct) / 100;
         return null;
+    }
+
+    // ── The Operators card (Maticus's 2026-11-12 LOOI spec) ─────────────────────────────────────────
+    // Bot stamps each admitted command itself, so the card's activity is Bot's own truth even before the tray
+    // publishes sensors.p7_commander. In memory: a restart loses "1s ago", never an authority or an audit row.
+    const operatorActivity = new Map();   // robot_id → Map(subject → { last, drive_at, head_at, lights_at })
+    const operatorsSentAt = new Map();    // robot_id → when the last operators_state went out (ms)
+    const operatorsTimer = new Map();     // robot_id → a pending throttled broadcast
+    const channelOf = (kind) => (kind === 'drive' ? 'drive' : kind === 'actuator' ? 'head' : kind === 'headlight' ? 'lights'
+        : kind === 'button' ? 'button' : kind === 'say' ? 'say' : kind === 'display' ? 'display' : kind === 'ptz' ? 'ptz' : 'other');
+    function noteOperatorActivity(robotId, subject, kind) {
+        if (!subject) return;
+        let bySubject = operatorActivity.get(robotId);
+        if (!bySubject) { bySubject = new Map(); operatorActivity.set(robotId, bySubject); }
+        const at = now();
+        const channel = channelOf(kind);
+        const rec = bySubject.get(subject) || { last: null, drive_at: null, head_at: null, lights_at: null };
+        rec.last = { kind, channel, at: iso(at) };
+        if (channel === 'drive') rec.drive_at = iso(at);
+        if (channel === 'head') rec.head_at = iso(at);
+        if (channel === 'lights') rec.lights_at = iso(at);
+        bySubject.set(subject, rec);
+        if (bySubject.size > 256) bySubject.delete(bySubject.keys().next().value);
+    }
+    function operatorActivityOf(robotId) {
+        const out = {};
+        for (const [subject, rec] of operatorActivity.get(robotId) || []) out[subject] = rec;
+        return out;
+    }
+    async function operatorsState(robotId) {
+        const [members, policy] = await Promise.all([domain.operators.list(robotId), domain.operators.policy(robotId)]);
+        return {
+            sole: policy.sole_subject ? { subject: policy.sole_subject, by: policy.sole_by, at: policy.sole_at } : null,
+            members: members.map((m) => ({ subject: m.subject, role: m.role, enabled: m.enabled !== false })),
+            viewers: members.filter((m) => m.role === 'viewer').length,
+            activity: operatorActivityOf(robotId),
+            now: iso(now()),
+        };
+    }
+    function sendOperatorsState(robotId) {
+        operatorsTimer.delete(robotId);
+        operatorsSentAt.set(robotId, now());
+        const subs = subsByRobot.get(robotId);
+        if (!subs || !subs.size) return;
+        operatorsState(robotId).then((state) => {
+            for (const sub of [...subs]) if (!sub.watcher) sendFrame(sub, 'operators_state', { operators: state });
+        }).catch((e) => log.warn(`[Bot] operators for ${robotId}: ${e.message}`));
+    }
+    /** Activity is broadcast at most twice a second; a real authority change forces one at once. */
+    function queueOperatorsState(robotId, force = false) {
+        if (force) {
+            const pending = operatorsTimer.get(robotId);
+            if (pending) { clearTimeout(pending); operatorsTimer.delete(robotId); }
+            return sendOperatorsState(robotId);
+        }
+        const since = now() - (operatorsSentAt.get(robotId) || 0);
+        if (since >= 500) return sendOperatorsState(robotId);
+        if (!operatorsTimer.has(robotId)) {
+            const t = setTimeout(() => sendOperatorsState(robotId), Math.max(0, 500 - since));
+            if (t.unref) t.unref();
+            operatorsTimer.set(robotId, t);
+        }
+        return undefined;
     }
 
     async function robotState(robotId, subjectForQueue = null) {
@@ -1286,6 +1392,9 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         const sensors = t && t.sensors && typeof t.sensors === 'object' ? t.sensors : {};
         const picked = {};
         for (const k of readouts) if (Object.prototype.hasOwnProperty.call(sensors, k)) picked[k] = sensors[k];
+        // The tray's provisional battery reading rides along so the panel can say "provisional, at connect" to a
+        // watcher too. It is a reading, never a command.
+        if (sensors.p7_battery !== undefined) picked.p7_battery = sensors.p7_battery;
         // A simulated rover's pose and lights draw its camera (public/sim-view.js); a real device has no `sim`.
         const sim = t && t.sim && typeof t.sim === 'object' && t.sim.pose ? simView(t.sim) : null;
         return {
@@ -1356,6 +1465,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         /** A one-time ticket for the embedded panel's Drive (POST /panel/:id/ticket), or null. */
         issueControlTicket(principal, robotId) { return tickets.issue(principal, robotId); },
         isOnline, deviceState, sendToDevice, sendToRobotDevices, broadcast, closeDevice, robotState, refreshConfig, pushEstop, closeWatchers, dropSubject, operatorCommand,
+        operatorActivity: operatorActivityOf,
         machineCommand, machineScreen, computerOf, machineChanged,
         // Network's grant relay and agent tasks (Contracts 0.409.0): close every relay under a revoked grant, and
         // hand an agent.task to the machine it names.

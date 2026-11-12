@@ -86,7 +86,7 @@ const LLMS_PAGES = [
     {
         path: '/', title: 'OpenVibe.Bot — drive your robot from any browser',
         note: 'What Bot is, and how a robot goes from added to driving.',
-        text: 'OpenVibe.Bot is the open control panel for robots. Add a robot and pick its profile, pair it by pasting one command on the robot\'s computer, then drive it from any browser. The panel lays its controls out from the robot\'s profile: a touch joystick, the keyboard, a gamepad, buttons and sliders, with a latency meter. Every command passes one gate with roles, per-robot limits, cooldowns and a turn budget, and a latched emergency stop that only the owner clears; a stop pressed on the robot itself holds until it is released there. An owner can add people by username as operators or viewers, or open a queue where visitors take turns. A simulated rover runs inside Bot, so the whole panel can be tried before any hardware exists.',
+        text: 'OpenVibe.Bot is the open control panel for robots. Add a robot and pick its profile, pair it by pasting one command on the robot\'s computer, then drive it from any browser. The panel lays its controls out from the robot\'s profile: a touch joystick, the keyboard, a gamepad, buttons and sliders, with a latency meter. Every command passes one gate with roles, per-robot limits, cooldowns and a turn budget, and a latched emergency stop that the owner or a Mod clears (the panel latch only; the tray\'s STOP and ARM stay local); a stop pressed on the robot itself holds until it is released there. An owner can add people by username as operators or viewers, or open a queue where visitors take turns. A simulated rover runs inside Bot, so the whole panel can be tried before any hardware exists.',
     },
     {
         path: '/try', title: 'Try the panel with a simulated rover',
@@ -936,9 +936,14 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
                 ? null
                 : domain.video.live(robot.id).catch((e) => { log.warn(`[Bot] live video for ${robot.id}: ${e.message}`); return null; }),
         ]);
-        // The owner's People card: every member but the owner, with Network's name for each. A Network that
-        // does not answer leaves the subject id and a note (see renderPanel) instead of failing the panel.
-        const people = role === 'owner' && mode === 'page' ? await peopleFor(robot) : null;
+        // The People and Operators cards: every member, with Network's name where it answers. A Network that does
+        // not answer leaves the subject id and a note (see renderPanel) instead of failing the panel. Anonymous
+        // watchers have no roster.
+        let roster = null;
+        if (role !== 'watcher') {
+            try { roster = await rosterFor(robot); } catch (e) { log.warn(`[Bot] roster for ${robot.id}: ${e.message}`); }
+        }
+        const people = role === 'owner' && mode === 'page' && roster ? roster.members.filter((m) => m.role !== 'owner') : null;
         // The owner's routines and webhooks (server/routines.js, server/webhooks.js), with each hook's last delivery.
         let automation = null;
         if (role === 'owner' && mode === 'page' && routines && webhooks) {
@@ -997,6 +1002,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         }
         res.type('html').send(renderPanel({
             robot: presentForPage(robot), profile, role, mode, view, signedIn, streaming, people, signaling_url,
+            operators: roster, viewer: req.viewer ? { subject: req.viewer.subject, username: req.viewer.username || null, name: req.viewer.name || null } : null,
             profileForm, automation, limitsInfo,
             // The page that frames the embed may hand it a Drive ticket (public/panel.js); the owner's page offers to put
             // the panel under their Live stream.
@@ -1067,18 +1073,31 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         return res.redirect(303, `/panel/${robot.id}`);
     }));
 
-    /** The non-owner members with their Network names, or null names when Network cannot be asked. */
-    async function peopleFor(robot) {
-        const members = (await domain.members.list(robot.id)).filter((m) => m.subject !== robot.owner_subject);
+    /** The Operators card's initial roster: every member, Network's names, the sole-control policy and live activity. */
+    async function rosterFor(robot) {
+        let members = await domain.members.list(robot.id);
+        if (!members.some((m) => m.role === 'owner')) {
+            members = [{ subject: robot.owner_subject, role: 'owner', enabled: true, added_by: null, created_at: null }, ...members];
+        }
         let names = new Map();
         if (members.length && identity) {
             try { names = await identity.names(members.map((m) => m.subject)); }
             catch (e) { log.warn(`[Bot] names for ${robot.id}: ${e.message}`); }
         }
-        return members.map((m) => {
+        const policy = await domain.operators.policy(robot.id);
+        const rows = members.map((m) => {
             const n = names.get(m.subject);
-            return { subject: m.subject, role: m.role, username: n ? n.username : null, display_name: n ? n.display_name : null };
+            return {
+                subject: m.subject, role: m.role, enabled: m.role === 'owner' ? true : m.enabled !== false,
+                username: n ? n.username : null, display_name: n ? n.display_name : null,
+            };
         });
+        return {
+            sole: policy.sole_subject ? { subject: policy.sole_subject, by: policy.sole_by, at: policy.sole_at } : null,
+            members: rows, viewers: rows.filter((m) => m.role === 'viewer').length,
+            activity: hub && hub.operatorActivity ? hub.operatorActivity(robot.id) : {},
+            now: new Date().toISOString(),
+        };
     }
 
     r.get('/panel/:id', page(async (req, res) => {

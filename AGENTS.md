@@ -93,7 +93,7 @@ migration; add a new number. The command audit is pruned after 30 days; job usag
 - User tokens (SSO session / `ov_token` cookie) and service tokens are both accepted on `/api/v1`;
   a **node token is refused** on person and service routes. A person acts only as themself — naming
   anyone else is refused, never ignored.
-- The **owner** can list a robot, add/remove operators, edit limits, clear the latched e-stop, set
+- The **owner** can list a robot, add/remove operators, edit limits, clear the latched panel e-stop, set
   the agent switch and flip streaming toggles. An operator drives within limits and cooldowns. An
   open-queue robot gives a viewer a turn, and leaving promotes the next person at once.
 - `svc:actor` may read/drive **only** the owner's robot and only with `robots.agent_control` on;
@@ -101,7 +101,7 @@ migration; add a new number. The command audit is pruned after 30 days; job usag
 - A machine runs only its owner's jobs: the dispatcher compares the job requester with the machine
   owner and refuses anyone else with `bot.not_owner`, whatever the placer chose.
 - Every command, allowed or refused, is audited. Pairing codes are one-time; `halt` always passes;
-  only the owner clears the e-stop.
+  the owner or a Mod clears the panel e-stop, while the tray's STOP latch and ARM stay local.
 
 ## Frontend loading model
 
@@ -143,8 +143,8 @@ webhooks, jobs/metering, the embed/watch limits, the simulator and the ONVIF cam
 
 ## Pitfalls
 
-- **The e-stop is latched and only the owner clears it**; `halt` always passes the gate and a layout
-  cannot hide Stop or the overlay e-stop.
+- **The panel e-stop is latched; the owner or a Mod clears it** (a Mod never clears the tray's local STOP/ARM);
+  `halt` always passes the gate and a layout cannot hide Stop or the overlay e-stop.
 - **Never widen the owner fence.** A person naming another subject, a service, a node token or
   `svc:actor` without the owner's switch must be refused.
 - **Device credentials are hashed and read-once.** Do not add a readable copy or a query-string form.

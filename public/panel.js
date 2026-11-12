@@ -274,7 +274,7 @@
     let allowed = JSON.parse(main.dataset.allowed || '[]');
     let ws = null;
     let joined = false;
-    let myRole = null;   // the role the joined frame gave this panel (owner, operator, viewer, queue)
+    let myRole = main.dataset.role && main.dataset.role !== 'watcher' ? main.dataset.role : null;   // the role the joined frame gave this panel (owner, mod, operator, viewer, queue)
     let retry = 0;
     let gone = false;          // refused for good (no access): no reconnect
     // The embeddable panel's two compact views (?mode=overlay|compact): only the live controls, over a picture or
@@ -1143,6 +1143,136 @@
         $('[data-headlight-off]', headlightEl).addEventListener('click', () => sendHeadlight(false));
         paintHeadlight();
     }
+    // ── Operators (Maticus's 2026-11-12 LOOI spec) ──────────────────────────────────────────────────
+    // The server draws the roster. This keeps it current from `operators_state` (Bot's own stamps for activity),
+    // sends a toggle / sole / role / panel E-STOP, and shows the refusal in the same notice line as a command's.
+    const opsCard = $('[data-operators]');
+    const opsNames = new Map();
+    if (opsCard) for (const row of $$('[data-operator-subject]', opsCard)) opsNames.set(row.dataset.operatorSubject, row.dataset.operatorName || row.dataset.operatorSubject);
+    const ops = { sole: null, members: [], activity: {}, viewers: 0, now: null };
+    function opsName(subject) {
+        if (!subject) return 'that person';
+        return opsNames.get(subject) || String(subject).slice(0, 14);
+    }
+    const OPS_CHANNEL = { drive: 'Drive', head: 'Head', lights: 'Lights', button: 'Button', say: 'Say', display: 'Display', ptz: 'Camera' };
+    const OPS_ROLE = { owner: 'OWNER · YOU', mod: 'MOD', operator: 'OPERATOR', viewer: 'VIEWER' };
+    function opsAgo(at) {
+        const then = Date.parse(at);
+        const now = Date.parse(ops.now) || Date.now();
+        if (!Number.isFinite(then)) return 'just now';
+        const ms = Math.max(0, now - then);
+        if (ms < 1000) return 'just now';
+        if (ms < 60000) return `${Math.round(ms / 1000)}s ago`;
+        if (ms < 3600000) return `${Math.round(ms / 60000)}m ago`;
+        return `${Math.round(ms / 3600000)}h ago`;
+    }
+    const opsFresh = (rec, channel) => {
+        if (!rec || !rec[`${channel}_at`]) return false;
+        const then = Date.parse(rec[`${channel}_at`]);
+        const now = Date.parse(ops.now) || Date.now();
+        return Number.isFinite(then) && now - then < 1500;
+    };
+    function opsSend(action, fields) {
+        if (!joined) { notice('Join the robot first.'); return; }
+        raw({ type: 'operators', action, ...fields });
+    }
+    function paintOperatorsEstop(state) {
+        if (!opsCard) return;
+        const box = $('[data-operators-estop-box]', opsCard);
+        const latched = !!(state && state.estop && state.estop.latched);
+        if (box) box.dataset.latched = latched ? 'true' : 'false';
+        const note = $('[data-operators-estop-note]', opsCard);
+        if (note) note.innerHTML = latched
+            ? '<b>Panel E-STOP is tripped.</b> A Mod may clear it. That never clears the tray STOP latch or ARM; the robot cannot move until the owner clears STOP and re-arms on the tray.'
+            : '<b>Panel E-STOP is clear.</b> A Mod may trip it, or clear it after a panel stop. That never clears the tray STOP latch or ARM.';
+        const btn = $('[data-operators-estop]', opsCard);
+        if (btn) {
+            btn.textContent = latched ? 'Clear panel E-STOP' : 'Trip panel E-STOP';
+            btn.hidden = !(myRole === 'owner' || myRole === 'mod');
+        }
+    }
+    function paintOperators(state, keepNow = false) {
+        if (!opsCard || !state) return;
+        ops.sole = state.sole || null;
+        ops.members = state.members || [];
+        ops.activity = state.activity || {};
+        ops.viewers = state.viewers || 0;
+        if (!keepNow) ops.now = state.now || new Date().toISOString();
+        const mode = $('[data-operators-mode]', opsCard);
+        if (mode) mode.textContent = ops.sole ? `Sole: ${opsName(ops.sole.subject)}` : 'Everyone';
+        const clear = $('[data-operators-clear]', opsCard);
+        if (clear) clear.hidden = !ops.sole;
+        for (const p of $$('.ops-viewers .pill', opsCard)) if (/watching/.test(p.textContent)) p.textContent = `${ops.viewers} watching`;
+        for (const m of ops.members) {
+            const row = $(`[data-operator-subject="${CSS.escape(m.subject)}"]`, opsCard);
+            if (!row) continue;
+            row.dataset.operatorRole = m.role;
+            row.dataset.operatorEnabled = String(m.enabled !== false);
+            row.dataset.operatorName = opsNames.get(m.subject) || row.dataset.operatorName || m.subject;
+            row.classList.remove('ops-owner', 'ops-mod', 'ops-operator', 'ops-viewer');
+            row.classList.add(`ops-${m.role}`);
+            const tag = $('[data-operator-role-tag]', row);
+            if (tag) tag.textContent = m.role === 'owner' ? (row.dataset.operatorYou === 'true' ? 'OWNER · YOU' : 'OWNER') : (OPS_ROLE[m.role] || m.role);
+            const sub = $('[data-operator-sub]', row);
+            if (sub) sub.textContent = m.role === 'owner'
+                ? 'Always has override, local STOP, and ARM'
+                : m.role === 'mod'
+                    ? 'Can manage operators and clear the panel E-STOP. Cannot change speed, mode, or Viewer access, or promote Mods.'
+                    : 'Can drive and tilt the head while switched on.';
+            const rec = ops.activity[m.subject];
+            const active = m.enabled !== false && (opsFresh(rec, 'drive') || opsFresh(rec, 'head'));
+            row.classList.toggle('is-live', active);
+            const live = $('[data-operator-activity]', row);
+            if (live) live.hidden = !active;
+            const last = $('[data-operator-last]', row);
+            if (last) last.textContent = rec && rec.last ? `${OPS_CHANNEL[rec.last.channel] || 'Control'} · ${opsAgo(rec.last.at)}${rec.last.channel === 'lights' ? ' · non-motion' : ''}` : 'No command yet';
+            const head = $('[data-operator-head]', row);
+            if (head) head.textContent = opsFresh(rec, 'head') ? 'Head active' : 'Head idle';
+            const toggle = $('[data-operator-toggle]', row);
+            if (toggle) {
+                toggle.checked = m.enabled !== false;
+                const can = m.role !== 'owner' && (myRole === 'owner' || (myRole === 'mod' && m.role === 'operator'));
+                toggle.disabled = !can;
+            }
+            const soleBtn = $('[data-operator-sole]', row);
+            if (soleBtn) {
+                const active = !!(ops.sole && ops.sole.subject === m.subject);
+                soleBtn.dataset.soleActive = active ? 'true' : 'false';
+                soleBtn.textContent = active ? 'Sole · on' : 'Sole control';
+                soleBtn.hidden = !(myRole === 'owner' || myRole === 'mod');
+                soleBtn.disabled = m.enabled === false;
+            }
+            const roleBtn = $('[data-operator-role]', row);
+            if (roleBtn) {
+                roleBtn.hidden = !(myRole === 'owner' && (m.role === 'operator' || m.role === 'mod'));
+                roleBtn.dataset.operatorRoleSet = m.role === 'operator' ? 'mod' : 'operator';
+                roleBtn.textContent = m.role === 'operator' ? 'Make Mod' : 'Make Operator';
+            }
+        }
+    }
+    if (opsCard) {
+        // Age "1s ago" and the Live badge even when no new command arrives (both are read from Bot's stamp).
+        setInterval(() => { if (joined) { ops.now = new Date().toISOString(); paintOperators(ops, true); } }, 1000);
+        opsCard.addEventListener('click', (e) => {
+            const btn = e.target.closest && e.target.closest('button');
+            if (!btn) return;
+            if (btn.matches('[data-operators-clear]')) { opsSend('sole', { subject: null }); return; }
+            const soleBtn = btn.closest('[data-operator-sole]');
+            if (soleBtn) { opsSend('sole', { subject: soleBtn.dataset.soleActive === 'true' ? null : soleBtn.dataset.operatorSole }); return; }
+            const roleBtn = btn.closest('[data-operator-role]');
+            if (roleBtn) { opsSend('role', { subject: roleBtn.dataset.subject, role: roleBtn.dataset.operatorRoleSet }); return; }
+            if (btn.closest('[data-operators-estop]')) {
+                const box = $('[data-operators-estop-box]', opsCard);
+                if (box && box.dataset.latched === 'true') raw({ type: 'estop_clear' });
+                else estop();
+            }
+        });
+        opsCard.addEventListener('change', (e) => {
+            const toggle = e.target.closest && e.target.closest('[data-operator-toggle]');
+            if (toggle) opsSend('toggle', { subject: toggle.dataset.subject, on: toggle.checked });
+        });
+    }
+
     $$('form[data-say]').forEach((f) => f.addEventListener('submit', (e) => {
         e.preventDefault();
         const text = f.elements.text.value.trim();
@@ -1294,6 +1424,20 @@
         if (text) text.textContent = label;
         pill.dataset.state = dataState;
     }
+    // Battery | Latency. A missing reading is a dash, an empty bar and the word unknown, never 0 %; a voltage is
+    // never invented. The tray's unverified FED8 read is a quiet provisional note, not a second number.
+    function paintBattery(state) {
+        const fraction = state.battery;
+        const sensors = state.telemetry && state.telemetry.sensors;
+        const provisional = !!(sensors && sensors.p7_battery && sensors.p7_battery.unverified === true);
+        for (const el of $$('[data-battery]')) {
+            if (fraction == null) { el.removeAttribute('value'); el.dataset.state = 'unknown'; }
+            else { el.value = String(Math.max(0, Math.min(1, fraction))); el.dataset.state = 'known'; }
+        }
+        for (const el of $$('[data-battery-text]')) el.textContent = fraction != null ? `${Math.round(fraction * 100)} %` : '—';
+        for (const el of $$('[data-battery-note]')) { el.textContent = fraction != null ? '' : 'unknown'; el.hidden = fraction != null; }
+        for (const el of $$('[data-battery-provisional]')) el.hidden = !provisional;
+    }
     function paint(state) {
         if (!state) return;
         const latched = !!(state.estop && state.estop.latched);
@@ -1307,8 +1451,8 @@
         const note = $('.estop-note');
         if (note) {
             const why = held && state.device_estop.reason ? ` (${state.device_estop.reason})` : '';
-            note.textContent = held ? ` — its local stop${why} holds until it is released on the robot (openvibe-link resume); then the owner clears it here.`
-                : latched ? ' — the robot stays still until the owner clears it.' : '';
+            note.textContent = held ? ` — its local stop${why} holds until it is released on the robot (openvibe-link resume); then the owner or a Mod clears it here.`
+                : latched ? ' — the robot stays still until the owner or a Mod clears it.' : '';
         }
         const clear = $('[data-estop-clear]');
         if (clear) {
@@ -1325,8 +1469,12 @@
         else if (!state.online) lastTelemetryAt = 0;
         paintAge();
         for (const el of $$('[data-link]')) el.textContent = state.latency_ms != null ? `${state.latency_ms} ms` : '—';
-        for (const el of $$('[data-battery]')) el.value = state.battery != null ? state.battery : 0;
-        for (const el of $$('[data-battery-text]')) el.textContent = state.battery != null ? `${Math.round(state.battery * 100)} %` : '—';
+        if (!samples.length) for (const el of $$('[data-latency]')) {
+            el.textContent = state.latency_ms != null ? `${state.latency_ms} ms` : '—';
+            el.dataset.quality = quality(state.latency_ms, 120, 300);
+        }
+        paintBattery(state);
+        paintOperatorsEstop(state);
         const sensors = state.telemetry && state.telemetry.sensors;
         headlightTelemetry(sensors);
         for (const el of $$('[data-telemetry]')) {
@@ -1392,19 +1540,23 @@
             joined = true; retry = 0;
             allowed = m.allowed_commands || [];
             if (m.ticket) ticket = m.ticket;
-            if (driving) {
-                const label = $('[data-role-label]');
-                myRole = m.role || null;
-                if (label && m.role) label.textContent = { owner: 'Owner', operator: 'Operator', viewer: 'Viewer', queue: 'In the queue' }[m.role] || m.role;
-                for (const el of $$('[data-estop]')) el.hidden = !(m.role === 'owner' || m.role === 'operator');
-            }
+            const label = $('[data-role-label]');
+            myRole = m.role || myRole;
+            if (label && m.role) label.textContent = { owner: 'Owner', mod: 'Mod', operator: 'Operator', viewer: 'Viewer', watcher: 'Watching', queue: 'In the queue' }[m.role] || m.role;
+            for (const el of $$('[data-estop]')) el.hidden = !(m.role === 'owner' || m.role === 'mod' || m.role === 'operator');
             notice('');
             enableControls();
             paint(m.state);
+            if (m.operators) paintOperators(m.operators);
             paintTurn(m.state && m.state.queue);
         } else if (m.type === 'robot_state') {
             paint(m.state);
             paintTurn(m.state && m.state.queue);
+        } else if (m.type === 'operators_state') {
+            paintOperators(m.operators);
+        } else if (m.type === 'operators_result') {
+            if (!m.ok) notice(m.reason || m.code || 'That change was refused.');
+            else notice('');
         } else if (m.type === 'command_result') {
             roundTrip(m.id, m.result);
             if (m.id && headlightIds.delete(m.id)) { headlightAck(m); return; }
