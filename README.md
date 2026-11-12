@@ -18,6 +18,15 @@ OpenVibe.Bot pairs a robot's machines, keeps their state and gates every operato
 - The `/device` and `/control` WebSockets, the command gate and the latched e-stop.
 - The front page, `GET /` (`server/web/home.js`, `public/home.css`): the OpenVibe Frame (`openvibe-shared/shell`) around `openvibe-shared/showcase` sections that say only what works today (pairing, the panel's controls, the gate and the e-stop, people and the queue, the read-only embed, the simulator, routines, webhooks and the agent switch), and data sections rendered on the server, each left out when it has nothing to show: numbers from the catalogue, the simulated rover and the listed robots with their online state, every catalogue model with its connection kind and controls, the connection kinds with their models, the first kit's parts list, robotics jobs from OpenVibe.Search (`server/web/network-reads.js`: OpenVibe.Work's documents, read anonymously with `BOT_SEARCH_URL`, cached 15 minutes) and the questions people ask first (JSON-LD WebSite, WebApplication, ItemList and FAQPage). It has its own CSP for the Frame's calls to the Network; the rest of the site keeps `default-src 'self'`. `/shared/` is openvibe-shared's serve handler.
 - The signed-in pages (`server/web/routes.js`): `/robots` to list and add robots, `/pair/:id` for a pairing code and the installer command, and `/panel/:id`, the panel rendered from the profile. A `sim.rover` robot is driven by an in-process simulator (`server/sim`), so the panel works before any hardware exists. It gets no jobs, and it is not counted as a device or reported online in the outbox. The rover lives in a small arena (`public/sim-world.js`, shared by the server and the browser): walls and crates stop it, its telemetry carries a range finder (`distance_cm`), three line sensors over a strip of tape and its pose, and its panel draws the camera from that pose (`public/sim-view.js`) with a map of the arena in the corner.
+- **Make your own controls.** The panel and the controls over a stream are arrangeable surfaces: Bot publishes
+  `bot.controls` and `bot.overlay` as `ui.surface@1` catalogs built from the robot's own profile, and each person's
+  `ui.layout@1` (kept with their OpenVibe.Network account, one per device class) is read server-side and drawn on the
+  real parts before first paint. **Arrange** loads `openvibe-shared/ov-arrange.js` only then: drag to move, the corner
+  to resize, arrows and Shift with the arrows, a long press for a part's visible/size/colour/shape/opacity/label and
+  bindings, live validation through `openvibe-sdk/ui-layout` with the reason in plain words, Undo, Reset to default,
+  Save and Share, and **Ask OpenVibe** previewed on the parts with Keep and Discard. Stop and the overlay's e-stop are
+  required; a layout only arranges, and every command still passes the same gate and the robot's limits. The old
+  browser store (`ov-bot-pad-prefs`: Stop's hand, pad size, readouts) is migrated into the person's first layout once.
 - The robot directory (`server/web/directory.js`, inside the OpenVibe Frame): `/robots` is public and lists the robots their owners list (online state, model, owner, who may drive), every model Bot drives and, signed in, your own robots; `/models` and `/models/:id` say how each model connects, its setup steps, its guide and the controls its panel gets; `/r/:id` is a listed robot's public page, watching it live through the embeddable panel; `/robots/new` adds one (name, what it is, who may drive). The owner lists a robot from its panel (`POST /robots/:id/listing`, migration 0009): listing turns on watching (`embed_public`), and turning watching off unlists it.
 - Routines (`server/routines.js`): an owner writes a robot's steps one per line (`forward 2`, `right 0.5`, `wait 1`, `say Hello`, `face happy`, `headlights #ff8800`, `horn A4 0.3`, `press horn`, `pan 0.5 1`, … only what its profile has) and runs them on demand, every N minutes, daily at a UTC time on chosen weekdays, or each time the robot comes online. Every step passes the same gate as a person's command, as the owner (limits, cooldowns, e-stop, audit); held steps are re-sent inside the deadman window and released at the end; anything refused stops the routine with its reason. One routine runs per robot at a time. The owner's panel card and `GET|POST /api/v1/robots/:id/routines`, `POST …/routines/:rid/run`, `DELETE …/routines/:rid`.
 - The owner's agent: the panel's **Your agent** card ("Let my OpenVibe.Actor agent drive this robot", `robots.agent_control`, migration 0012) lets `svc:actor`, acting for the robot's owner and nobody else, read the robot (`GET /api/v1/robots/:id/steps`: online, the e-stop, battery, sensors and the step lines it takes) and drive it with plain step lines (`POST …/steps`, at most 20 steps and 30 seconds, answered when they end) or one command (`POST …/commands`). Every step passes the same gate as the owner's own commands and is audited as the service. Off, or for anyone but the owner, it answers `403 bot.agent_not_allowed`.
@@ -146,7 +155,7 @@ Sitemap entries use the release commit time for these code-backed pages.
 - OpenVibe.Network: user and service tokens, node tokens, pairing when the authority is `network`, and identity resolution (a `@username` to a subject, and subjects to names, for the panel's People card).
 - OpenRestream: the WHIP ingest base (`BOT_WHIP_BASE`) devices publish to.
 - OpenVibe.Billing: job usage readings go to `billing.usage.record` (`BOT_BILLING_URL`; Bot mints its own Network service token for audience `openvibe.billing` with `billing.usage.record`, and `BOT_BILLING_TOKEN` overrides it); unset, they wait in `run_usage_outbox`.
-- `openvibe-contracts` v0.129.0, `openvibe-sdk` v0.150.0 and `openvibe-shared` v4.211.0 (package.json).
+- `openvibe-contracts` v0.410.0, `openvibe-sdk` v0.152.0 and `openvibe-shared` v4.214.0 (package.json).
 - Account export and deletion (ADR-033): Network grants `events.subscription.manage` (openvibe.events) for the two
   subscriptions created at boot, then, last and once the release is live, `network.account.export.contribute` and
   `network.account.deletion.confirm` (openvibe.network).
@@ -236,7 +245,7 @@ Set `BOT_ONVIF_CAMERAS` (JSON, unset by default) to the server-side cameras Bot 
 OpenVibe.Sites no longer generates `deploy/nginx/openvibe.bot.conf` (sites.json marks the vhost as owned by OpenVibe.Bot), and Bot serves nothing from a Sites checkout: the legal pages, `robots.txt`, `sitemap.xml`, `manifest.webmanifest` and the 404 page all come from the app. A Sites deploy leaves an installed vhost it no longer generates in place, so the current Sites vhost keeps serving openvibe.bot until Bot's first deploy installs this file over it; later Sites deploys never overwrite Bot's `/device` and `/control` routes.
 
 <!-- versions:start -->
-- openvibe-contracts: v0.408.0
-- openvibe-sdk: v0.150.0
-- openvibe-shared: v4.211.0
+- openvibe-contracts: v0.410.0
+- openvibe-sdk: v0.152.0
+- openvibe-shared: v4.214.0
 <!-- versions:end -->

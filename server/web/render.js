@@ -1,5 +1,6 @@
 'use strict';
 const kit = require('openvibe-shared/kit');
+const sharedServe = require('openvibe-shared/serve');
 
 /**
  * The signed-in pages, rendered on the server from data alone (pure functions, testable without a server).
@@ -136,8 +137,12 @@ const DIRECTION_BUTTONS = [
     { dir: 'right', label: 'right', names: ['turn_right', 'right', 'rotate_right'] },
 ];
 
-/** The drive pad: a touch joystick for two axes (pointer events, see panel.js), hold buttons for the rest. */
-function drivePad(axes, enabled) {
+/**
+ * The drive pad: a touch joystick for two axes (pointer events, see panel.js), hold buttons for the rest.
+ * Its stick, Stop and direction buttons are the panel's arrangeable parts (make your own controls, stage 2):
+ * the section around them flattens (`display: contents`) so each is a cell of the panel's grid.
+ */
+function drivePad(axes, enabled, attrs = {}, flatten = false) {
     const x = STICK_X.find((a) => axes[a]);
     const y = STICK_Y.find((a) => axes[a]);
     const stick = {};
@@ -146,29 +151,13 @@ function drivePad(axes, enabled) {
     const rest = Object.fromEntries(Object.entries(axes).filter(([a]) => a !== x && a !== y));
     const label = [y && AXIS_NAME[y], x && AXIS_NAME[x]].filter(Boolean).join(' and ');
     const joystick = x || y
-        ? `<div class="stick" data-joystick="${data(stick)}" role="img" aria-label="${esc(`Joystick: ${label}. Drag and hold to drive.`)}"${enabled ? '' : ' aria-disabled="true"'}>`
+        ? `<div class="stick" data-joystick="${data(stick)}" data-ov-part="stick" ${attrs.stick || ''} role="img" aria-label="${esc(`Joystick: ${label}. Drag and hold to drive.`)}"${enabled ? '' : ' aria-disabled="true"'}>`
             + '<span class="stick-ring"></span><span class="stick-cross"></span><svg class="stick-dirs" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><path d="M50 5l6 7H44zM95 50l-7 6V44zM50 95l-6-7h12zM5 50l7-6v12z"/></svg>'
             + `<span class="stick-knob" data-knob></span></div>`
         : '';
-    return `<div class="drive-pad" data-axes="${data(axes)}">${joystick}${Object.keys(rest).length ? `<div class="pad">${axisButtons(rest, enabled)}</div>` : ''}`
-        + `<button type="button" class="stop" data-stop${disabledUnless(enabled)}>${icon('square')}<span>Stop</span></button></div>`
-        + padPrefs();
-}
-
-/**
- * How this person likes the pad (controls v2, ask 368: "make it … per user"): the hand the Stop sits on, the pad's size
- * and the readouts shown or folded. public/panel.js keeps the choice in this browser and sets data-hand, data-pad and
- * data-readouts on #panel; nothing here changes what the robot does.
- */
-function padPrefs() {
-    const group = (name, label, opts) => `<div class="pad-pref" role="radiogroup" aria-label="${esc(label)}"><span class="pad-pref-l">${esc(label)}</span><div class="pad-pref-opts">${opts.map(([v, t]) =>
-        `<label><input type="radio" name="pad-${esc(name)}" value="${esc(v)}" data-pad-pref="${esc(name)}"><span>${esc(t)}</span></label>`).join('')}</div></div>`;
-    return `<button type="button" class="pad-prefs-btn" data-pad-prefs aria-expanded="false" aria-controls="pad-prefs" title="Arrange the controls" aria-label="Arrange the controls">${icon('sliders')}</button>`
-        + `<div class="pad-prefs" id="pad-prefs" data-pad-prefs-menu hidden>`
-        + group('hand', 'Stop on the', [['right', 'Right'], ['left', 'Left']])
-        + group('size', 'Pad', [['s', 'Small'], ['m', 'Medium'], ['l', 'Large']])
-        + group('readouts', 'Readouts', [['on', 'Shown'], ['off', 'Folded']])
-        + '</div>';
+    const pad = Object.keys(rest).length ? `<div class="pad" data-ov-part="pad" ${attrs.pad || ''}>${axisButtons(rest, enabled)}</div>` : '';
+    return `<div class="drive-pad" data-axes="${data(axes)}"${flatten ? ' data-ov-flatten="true"' : ''}>${joystick}${pad}`
+        + `<button type="button" class="stop" data-stop data-ov-part="stop" ${attrs.stop || ''}${disabledUnless(enabled)}>${icon('square')}<span>Stop</span></button></div>`;
 }
 
 /** An actuator's name as a label: backpack_lights → Backpack lights. */
@@ -267,7 +256,7 @@ function cameraTiles(w, profile, signaling_url = null, pointEnabled = false) {
     }).join('');
 }
 
-function renderWidget(w, { profile = {}, allowed_commands = [], signaling_url = null } = {}) {
+function renderWidget(w, { profile = {}, allowed_commands = [], signaling_url = null, part = null, partAttrs = {}, flatten = false } = {}) {
     const commands = profile.commands || {};
     const kind = w.command ? w.command.kind : null;
     const enabled = !!kind && allowed_commands.includes(kind);
@@ -280,8 +269,8 @@ function renderWidget(w, { profile = {}, allowed_commands = [], signaling_url = 
             // drive has a rotation axis, else nothing, and then the legend does not offer them.
             const headName = ((commands.actuator && commands.actuator.names) || {}).head;
             const qe = headName ? ' · <kbd>Q</kbd> / <kbd>E</kbd> to tilt' : axes.rotation ? ' · <kbd>Q</kbd> / <kbd>E</kbd> to turn' : '';
-            inner = drivePad(axes, enabled)
-                + `<p class="hint"><kbd>W A S D</kbd> or arrows to drive${qe} · <kbd>Space</kbd> to stop. `
+            inner = drivePad(axes, enabled, partAttrs, flatten)
+                + `<p class="hint" data-ov-decor><kbd>W A S D</kbd> or arrows to drive${qe} · <kbd>Space</kbd> to stop. `
                 + `<span class="pad-hint" data-pad-hint>${icon('gamepad')} A gamepad works too: left stick drives, A sounds, B stops, Start is the e-stop.</span></p>`;
             break;
         }
@@ -360,7 +349,11 @@ function renderWidget(w, { profile = {}, allowed_commands = [], signaling_url = 
             inner = '';
     }
     const cmd = w.command ? ` data-command="${data(w.command)}"` : '';
-    return `<section class="widget widget-${esc(w.type)}" data-widget="${esc(w.type)}"${cmd}><h2>${esc(label)}</h2>${inner}</section>`;
+    if (w.type === 'drive') {
+        return `<section class="widget widget-drive" data-widget="drive" data-ov-host${flatten ? ' data-ov-flatten="true"' : ''}${cmd}><h2 data-ov-decor>${esc(label)}</h2>${inner}</section>`;
+    }
+    const partAttr = part ? ` data-ov-part="${esc(part)}" ${partAttrs[part] || ''}` : '';
+    return `<section class="widget widget-${esc(w.type)}" data-widget="${esc(w.type)}"${cmd}${partAttr}><h2>${esc(label)}</h2>${inner}</section>`;
 }
 
 /** One owner switch: a checkbox posted as name=on, after a hidden name=off so an unchecked box still says off. */
@@ -687,42 +680,47 @@ function overlaySlider(profile, allowed) {
     return null;
 }
 
-const botPill = (robot) => `<span class="bot-pill bot-control" data-bot-pill data-online-pill data-state="connecting" data-bot-hit><span class="dot"></span><b class="bot-pill-name">${esc(robot.name)}</b><span class="bot-pill-state" data-bot-state>Connecting…</span></span>`;
+const botPill = (robot, attrs = '') => `<span class="bot-pill bot-control" data-bot-pill data-online-pill data-state="connecting" data-bot-hit data-ov-part="pill" ${attrs}><span class="dot"></span><b class="bot-pill-name">${esc(robot.name)}</b><span class="bot-pill-state" data-bot-state>Connecting…</span></span>`;
 // A watcher (the anonymous embed on a stream) takes the controls with Drive, as on the full panel; the e-stop waits,
 // hidden, for the join that makes them an operator (public/panel.js onFrame), and the line under the controls says
 // what the page around answered (sign in there, or the owner decides who drives). Ask 353, 2026-11-11: on a phone over
 // the stream there was no way to start driving at all.
-const botEstop = (role, canDrive = false) => (ESTOP_ROLES.has(role)
-    ? `<button type="button" class="bot-estop bot-control" data-estop data-bot-hit aria-label="E-stop" title="E-stop">${icon('stop')}</button>`
-    : canDrive ? `<button type="button" class="bot-estop bot-control" data-estop data-bot-hit aria-label="E-stop" title="E-stop" hidden>${icon('stop')}</button>` : '');
-const botDrive = (canDrive) => (canDrive
-    ? `<button type="button" class="bot-drive bot-control" data-drive data-drive-bar data-bot-hit title="Take the controls">${icon('gamepad')}<span>Drive</span></button>` : '');
+const botEstop = (role, canDrive = false, attrs = '') => (ESTOP_ROLES.has(role)
+    ? `<button type="button" class="bot-estop bot-control" data-estop data-bot-hit data-ov-part="estop" ${attrs} aria-label="E-stop" title="E-stop">${icon('stop')}</button>`
+    : canDrive ? `<button type="button" class="bot-estop bot-control" data-estop data-bot-hit data-ov-part="estop" data-ov-role-hidden="true" ${attrs} aria-label="E-stop" title="E-stop" hidden>${icon('stop')}</button>` : '');
+const botDrive = (canDrive, attrs = '') => (canDrive
+    ? `<button type="button" class="bot-drive bot-control" data-drive data-drive-bar data-bot-hit data-ov-part="drive" ${attrs} title="Take the controls">${icon('gamepad')}<span>Drive</span></button>` : '');
 const botNotice = '<p class="bot-notice bot-control" data-notice data-bot-hit role="alert" hidden></p>';
-const botMore = '<button type="button" class="bot-more bot-control" data-bot-more data-bot-hit aria-label="More controls" title="Open the full panel"><span aria-hidden="true">•••</span></button>';
+const botMore = (attrs = '') => `<button type="button" class="bot-more bot-control" data-bot-more data-bot-hit data-ov-part="more" ${attrs} aria-label="More controls" title="Open the full panel"><span aria-hidden="true">•••</span></button>`;
 
 /** The overlay/compact page: a transparent surface with only the controls, no topbar, header or widgets. */
-function renderBotSurface({ robot, profile, role, allowed_commands = [], holdResendMs = 150, view = 'overlay', parentOrigins = [], signedIn = true }) {
+function renderBotSurface({ robot, profile, role, allowed_commands = [], holdResendMs = 150, view = 'overlay', parentOrigins = [], signedIn = true, arrange = null }) {
+    const surface = require('./surface');
+    const arrangeApply = !!(arrange && arrange.layoutSource === 'account');
+    const attrs = (id) => (arrange ? surface.attrsFor(arrange.catalog, arrange.layout, arrange.device, id, { apply: arrangeApply }) : '');
     const stick = overlayStickMarkup(profile, allowed_commands);
     const slider = overlaySlider(profile, allowed_commands);
     const canDrive = role === 'watcher' && !signedIn;
-    const stop = botEstop(role, canDrive) + botDrive(canDrive);
+    const stop = botEstop(role, canDrive, attrs('estop')) + botDrive(canDrive, attrs('drive'));
     const sliderLabel = slider ? esc(humanName(slider.name)) : '';
     const sliderMarkup = slider
-        ? `<div class="bot-slider bot-control" data-bot-hit><section class="widget bot-widget" data-command="${data(slider.widget.command)}"><label class="control bot-range-label"><span class="sr-only">${sliderLabel}</span>${numberRange(slider.name, slider.actuator, slider.enabled, profile.id)}</label></section></div>`
+        ? `<div class="bot-slider bot-control" data-bot-hit data-ov-part="slider" ${attrs('slider')}><section class="widget bot-widget" data-command="${data(slider.widget.command)}"><label class="control bot-range-label"><span class="sr-only">${sliderLabel}</span>${numberRange(slider.name, slider.actuator, slider.enabled, profile.id)}</label></section></div>`
         : '';
-    const stickMarkup = stick ? `<div class="bot-stick bot-control" data-bot-hit>${stick}</div>` : '';
+    const stickMarkup = stick ? `<div class="bot-stick bot-control" data-bot-hit data-ov-part="stick" ${attrs('stick')}>${stick}</div>` : '';
+    const surfaceAttrs = arrange ? surface.overlaySurfaceAttrs(arrange.catalog, arrange.layout, arrange.device, arrangeApply && view !== 'compact') : '';
     const body = view === 'compact'
-        ? `<div class="bot-compact" data-bot-compact${slider ? '' : ' data-no-slider'}>${botPill(robot)}${stickMarkup}${sliderMarkup}${stop}${botMore}${botNotice}</div>`
-        : `<div class="bot-overlay" data-bot-overlay>${botPill(robot)}${stickMarkup}${sliderMarkup}${stop}${botMore}${botNotice}</div>`;
-    return `<main id="panel" class="bot-surface" tabindex="0" data-robot-id="${esc(robot.id)}" data-role="${esc(role)}" data-hold-ms="${esc(holdResendMs)}" data-allowed="${data(allowed_commands)}" data-bot-view="${esc(view)}"${parentOrigins.length ? ` data-parent-origins="${esc(parentOrigins.join(' '))}"` : ''}>${body}</main>`;
+        ? `<div class="bot-compact" data-bot-compact${slider ? '' : ' data-no-slider'} ${surfaceAttrs}>${botPill(robot, attrs('pill'))}${stickMarkup}${sliderMarkup}${stop}${botMore(attrs('more'))}${botNotice}</div>`
+        : `<div class="bot-overlay" data-bot-overlay ${surfaceAttrs}>${botPill(robot, attrs('pill'))}${stickMarkup}${sliderMarkup}${stop}${botMore(attrs('more'))}${botNotice}</div>`;
+    const dataScript = arrange ? `<script type="application/json" id="ov-arrange-data">${JSON.stringify({ catalog: arrange.catalog, layout: arrange.layout, device: arrange.device, surface: arrange.catalog.id, signedIn: arrange.signedIn, layoutSource: arrange.layoutSource || 'default', save: arrange.save || null, suggest: arrange.suggest || null, share: arrange.share || null, reset: arrange.reset || null, author: arrange.author || null }).replace(/</g, '\\u003c')}</script>` : '';
+    return `<main id="panel" class="bot-surface" tabindex="0" data-robot-id="${esc(robot.id)}" data-role="${esc(role)}" data-hold-ms="${esc(holdResendMs)}" data-allowed="${data(allowed_commands)}" data-bot-view="${esc(view)}"${parentOrigins.length ? ` data-parent-origins="${esc(parentOrigins.join(' '))}"` : ''}>${body}${dataScript}</main>`;
 }
 
-function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs = 150, mode = 'page', view = 'panel', signedIn = true, streaming = null, people = null, signaling_url = null, profileForm = {}, tryIt = false, automation = null, parentOrigins = [], liveUrl = null, limitsInfo = null }) {
+function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs = 150, mode = 'page', view = 'panel', signedIn = true, streaming = null, people = null, signaling_url = null, profileForm = {}, tryIt = false, automation = null, parentOrigins = [], liveUrl = null, limitsInfo = null, arrange = null }) {
     const embed = mode === 'embed';
     const botView = embed ? botViewOf(view) : 'panel';
     if (embed && botView !== 'panel') {
         const [minWidth, minHeight] = BOT_VIEW_MIN[botView];
-        return page(robot.name, renderBotSurface({ robot, profile, role, allowed_commands, holdResendMs, view: botView, parentOrigins, signedIn }), {
+        return page(robot.name, renderBotSurface({ robot, profile, role, allowed_commands, holdResendMs, view: botView, parentOrigins, signedIn, arrange }), {
             scripts: panelScripts(profile, false, true),
             bodyClass: `embed-page bot-mode-${botView}`,
             htmlClass: `embed-page bot-mode-${botView}`,
@@ -733,13 +731,32 @@ function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs
     const minSize = BOT_VIEW_MIN.panel;
     const htmlAttrs = embed ? ` data-bot-view="panel" data-bot-min-width="${minSize[0]}" data-bot-min-height="${minSize[1]}"` : '';
     const latched = !!(robot.estop && robot.estop.latched);
-    const widgets = (profile.widgets || []).map((w, i) => ({ w, i }))
-        .sort((a, b) => (a.w.order != null ? a.w.order : 1e9 + a.i) - (b.w.order != null ? b.w.order : 1e9 + b.i))
-        .map(({ w }) => renderWidget(w, { profile, allowed_commands, signaling_url }));
+    const widgetOrder = (profile.widgets || []).map((w, i) => ({ w, i }))
+        .sort((a, b) => (a.w.order != null ? a.w.order : 1e9 + a.i) - (b.w.order != null ? b.w.order : 1e9 + b.i));
+    // The arrangeable part ids each widget draws: the drive is split into its stick, Stop and direction buttons.
+    const byWidget = new Map();
+    for (const p of (arrange && arrange.catalog ? arrange.catalog.parts || [] : [])) {
+        const source = (arrange.parts || []).find((x) => x.id === p.id);
+        if (!source || source.widgetIndex == null) continue;
+        if (!byWidget.has(source.widgetIndex)) byWidget.set(source.widgetIndex, []);
+        byWidget.get(source.widgetIndex).push(p.id);
+    }
+    const widgetParts = (i) => byWidget.get(i) || [];
+    const arrangeApply = !!(arrange && arrange.layoutSource === 'account');
+    const attrsOf = (ids) => Object.fromEntries(ids.map((id) => [id, arrange ? require('./surface').attrsFor(arrange.catalog, arrange.layout, arrange.device, id, { apply: arrangeApply }) : '']));
+    const widgets = widgetOrder.map(({ w, i }) => renderWidget(w, { profile, allowed_commands, signaling_url, part: widgetParts(i)[0] || null, partAttrs: attrsOf(widgetParts(i)), flatten: arrangeApply }));
+    // A robot with no drive widget still gets its Stop: a required part of bot.controls, drawn on its own.
+    const drawn = new Set([...byWidget.values()].flat());
+    if (arrange && !drawn.has('stop') && require('./surface').partOf(arrange.catalog, 'stop')) {
+        widgets.push(`<section class="widget widget-stop" data-widget="stop" data-ov-part="stop" ${attrsOf(['stop']).stop || ''}>`
+            + `<h2>Stop</h2><button type="button" class="stop" data-stop>${icon('square')}<span>Stop</span></button></section>`);
+    }
     // A framed watcher may take the controls with Drive; its e-stop waits, hidden, for an owner's or operator's join.
     const estop = ESTOP_ROLES.has(role) ? `<button type="button" class="estop" data-estop>${icon('stop')}<span>E-stop</span></button>`
         : (embed && role === 'watcher' ? `<button type="button" class="estop" data-estop hidden>${icon('stop')}<span>E-stop</span></button>` : '');
     const clear = role === 'owner' ? `<button type="button" class="estop-clear" data-estop-clear${latched ? '' : ' hidden'}>Clear e-stop</button>` : '';
+    const arrangeButton = arrange && arrange.src
+        ? `<button type="button" class="arrange-btn" data-arrange data-arrange-src="${esc(arrange.src || '')}" title="Arrange the controls">${icon('sliders')}<span>Arrange</span></button>` : '';
     const body = `<header class="estop-banner" data-estop-banner data-latched="${latched}">
 ${embed ? '' : tryIt ? topbar('<span class="crumb">Try the panel</span>', '/') : topbar(`<span class="crumb">${esc(robot.name)}</span>`)}
 <div class="estop-bar"><p class="estop-state" role="status" aria-live="assertive"><span class="estop-dot"></span><span data-estop-state>${latched ? 'E-stop latched' : 'E-stop clear'}</span><span class="estop-note">${latched ? ' — the robot stays still until the owner clears it.' : ''}</span></p>${clear}${estop}</div>
@@ -749,15 +766,16 @@ ${embed ? '' : tryIt ? topbar('<span class="crumb">Try the panel</span>', '/') :
 ${kit.pageHead({ title: `${robot.name}`, icon: 'gear', back: embed ? null : { href: '/', label: 'Home' } })}
 <p class="meta"><span class="pill online" data-online-pill data-state="connecting"><span class="dot"></span><span data-online-label>Connecting…</span></span> <span class="pill">${esc(profile.name || robot.profile_id)}</span> <span class="pill role" data-role-label>${esc(ROLE_LABEL[role] || role)}</span></p>
 ${turnStrip(robot, role)}
+${arrangeButton}
 ${embed && role === 'watcher' && !signedIn ? `<p class="embed-sign-in"><button type="button" class="button primary" data-drive data-drive-bar>${icon('gamepad')}<span>Drive</span></button> <a class="button embed-open" href="/panel/${esc(robot.id)}" target="_blank" rel="noopener" title="Open on openvibe.bot">${icon('external')}<span>Open on openvibe.bot</span></a></p>` : ''}
 </div>
 ${tryIt ? tryIntro() : ''}
 <p class="notice" data-device-fault role="status" hidden></p>
 <p class="notice" data-notice role="alert" hidden></p>
-<div class="widgets">
+<div class="widgets"${arrange ? require('./surface').surfaceAttrs(arrange.catalog, arrange.layout, arrange.device, arrangeApply) : ''}>
 ${widgets.join('\n')}
 </div>
-${tryIt ? tryOutro(profile) : ''}${role === 'owner' && !embed && !tryIt ? `<div class="owner-settings">${limitsCard(robot, limitsInfo, profile)}${onStreamCard(robot, { liveUrl })}${localProfileForm(robot, profile, profileForm)}${commissionForm(robot, profile)}${automation ? routinesCard(robot, profile, automation) + webhooksCard(robot, automation) : ''}${agentForm(robot)}${listingForm(robot)}${embedForm(robot)}${streamingForm(robot, streaming)}${people ? peopleCard(robot, people) : ''}</div>` : ''}
+${arrange ? `<script type="application/json" id="ov-arrange-data">${JSON.stringify({ catalog: arrange.catalog, layout: arrange.layout, device: arrange.device, surface: arrange.catalog.id, signedIn: arrange.signedIn, layoutSource: arrange.layoutSource || 'default', save: arrange.save || null, suggest: arrange.suggest || null, share: arrange.share || null, reset: arrange.reset || null, author: arrange.author || null }).replace(/</g, '\\u003c')}</script>` : ''}${tryIt ? tryOutro(profile) : ''}${role === 'owner' && !embed && !tryIt ? `<div class="owner-settings">${limitsCard(robot, limitsInfo, profile)}${onStreamCard(robot, { liveUrl })}${localProfileForm(robot, profile, profileForm)}${commissionForm(robot, profile)}${automation ? routinesCard(robot, profile, automation) + webhooksCard(robot, automation) : ''}${agentForm(robot)}${listingForm(robot)}${embedForm(robot)}${streamingForm(robot, streaming)}${people ? peopleCard(robot, people) : ''}</div>` : ''}
 </main>`;
     return page(tryIt ? 'Try the panel with a simulated rover' : robot.name, body, {
         scripts: panelScripts(profile, tryIt, embed), bodyClass: embed ? 'embed-page' : 'panel-page',
@@ -1122,4 +1140,4 @@ function renderFirstRunPage({ rows = [] }) {
     return page('First run', body, { description: 'The guided first run of OpenVibe Link, measured step by step.', canonical: '/admin/first-run' });
 }
 
-module.exports = { page, renderPanel, renderPhonePage, renderSharePage, renderShareGone, panelScripts, isSim, TRY_DESCRIPTION, renderEmbedRefused, renderDrivePage, renderWidget, renderRobotsPage, renderPairingPage, renderPhoneLinkPage, renderLinkPage, renderSignInPage, renderClaimPage, renderClaimApproved, renderFirstRunPage, camerasOf, esc };
+module.exports = { page, renderPanel, renderPhonePage, renderSharePage, renderShareGone, panelScripts, isSim, TRY_DESCRIPTION, renderEmbedRefused, renderDrivePage, renderWidget, renderRobotsPage, renderPairingPage, renderPhoneLinkPage, renderLinkPage, renderSignInPage, renderClaimPage, renderClaimApproved, renderFirstRunPage, camerasOf, overlayStickMarkup, overlaySlider, esc };

@@ -113,6 +113,22 @@ main { padding: 1rem max(1rem, env(safe-area-inset-right)) calc(1.5rem + env(saf
 .online[data-state="connecting"] .dot { animation: pulse 1s ease-in-out infinite; }
 .notice { margin: 0 0 0.75rem; }
 
+.arrange-btn { display: inline-flex; align-items: center; gap: 0.4rem; min-height: 40px; padding: 0 0.8rem; margin: 0.25rem 0 0.5rem; border: 1px solid var(--line); border-radius: 10px; background: var(--raised); color: var(--text); font: inherit; cursor: pointer; }
+.arrange-btn:hover { border-color: color-mix(in srgb, var(--line) 65%, var(--text) 35%); }
+.arrange-btn .icon { width: 1.1rem; height: 1.1rem; }
+
+/* The arranged panel: each part is a cell of the grid the layout names (make your own controls, stage 2). The
+   drive section flattens so its stick, Stop and direction buttons are cells of the same grid; the old heading and
+   key hint are decoration and step out of the way. */
+.widgets[data-ov-arranged] { display: grid; }
+[data-ov-flatten] { display: contents; }
+[data-ov-flatten] > [data-ov-decor] { display: none; }
+[data-ov-part][hidden] { display: none !important; }
+.widgets[data-ov-arranged] > [data-ov-part] { overflow: auto; }
+#panel :is(.widgets[data-ov-arranged], .widgets.ov-arrange-surface) .stick { width: 100%; height: 100%; }
+:is(.widgets[data-ov-arranged], .widgets.ov-arrange-surface) .drive-pad { display: contents; }
+#panel :is(.widgets[data-ov-arranged], .widgets.ov-arrange-surface) .stop { width: 100%; height: 100%; border-radius: 50%; }
+
 /* Widgets: one column on a phone held upright. The camera comes first and the drive pad right under it, so the
    picture and the controls are on screen together; the readouts and the other controls follow. */
 .widgets { display: grid; gap: 0.75rem; grid-template-columns: minmax(0, 1fr); grid-auto-flow: dense; }
@@ -681,11 +697,28 @@ body.bot-mode-compact .bot-compact .bot-notice { color: var(--warn); background:
     url("/panel/lock.svg");
 }
 
+/* A person's docked overlay: the four edges and their order. The default overlay keeps the rules above; this
+   only takes over when the layout is the person's own (data-ov-custom). */
+[data-ov-custom] [data-ov-part][data-ov-dock] { position: absolute; }
+[data-ov-custom] [data-ov-part][data-ov-dock="left"] { left: calc(16px + env(safe-area-inset-left)); right: auto; }
+[data-ov-custom] [data-ov-part][data-ov-dock="right"] { right: calc(16px + env(safe-area-inset-right)); left: auto; }
+[data-ov-custom] [data-ov-part][data-ov-dock="top"] { top: calc(16px + env(safe-area-inset-top)); bottom: auto; }
+[data-ov-custom] [data-ov-part][data-ov-dock="bottom"] { bottom: calc(16px + env(safe-area-inset-bottom)); top: auto; }
+[data-ov-custom] [data-ov-part][data-ov-dock="left"][data-ov-order="0"],
+[data-ov-custom] [data-ov-part][data-ov-dock="right"][data-ov-order="0"] { top: calc(16px + env(safe-area-inset-top)); bottom: auto; }
+[data-ov-custom] [data-ov-part][data-ov-dock="left"][data-ov-order="1"],
+[data-ov-custom] [data-ov-part][data-ov-dock="right"][data-ov-order="1"] { bottom: calc(16px + env(safe-area-inset-bottom)); top: auto; }
+[data-ov-custom] [data-ov-part][data-ov-dock="left"][data-ov-order="2"],
+[data-ov-custom] [data-ov-part][data-ov-dock="right"][data-ov-order="2"] { bottom: calc(80px + env(safe-area-inset-bottom)); top: auto; }
+[data-ov-custom] [data-ov-part="more"][data-ov-dock="right"] { top: calc(68px + env(safe-area-inset-top)); bottom: auto; }
+[data-ov-custom] [data-ov-part="slider"][data-ov-dock="bottom"] { left: 50%; transform: translateX(-50%); }
+
 /* ── Controls v2 (ask 368, 2026-11-11: the owner circled the pad, the Stop, the head slider and the readouts:
    "redesign … polish … more consistent … per user"). One family on the full panel, in a channel's Robot tab and
    framed anywhere: the stick has its four marks and a knob that lights when it drives; Stop is a ringed red disc
    beside it (on the hand this person chose); a slider says its value with − and + to step it; battery and latency
-   are slim readout rows. The pad's arrangement menu (the sliders icon) keeps the hand, the size and the readouts. ─── */
+   are slim readout rows. The Arrange button (make your own controls) replaces the old arrangement menu; the pad's
+   hand, size and readouts are now the person's ui.layout@1. ─── */
 #panel:not(.bot-surface) .widget-drive { position: relative; }
 #panel:not(.bot-surface) .drive-pad { grid-template-columns: auto auto; justify-content: center; align-items: center; gap: 0.75rem 1.4rem; }
 #panel:not(.bot-surface) .drive-pad > :not(.stick):not(.stop) { grid-column: 1 / -1; }
@@ -731,21 +764,6 @@ body.bot-mode-compact .bot-compact .bot-notice { color: var(--warn); background:
 #panel:not(.bot-surface) .drive-pad .stop:active:not(:disabled) { transform: scale(0.94); }
 #panel:not(.bot-surface) .drive-pad .stop:disabled { opacity: 0.5; filter: saturate(0.5); }
 
-/* The arrangement menu: a quiet icon in the drive card's corner, its choices as segmented rows. */
-#panel:not(.bot-surface) .pad-prefs-btn { position: absolute; top: 0.45rem; right: 0.45rem; min-width: 36px; min-height: 36px; width: 36px; height: 36px; padding: 0; border-radius: 10px; display: grid; place-items: center; background: transparent; border-color: transparent; color: var(--muted); }
-#panel:not(.bot-surface) .pad-prefs-btn:hover, #panel:not(.bot-surface) .pad-prefs-btn[aria-expanded="true"] { color: var(--text); background: var(--raised); }
-#panel:not(.bot-surface) .pad-prefs-btn .icon { width: 1.15rem; height: 1.15rem; }
-#panel:not(.bot-surface) .pad-prefs { position: absolute; top: 2.9rem; right: 0.45rem; z-index: 5; display: grid; gap: 0.6rem; width: min(17rem, calc(100% - 0.9rem)); padding: 0.75rem; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); box-shadow: 0 16px 36px -12px rgba(0, 0, 0, 0.6); }
-#panel:not(.bot-surface) .pad-prefs[hidden] { display: none; }
-#panel:not(.bot-surface) .pad-pref { display: grid; gap: 0.3rem; }
-#panel:not(.bot-surface) .pad-pref-l { font-size: 0.72rem; font-weight: 600; color: var(--muted); }
-#panel:not(.bot-surface) .pad-pref-opts { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 3px; padding: 3px; border-radius: 10px; background: var(--bg); }
-#panel:not(.bot-surface) .pad-pref label { position: relative; }
-#panel:not(.bot-surface) .pad-pref input { position: absolute; inset: 0; opacity: 0; margin: 0; width: 100%; height: 100%; min-height: 0; cursor: pointer; }
-#panel:not(.bot-surface) .pad-pref span { display: grid; place-items: center; min-height: 34px; border-radius: 8px; font-size: 0.8rem; font-weight: 600; color: var(--muted); }
-#panel:not(.bot-surface) .pad-pref input:checked + span { background: var(--raised); color: var(--text); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05), 0 2px 6px rgba(0, 0, 0, 0.25); }
-#panel:not(.bot-surface) .pad-pref input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 1px; }
-
 /* A slider: its name and value on one line, − the track + on the next; the track fills to the value. */
 #panel:not(.bot-surface) .control.slider { display: grid; gap: 0.4rem; align-items: stretch; }
 #panel:not(.bot-surface) .slider-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; margin: 0; }
@@ -789,7 +807,6 @@ body.bot-mode-compact .bot-compact .bot-notice { color: var(--warn); background:
 #panel:not(.bot-surface) .notice[hidden] { display: none; }
 
 @media (prefers-reduced-motion: reduce) { #panel:not(.bot-surface) .stick, #panel:not(.bot-surface) .drive-pad .stop, #panel:not(.bot-surface) .stick-dirs { transition: none; } }
-#panel:not(.bot-surface) .pad-prefs { text-align: left; }
 /* A wide panel lays the cards in columns: each card is as tall as what it holds (the battery was a tall empty box). */
 #panel:not(.bot-surface) .widgets { align-items: start; }
 

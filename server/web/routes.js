@@ -48,7 +48,11 @@ function linkApkUrl() {
     const v = String(process.env.LINK_ANDROID_APK_URL || '').trim();
     return /^https:\/\/(github\.com\/OpenVibers\/OpenVibe\.Link\/releases\/|openvibe\.link\/)[^\s"'<>]+$/.test(v) ? v : null;
 }
-const { renderPanel, renderEmbedRefused, renderDrivePage, renderPairingPage, renderPhonePage, renderPhoneLinkPage, renderSharePage, renderShareGone, renderLinkPage, renderSignInPage, renderClaimPage, renderClaimApproved, renderFirstRunPage } = require('./render');
+const { renderPanel, renderEmbedRefused, renderDrivePage, renderPairingPage, renderPhonePage, renderPhoneLinkPage, renderSharePage, renderShareGone, renderLinkPage, renderSignInPage, renderClaimPage, renderClaimApproved, renderFirstRunPage, overlayStickMarkup, overlaySlider } = require('./render');
+const sharedServe = require('openvibe-shared/serve');
+const layoutStore = require('./layouts');
+const surface = require('./surface');
+const uiLayout = require('openvibe-sdk/ui-layout');
 const { createMachineScreen } = require('../machine-screen');
 const { createScreenShares } = require('../screen-shares');
 const { renderDocsIndex, renderDriversPage, renderProfilesPage, renderAutomationPage, renderComputersPage } = require('./docs');
@@ -688,7 +692,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         } catch (e) {
             if (e.status !== 422) throw e;
             res.status(422);
-            return sendPanel(res, robot, await profileOf(robot), 'owner', 'page', true, { automation: { routineError: e.detail || e.message, values: { name: b.name, steps: b.steps, trigger: kind, every: b.every, at: b.at, days: many(b.days) } } });
+            return sendPanel(req, res, robot, await profileOf(robot), 'owner', 'page', true, { automation: { routineError: e.detail || e.message, values: { name: b.name, steps: b.steps, trigger: kind, every: b.every, at: b.at, days: many(b.days) } } });
         }
         return res.redirect(303, `/panel/${robot.id}#routines`);
     }));
@@ -710,11 +714,11 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         try { made = await webhooks.create(robot, me, { url: req.body.url, events: many(req.body.events) }); } catch (e) {
             if (![409, 422].includes(e.status)) throw e;
             res.status(e.status);
-            return sendPanel(res, robot, await profileOf(robot), 'owner', 'page', true, { automation: { webhookError: e.detail || e.message } });
+            return sendPanel(req, res, robot, await profileOf(robot), 'owner', 'page', true, { automation: { webhookError: e.detail || e.message } });
         }
         // The secret is shown on this page alone (never in a URL), so the answer is the panel itself.
         res.status(201);
-        return sendPanel(res, robot, await profileOf(robot), 'owner', 'page', true, { automation: { webhookSecret: made.secret } });
+        return sendPanel(req, res, robot, await profileOf(robot), 'owner', 'page', true, { automation: { webhookSecret: made.secret } });
     }));
     r.post('/robots/:id/webhooks/:hid/remove', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
         const { robot } = await ownRobot(req);
@@ -911,7 +915,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         const role = await domain.members.roleOf(robot.id, me.subject);
         return role || (robot.access_policy === 'queue' ? 'queue' : null);
     }
-    async function sendPanel(res, robot, profile, role, mode = 'page', signedIn = true, profileForm = {}, view = 'panel') {
+    async function sendPanel(req, res, robot, profile, role, mode = 'page', signedIn = true, profileForm = {}, view = 'panel') {
         await attachInProcess(robot, profile);
         const effective = domain.control.effectiveLimits(robot, profile);
         const { maxCommandMs } = effective;
@@ -943,6 +947,54 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
             automation = { routines: await routines.list(robot.id), hooks, events: webhooks.EVENTS, describe: (t) => routines.describeTrigger(typeof t === 'string' ? JSON.parse(t) : t), ...(profileForm.automation || {}) };
         }
         const liveOrigin = (config.embed && config.embed.origins && config.embed.origins[0]) || null;
+        // The person's arrangement for this surface and device class, read before the page is drawn (never a
+        // flash of the default for a signed-in person). A Network that does not answer leaves the default.
+        const device = surface.deviceClass(req);
+        const token = req.cookies && req.cookies.ov_token;
+        // A layout made on another robot may name parts this one does not have: keep the parts this catalog knows,
+        // add the defaults of any it is missing, and use it only when the SDK accepts the result. Otherwise the
+        // panel draws its default (a stored layout is never a broken page).
+        const usable = (catalog, storedRaw, defaults) => {
+            if (!storedRaw || !Array.isArray(storedRaw.parts)) return null;
+            const known = new Set((catalog.parts || []).map((p) => p.id));
+            const parts = storedRaw.parts.filter((p) => p && known.has(p.id));
+            for (const d of defaults.parts || []) if (!parts.some((p) => p.id === d.id)) parts.push(d);
+            const candidate = { ...storedRaw, parts };
+            return uiLayout.validate(catalog, candidate).ok ? candidate : null;
+        };
+        const overlayView = mode === 'embed' && view !== 'panel';
+        let arrange;
+        if (overlayView) {
+            const slider = overlaySlider(profile, role === 'watcher' ? [] : domain.control.allowedFor(robot, role, profile));
+            const canDrive = role === 'watcher' && !signedIn;
+            const catalog = surface.overlayCatalog(profile, {
+                slider: slider ? { name: slider.name.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()) } : null,
+                hasStick: !!overlayStickMarkup(profile, role === 'watcher' ? [] : domain.control.allowedFor(robot, role, profile)),
+                canDrive,
+            });
+            const storedRaw = signedIn && token ? await layoutStore.activeLayout({ config, token, surface: catalog.id, device }) : null;
+            const fallbackLayout = surface.overlayDefaultLayout(catalog, device);
+            const stored = usable(catalog, storedRaw, fallbackLayout);
+            arrange = {
+                catalog, layout: stored || fallbackLayout, device,
+                signedIn: !!signedIn, layoutSource: stored ? 'account' : 'default',
+                save: `/panel/${robot.id}/arrange`, suggest: `/panel/${robot.id}/arrange/suggest`, share: `/panel/${robot.id}/arrange/share`, reset: `/panel/${robot.id}/arrange/reset`,
+                author: req.viewer ? { name: req.viewer.username || req.viewer.name || 'Me' } : null,
+            };
+        } else {
+            const catalog = surface.controlsCatalog(profile);
+            const storedRaw = signedIn && token ? await layoutStore.activeLayout({ config, token, surface: catalog.id, device }) : null;
+            const fallbackLayout = surface.defaultLayout(catalog, device);
+            const stored = usable(catalog, storedRaw, fallbackLayout);
+            let src = null;
+            try { src = sharedServe.url('ov-arrange.js'); } catch { /* an older openvibe-shared pin: no editor */ }
+            arrange = {
+                catalog, parts: surface.partsOf(profile), layout: stored || fallbackLayout, device,
+                signedIn: !!signedIn, layoutSource: stored ? 'account' : 'default', src,
+                save: `/panel/${robot.id}/arrange`, suggest: `/panel/${robot.id}/arrange/suggest`, share: `/panel/${robot.id}/arrange/share`, reset: `/panel/${robot.id}/arrange/reset`,
+                author: req.viewer ? { name: req.viewer.username || req.viewer.name || 'Me' } : null,
+            };
+        }
         res.type('html').send(renderPanel({
             robot: presentForPage(robot), profile, role, mode, view, signedIn, streaming, people, signaling_url,
             profileForm, automation, limitsInfo,
@@ -955,6 +1007,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
             // sixth of it (50 ms at the least). Half left about 90 ms of slack on LOOI, and ordinary Wi-Fi jitter expired
             // commands mid-hold (Maticus, 2026-11-11: four in 9 minutes, gaps of 171–257 ms).
             holdResendMs: Math.max(50, Math.min(HOLD_RESEND_MS, Math.floor(maxCommandMs / 6))),
+            arrange,
         }));
     }
 
@@ -988,7 +1041,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         if (action !== 'save') {
             const local = await domain.robots.localProfile(robot.id);
             state.catalogueId = local ? local.source_profile_id : robot.profile_id;
-            return sendPanel(res, robot, await profileOf(robot), 'owner', 'page', true, state);
+            return sendPanel(req, res, robot, await profileOf(robot), 'owner', 'page', true, state);
         }
         try {
             const buttons = {};
@@ -1009,7 +1062,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
             const local = await domain.robots.localProfile(robot.id);
             state.catalogueId = local ? local.source_profile_id : robot.profile_id;
             state.error = e.detail || e.message;
-            return sendPanel(res, robot, await profileOf(robot), 'owner', 'page', true, state);
+            return sendPanel(req, res, robot, await profileOf(robot), 'owner', 'page', true, state);
         }
         return res.redirect(303, `/panel/${robot.id}`);
     }));
@@ -1040,7 +1093,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         const profile = await profileOf(robot);
         if (!profile) throw new BotError(404, 'bot.profile_not_found', 'this robot has no profile');
         const local = role === 'owner' ? await domain.robots.localProfile(robot.id) : null;
-        await sendPanel(res, robot, profile, role, 'page', true, { catalogueId: local ? local.source_profile_id : robot.profile_id });
+        await sendPanel(req, res, robot, profile, role, 'page', true, { catalogueId: local ? local.source_profile_id : robot.profile_id });
     }));
 
     // The embed's Drive (server/control-tickets.js): the popup page, first-party, signs in if it must and then mints a
@@ -1086,8 +1139,75 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         // picture, or one row for a narrow card); panel is the full embed and the default. Anything else is panel.
         const asked = String(req.query.mode || '').toLowerCase();
         const view = ['overlay', 'compact'].includes(asked) ? asked : 'panel';
-        return sendPanel(res, robot, profile, role, 'embed', !!req.viewer, {}, view);
+        return sendPanel(req, res, robot, profile, role, 'embed', !!req.viewer, {}, view);
     }));
+
+    // ── The Arrange editor's three calls (make your own controls, stage 2) ──────────────────────────────
+    // The page never holds a Network token of its own: these carry the first-party session cookie to Network's
+    // person routes. A layout only arranges; the robot gate and limits are untouched.
+    const arrangeBody = express.json({ limit: '128kb' });
+    const arrangeSurface = (v) => (v === 'bot.controls' || v === 'bot.overlay' ? v : null);
+    const arrangeDevice = (v) => (['phone', 'tablet', 'computer'].includes(v) ? v : null);
+    const arrangeToken = (req) => req.cookies && req.cookies.ov_token;
+    const arrangeError = (res, e) => res.status(503).json({ ok: false, reasons: [String((e && (e.detail || e.message)) || 'Network is not reachable right now.')] });
+    r.post('/panel/:id/arrange', arrangeBody, async (req, res) => {
+        res.setHeader('Cache-Control', 'no-store');
+        try {
+            if (!sameOrigin(req)) return res.status(403).json({ ok: false, reasons: ['Cross-site saves are refused.'] });
+            requireUser(req);
+            const robot = await domain.robots.get(req.params.id);
+            if (!robot) return res.status(404).json({ ok: false, reasons: ['No such robot.'] });
+            const surfaceId = arrangeSurface(req.body && req.body.surface);
+            const device = arrangeDevice(req.body && req.body.device);
+            if (!surfaceId || !device || !req.body || !req.body.layout || !req.body.catalog) return res.status(422).json({ ok: false, reasons: ['Missing surface, device, catalog or layout.'] });
+            await layoutStore.saveLayout({ config, token: arrangeToken(req), surface: surfaceId, device, layout: req.body.layout, catalog: req.body.catalog });
+            res.json({ ok: true });
+        } catch (e) { arrangeError(res, e); }
+    });
+    r.post('/panel/:id/arrange/suggest', arrangeBody, async (req, res) => {
+        res.setHeader('Cache-Control', 'no-store');
+        try {
+            if (!sameOrigin(req)) return res.status(403).json({ ok: false, reasons: ['Cross-site asks are refused.'] });
+            requireUser(req);
+            const robot = await domain.robots.get(req.params.id);
+            if (!robot) return res.status(404).json({ ok: false, reasons: ['No such robot.'] });
+            const surfaceId = arrangeSurface(req.body && req.body.surface);
+            const device = arrangeDevice(req.body && req.body.device);
+            const words = String((req.body && req.body.words) || '').trim();
+            if (!surfaceId || !device || !words) return res.status(422).json({ ok: false, reasons: ['Say how you want it first.'] });
+            const out = await layoutStore.suggestLayout({ config, token: arrangeToken(req), surface: surfaceId, device, words, layout: req.body.layout || null, catalog: req.body.catalog || null });
+            res.json(out);
+        } catch (e) { arrangeError(res, e); }
+    });
+    r.post('/panel/:id/arrange/reset', arrangeBody, async (req, res) => {
+        res.setHeader('Cache-Control', 'no-store');
+        try {
+            if (!sameOrigin(req)) return res.status(403).json({ ok: false, reasons: ['Cross-site resets are refused.'] });
+            requireUser(req);
+            const robot = await domain.robots.get(req.params.id);
+            if (!robot) return res.status(404).json({ ok: false, reasons: ['No such robot.'] });
+            const surfaceId = arrangeSurface(req.body && req.body.surface);
+            const device = arrangeDevice(req.body && req.body.device);
+            if (!surfaceId || !device) return res.status(422).json({ ok: false, reasons: ['Missing surface or device.'] });
+            res.json(await layoutStore.resetLayout({ config, token: arrangeToken(req), surface: surfaceId, device }));
+        } catch (e) { arrangeError(res, e); }
+    });
+    r.post('/panel/:id/arrange/share', arrangeBody, async (req, res) => {
+        res.setHeader('Cache-Control', 'no-store');
+        try {
+            if (!sameOrigin(req)) return res.status(403).json({ ok: false, reasons: ['Cross-site shares are refused.'] });
+            requireUser(req);
+            const robot = await domain.robots.get(req.params.id);
+            if (!robot) return res.status(404).json({ ok: false, reasons: ['No such robot.'] });
+            const surfaceId = arrangeSurface(req.body && req.body.surface);
+            const device = arrangeDevice(req.body && req.body.device);
+            if (!surfaceId || !device || !req.body || !req.body.layout || !req.body.catalog) return res.status(422).json({ ok: false, reasons: ['Missing surface, device, catalog or layout.'] });
+            const out = await layoutStore.shareLayout({ config, token: arrangeToken(req), surface: surfaceId, device, layout: req.body.layout, catalog: req.body.catalog });
+            const url = out && (out.url || out.share_url || out.link);
+            if (!url) return res.status(503).json({ ok: false, reasons: ['Network did not make a link.'] });
+            res.json({ url });
+        } catch (e) { arrangeError(res, e); }
+    });
 
     return r;
 }
