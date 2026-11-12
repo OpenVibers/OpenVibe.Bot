@@ -82,12 +82,41 @@ const { boot, check, done } = require('./helpers/app');
             assert.strictEqual(other.status, 404, `${method} ${path}: ${other.text}`);
             assert.strictEqual(other.json.code, 'bot.device_not_found');
         }
+        // 2026-11-12: every switch of the machine card: the models, voice, and lending the desks to other people's
+        // agents (only where every desk is sandboxed; this fake Link's are).
+        for (const [route, col] of [['ai-models', 'ai_models'], ['voice', 'voice_on'], ['shared-desks', 'shared_desks']]) {
+            const r = await hub('POST', `/api/v1/machines/${mine.deviceId}/${route}`, { body: { on: true } });
+            assert.strictEqual(r.status, 200, `${route}: ${r.text}`);
+            assert.strictEqual((await t.db.maybe(`SELECT ${col} FROM devices WHERE id = $1`, [mine.deviceId]))[col], true, route);
+            const other = await hub('POST', `/api/v1/machines/${theirs.deviceId}/${route}`, { body: { on: true } });
+            assert.strictEqual(other.status, 404, `${route} on another person's machine: ${other.text}`);
+            const bad = await hub('POST', `/api/v1/machines/${mine.deviceId}/${route}`, { body: { on: 'yes' } });
+            assert.strictEqual(bad.status, 422, `${route}: on is true or false`);
+        }
+        assert.strictEqual((await hub('GET', '/api/v1/machines')).json.machines.find((m) => m.id === mine.deviceId).shared_desks, true, 'the card reads it back');
+        const lentOff = await t.call('POST', `/api/v1/machines/${mine.deviceId}/shared-desks`, { user: alex, body: { on: false } });
+        assert.strictEqual(lentOff.status, 200, lentOff.text);
+        assert.strictEqual(lentOff.json.machine.shared_desks, false, 'the person themselves stops lending');
         // Another service with the capability cannot act for a person.
         const stranger = await t.call('POST', `/api/v1/machines/${mine.deviceId}/agent-computer`, {
             body: { on: true }, sub: 'svc:codes', cap: ['bot.machine.manage'], headers: { 'X-OV-Subject': alex.subject },
         });
         assert.strictEqual(stranger.status, 403, stranger.text);
         assert.strictEqual(stranger.json.code, 'bot.forbidden');
+    });
+
+    await check('a computer whose desks are not each in a sandbox cannot lend them to other people', async () => {
+        // The same machine, now saying its desks share one browser profile (no sandbox of their own).
+        mine.c.send(frame('status', { capabilities: { computer: { ...COMPUTER, desk: { ...COMPUTER.desk, isolation: 'profile' } } }, drivers: [], faults: [] }));
+        await poll(() => { const o = t.hub.computerOf(mine.deviceId); return o && o.desk && o.desk.isolation === 'profile'; });
+        const r = await hub('POST', `/api/v1/machines/${mine.deviceId}/shared-desks`, { body: { on: true } });
+        assert.strictEqual(r.status, 409, r.text);
+        assert.strictEqual(r.json.code, 'bot.desks_not_sandboxed');
+        assert.strictEqual((await t.db.maybe('SELECT shared_desks FROM devices WHERE id = $1', [mine.deviceId])).shared_desks, false);
+        const off = await hub('POST', `/api/v1/machines/${mine.deviceId}/shared-desks`, { body: { on: false } });
+        assert.strictEqual(off.status, 200, 'turning it off always works');
+        mine.c.send(frame('status', { capabilities: { computer: COMPUTER }, drivers: [], faults: [] }));
+        await poll(() => { const o = t.hub.computerOf(mine.deviceId); return o && o.desk && o.desk.isolation === 'sandbox'; });
     });
 
     await check('the live screen: the hub starts it for ten minutes, reads it, takes the input and stops it', async () => {

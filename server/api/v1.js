@@ -704,10 +704,10 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         const updated = await domain.machines.setWatchProbe(device.id, req.body.on);
         res.json({ machine: machineOut(updated) });
     }));
-    // The owner lets Vibe answer their voice on the machine, with a call word, or stops it (never an agent or a service).
+    // The owner lets Vibe answer their voice on the machine, with a call word, or stops it (never an agent or another
+    // service). The network's hub does the same for the person from their own session (2026-11-12: the machine card).
     r.post('/machines/:id/voice', manage, wrap(async (req, res) => {
-        if (req.principal.kind !== 'user') fail(403, 'bot.forbidden', 'only the machine\'s owner turns this on or off');
-        const { device } = await computerMachine(req, { agentNeedsOptIn: false });
+        const { device } = req.principal.kind === 'user' ? await computerMachine(req, { agentNeedsOptIn: false }) : await hubMachine(req);
         if (typeof req.body?.on !== 'boolean') fail(422, 'bot.invalid_input', 'on is true or false');
         const word = req.body.call_word == null ? null : validCallWord(req.body.call_word);
         if (req.body.call_word != null && !word) fail(422, 'bot.invalid_input', 'a call word is 1 to 4 words, 3 to 40 characters, with one word of three letters or more');
@@ -715,12 +715,28 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         if (hub && hub.machineChanged) await hub.machineChanged(updated);
         res.json({ machine: machineOut(updated) });
     }));
-    // The owner lets their AI run models on this machine, or stops it (never the AI itself).
+    // The owner lets their AI run models on this machine, or stops it (never the AI itself). The network's hub does the
+    // same for the person from their own session (2026-11-12: the machine card).
     r.post('/machines/:id/ai-models', manage, wrap(async (req, res) => {
-        if (req.principal.kind !== 'user') fail(403, 'bot.forbidden', 'only the machine\'s owner turns this on or off');
-        const { device } = await computerMachine(req, { agentNeedsOptIn: false });
+        const { device } = req.principal.kind === 'user' ? await computerMachine(req, { agentNeedsOptIn: false }) : await hubMachine(req);
         if (typeof req.body?.on !== 'boolean') fail(422, 'bot.invalid_input', 'on is true or false');
         const updated = await domain.machines.setAiModels(device.id, req.body.on);
+        res.json({ machine: machineOut(updated) });
+    }));
+    // The owner lends this machine's desks to agents other people run, or stops (never an agent or another service). A
+    // machine may lend them only where its Link keeps every desk in its own sandbox (installed with --desk-host
+    // --shared): browser desks with the public internet only, nothing of the machine itself. Desk leases check it again
+    // for every session (desk-leases.js usable()). Until 2026-11-12 nothing could set it but the database.
+    r.post('/machines/:id/shared-desks', manage, wrap(async (req, res) => {
+        const { device } = req.principal.kind === 'user' ? await computerMachine(req, { agentNeedsOptIn: false }) : await hubMachine(req);
+        if (typeof req.body?.on !== 'boolean') fail(422, 'bot.invalid_input', 'on is true or false');
+        if (req.body.on) {
+            const offered = hub.computerOf(device.id) || computerCaps(device.capabilities);
+            if (!(offered && offered.desk && offered.desk.isolation === 'sandbox')) {
+                fail(409, 'bot.desks_not_sandboxed', 'this computer does not keep each desk in a sandbox of its own, so it cannot lend them; set it up again as a shared desk host (openvibe-link install --desk-host --shared)');
+            }
+        }
+        const updated = await domain.machines.setSharedDesks(device.id, req.body.on);
         res.json({ machine: machineOut(updated) });
     }));
     // The owner turns their agent's use of the machine on or off (never the agent itself). The network's hub does
