@@ -814,3 +814,42 @@ body.bot-mode-compact .bot-compact .bot-notice { color: var(--warn); background:
    and position was perfect"): Controls v2 is the full panel's (#panel:not(.bot-surface) above); their stick draws its
    dots, not the v2 direction marks. */
 .bot-surface .stick-dirs { display: none; }
+
+/* ── LOOI headlights (the full panel only, Controls v2's family) ── One row: the sun in its own circle (amber and glowing
+   when on), the name, and the state as a pill at the end; waiting for the robot, the pill breathes. Unknown offers two
+   choices under it. "Not confirmed on the robot" is a quiet line, because the light's state is what was commanded. */
+#panel:not(.bot-surface) .headlight { display: grid; gap: 0.45rem; margin-top: 0.75rem; }
+#panel:not(.bot-surface) .headlight-toggle {
+  display: flex; align-items: center; gap: 0.7rem; width: 100%; min-height: 52px; padding: 0.45rem 0.6rem 0.45rem 0.45rem;
+  border-radius: 14px; border: 1px solid var(--line); background: var(--raised); color: var(--text); font: inherit; font-weight: 650;
+  cursor: pointer; transition: border-color 0.18s ease, background-color 0.18s ease, transform 0.12s ease;
+}
+#panel:not(.bot-surface) .headlight-toggle:hover:not(:disabled) { border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
+#panel:not(.bot-surface) .headlight-toggle:active:not(:disabled) { transform: scale(0.98); }
+#panel:not(.bot-surface) .headlight-toggle:disabled { cursor: progress; opacity: 1; filter: none; }
+#panel:not(.bot-surface) .headlight-toggle .icon {
+  width: 36px; height: 36px; padding: 8px; flex: none; border-radius: 50%; box-sizing: border-box;
+  color: var(--muted); background: color-mix(in srgb, var(--text) 7%, transparent); transition: color 0.2s ease, background-color 0.2s ease, box-shadow 0.25s ease;
+}
+#panel:not(.bot-surface) .headlight-toggle .control-name { flex: 1 1 auto; text-align: left; color: var(--text); font-size: 0.95rem; letter-spacing: normal; text-transform: none; }
+#panel:not(.bot-surface) .headlight-state {
+  flex: none; min-width: 4.5rem; padding: 0.3rem 0.7rem; border-radius: 999px; text-align: center; font-size: 0.8rem; font-weight: 700;
+  color: var(--muted); border: 1px solid var(--line); background: transparent;
+}
+#panel:not(.bot-surface) .headlight[data-state="on"] .headlight-toggle { border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); background: color-mix(in srgb, var(--warn) 9%, var(--raised)); }
+#panel:not(.bot-surface) .headlight[data-state="on"] .headlight-toggle .icon { color: #1a1300; background: var(--warn); box-shadow: 0 0 0 4px color-mix(in srgb, var(--warn) 22%, transparent), 0 0 18px color-mix(in srgb, var(--warn) 55%, transparent); }
+#panel:not(.bot-surface) .headlight[data-state="on"] .headlight-state { color: #1a1300; background: var(--warn); border-color: var(--warn); }
+#panel:not(.bot-surface) .headlight[data-state="off"] .headlight-state { color: var(--text); }
+#panel:not(.bot-surface) .headlight[data-state="unknown"] .headlight-state { border-style: dashed; }
+#panel:not(.bot-surface) .headlight[data-state="pending"] .headlight-state { color: var(--text); border-color: color-mix(in srgb, var(--warn) 60%, var(--line)); animation: headlight-wait 1.2s ease-in-out infinite; }
+@keyframes headlight-wait { 50% { background: color-mix(in srgb, var(--warn) 18%, transparent); } }
+html[data-ov-motion="off"] #panel:not(.bot-surface) .headlight[data-state="pending"] .headlight-state { animation: none; }
+@media (prefers-reduced-motion: reduce) { #panel:not(.bot-surface) .headlight[data-state="pending"] .headlight-state { animation-duration: 2.4s; } }
+#panel:not(.bot-surface) .headlight-choices:not([hidden]) { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+#panel:not(.bot-surface) .headlight-choices button {
+  min-height: 44px; border-radius: 12px; border: 1px solid var(--line); background: transparent; color: var(--text); font: inherit; font-weight: 650; cursor: pointer;
+}
+#panel:not(.bot-surface) .headlight-choices [data-headlight-on] { background: var(--warn); border-color: var(--warn); color: #1a1300; }
+#panel:not(.bot-surface) .headlight-unconfirmed { font-size: 0.78rem; color: var(--muted); padding-left: 0.2rem; }
+#panel:not(.bot-surface) .headlight-unconfirmed[hidden] { display: none; }
+#panel:not(.bot-surface) .headlight-note { margin: 0.35rem 0 0; font-size: 0.85rem; color: var(--warn); }

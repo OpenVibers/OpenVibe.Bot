@@ -5,13 +5,13 @@
   "runtime": "node 22, express 4, ws; PostgreSQL 18 via openvibe-sdk/db (pg, or embedded PGlite in tests); Valkey optional; no build step",
   "port": 4630,
   "domain": "openvibe.bot (www -> apex; /device and /control WebSockets; /install)",
-  "contracts": "openvibe-contracts v0.406.0",
-  "sdk": "openvibe-sdk 0.151.0 (reviewed commit 6236bf23edc3f73c8eaed78f3616bb25d253ff29)",
-  "shared": "openvibe-shared 4.214.0 (reviewed commit ed8f4356b7c764257a4c718c0da1e24e1ab47788)",
+  "contracts": "openvibe-contracts v0.410.0",
+  "sdk": "openvibe-sdk v0.152.0",
+  "shared": "openvibe-shared v4.214.0",
   "packages": [
-    "openvibe-contracts v0.406.0",
-    "openvibe-sdk 0.151.0 (commit 6236bf23edc3f73c8eaed78f3616bb25d253ff29)",
-    "openvibe-shared 4.214.0 (commit ed8f4356b7c764257a4c718c0da1e24e1ab47788)"
+    "openvibe-contracts v0.410.0",
+    "openvibe-sdk v0.152.0",
+    "openvibe-shared v4.214.0"
   ],
   "capabilities": [
     "bot.robot.read",
