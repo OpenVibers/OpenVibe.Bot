@@ -84,12 +84,12 @@ function panelPage() {
 }
 
 (async () => {
-    await check('the battery row says read at connect, updated Ns/min ago, or nothing; a missing reading is a dash and unknown', () => {
+    await check('the battery row says provisional at connect, updated Ns/min ago, or nothing; a missing reading is a dash and unknown', () => {
         const page = panelPage();
         page.state({ battery: 0.42, telemetry: { sensors: { p7_battery: { pct: 42, unverified: true, at: iso(NOW - 500) } } } });
         assert.strictEqual(page.batteryText.textContent, '42 %');
         assert.strictEqual(page.batteryNote.hidden, true);
-        assert.strictEqual(page.batteryFreshness.textContent, 'read at connect');
+        assert.strictEqual(page.batteryFreshness.textContent, 'provisional, read at connect');
         assert.strictEqual(page.batteryFreshness.hidden, false);
         page.state({ battery: 0.42, telemetry: { sensors: { p7_battery: { pct: 42, at: iso(NOW - 12300) } } } });
         assert.strictEqual(page.batteryFreshness.textContent, 'updated 12s ago');
@@ -106,14 +106,16 @@ function panelPage() {
         assert.strictEqual(page.batteryFreshness.hidden, true, 'a missing reading has no freshness note');
     });
 
-    await check('a polled reading says provisional, updated Ns ago (source poll, Maticus 11-12)', () => {
+    await check('a fresh poll is not provisional; unverified (at connect or stale) is (Maticus\'s P7 list, 11-12)', () => {
         const page = panelPage();
-        page.state({ battery: 0.6, telemetry: { sensors: { p7_battery: { pct: 60, usb: false, raw: 153, unverified: true, source: 'poll', at: iso(NOW - 7400) } } } });
-        assert.strictEqual(page.batteryFreshness.textContent, 'provisional, updated 7s ago');
-        page.state({ battery: 0.6, telemetry: { sensors: { p7_battery: { pct: 60, unverified: true, source: 'poll', at: NOW - 180000 } } } });
-        assert.strictEqual(page.batteryFreshness.textContent, 'provisional, updated 3m ago');
-        page.state({ battery: 0.6, telemetry: { sensors: { p7_battery: { pct: 60, unverified: true, at: iso(NOW - 500) } } } });
-        assert.strictEqual(page.batteryFreshness.textContent, 'read at connect', 'a read at connect still says so');
+        page.state({ battery: 0.6, telemetry: { sensors: { p7_battery: { pct: 60, usb: false, raw: 153, at: NOW - 7400 } } } });
+        assert.strictEqual(page.batteryFreshness.textContent, 'updated 7s ago', 'a fresh poll: { pct, usb, raw, at }, no unverified');
+        page.state({ battery: 0.6, telemetry: { sensors: { p7_battery: { pct: 60, unverified: true, at: NOW - 180000 } } } });
+        assert.strictEqual(page.batteryFreshness.textContent, 'provisional, from 3m ago', 'a stale value');
+        page.state({ battery: 0.6, telemetry: { sensors: { p7_battery: { pct: 60, unverified: true, source: 'connect', at: iso(NOW - 500) } } } });
+        assert.strictEqual(page.batteryFreshness.textContent, 'provisional, read at connect');
+        page.state({ battery: 0.6, telemetry: { sensors: { p7_battery: { pct: 60, unverified: true } } } });
+        assert.strictEqual(page.batteryFreshness.textContent, 'provisional, read at connect', 'unverified with no time: a read at connect');
     });
 
     await check('the head slider names its mounting: Portrait and its range, or Landscape; nothing without p7_head', () => {

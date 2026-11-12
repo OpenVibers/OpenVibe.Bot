@@ -1443,8 +1443,10 @@
         pill.dataset.state = dataState;
     }
     // Battery | Latency. A missing reading is a dash, an empty bar and the word unknown, never 0 %; a voltage is
-    // never invented. The tray's reading says how fresh it is: "read at connect" for an unverified FED8 read, or
-    // "updated 12s ago" from its `at`. No `at` and not unverified: no note.
+    // never invented. The tray's reading says how fresh it is (Maticus's P7 list, 2026-11-12): a fresh poll is
+    // { pct, usb, raw, at } with no `unverified`, shown as "updated 12s ago"; `unverified` comes only with a read at
+    // connect or a stale value, shown as "provisional" with its age ("provisional, from 3m ago", or "provisional, read
+    // at connect" when the tray says so). No `at` and not unverified: no note.
     function batteryAge(at) {
         const then = typeof at === 'number' ? at : Date.parse(at);
         if (!Number.isFinite(then)) return '';
@@ -1474,10 +1476,12 @@
         const p7 = sensors && sensors.p7_battery && typeof sensors.p7_battery === 'object' ? sensors.p7_battery : null;
         let freshness = '';
         if (fraction != null && p7) {
-            // The tray polls it now (source 'poll'): still provisional, but as fresh as its `at` (Maticus, 2026-11-12).
-            if (p7.source === 'poll' && p7.at != null) { const age = batteryAge(p7.at); freshness = age ? `provisional, updated ${age} ago` : 'provisional'; }
-            else if (p7.unverified === true) freshness = 'read at connect';
-            else if (p7.at != null) {
+            if (p7.unverified === true) {
+                // A minute old or less is the read at connect; older is a value gone stale.
+                const then = p7.at == null ? NaN : (typeof p7.at === 'number' ? p7.at : Date.parse(p7.at));
+                const stale = Number.isFinite(then) && Date.now() - then > 60000 && p7.source !== 'connect';
+                freshness = stale ? `provisional, from ${batteryAge(p7.at)} ago` : 'provisional, read at connect';
+            } else if (p7.at != null) {
                 const age = batteryAge(p7.at);
                 if (age) freshness = `updated ${age} ago`;
             }
