@@ -25,9 +25,9 @@ CREATE TABLE robots (
     profile_version integer NOT NULL DEFAULT 1,
     access_policy   text NOT NULL DEFAULT 'private' CHECK (access_policy IN ('private', 'invite', 'queue')),
     limits          jsonb NOT NULL DEFAULT '{}',         -- owner-set: max_speed, max_turn, max_command_ms, turn_ms, turn_budget, cooldown_ms, allow
-    estop_latched   boolean NOT NULL DEFAULT false,   -- legacy stop latch, no longer read or written; contract-migration later
-    estop_by        text,                                -- legacy: who latched it; unused
-    estop_at        timestamptz,                        -- legacy; unused
+    estop_latched   boolean NOT NULL DEFAULT false,
+    estop_by        text,                                -- the principal that latched it, or 'device'
+    estop_at        timestamptz,
     created_at      timestamptz NOT NULL,
     updated_at      timestamptz NOT NULL
 );
@@ -94,7 +94,7 @@ CREATE TABLE command_audit (
     operator_subject text,                               -- the person, or the subject a service acted for
     operator_kind    text,                               -- user | service
     role             text,                               -- owner | operator | viewer | null
-    kind             text,                               -- drive | actuator | ptz | say | display | halt
+    kind             text,                               -- drive | actuator | ptz | say | display | halt | estop
     value            jsonb NOT NULL DEFAULT '{}',        -- a small summary (clamped axes, servo, text length), never a credential
     result           text NOT NULL CHECK (result IN ('ack', 'nack', 'refused', 'expired')),
     reason           text,
