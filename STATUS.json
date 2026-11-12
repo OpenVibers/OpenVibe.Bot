@@ -6,11 +6,11 @@
   "port": 4630,
   "domain": "openvibe.bot (www -> apex; /device and /control WebSockets; /install)",
   "contracts": "openvibe-contracts v0.416.0",
-  "sdk": "openvibe-sdk v0.152.0",
+  "sdk": "openvibe-sdk v0.160.0",
   "shared": "openvibe-shared v4.223.1",
   "packages": [
     "openvibe-contracts v0.416.0",
-    "openvibe-sdk v0.152.0",
+    "openvibe-sdk v0.160.0",
     "openvibe-shared v4.223.1"
   ],
   "capabilities": [
