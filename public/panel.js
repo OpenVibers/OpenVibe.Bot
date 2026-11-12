@@ -315,6 +315,23 @@
     const sentAt = new Map();     // id → performance.now() at send
     const samples = [];           // the last round trips, ms
     let lastTelemetryAt = 0;
+    // A robot that was online moments ago reads "Reconnecting…" for a short grace before "Device offline": every Bot
+    // deploy restarts it (WebSocket close 1012) and Link dials back in about 2 s, which showed streamers "offline" for
+    // a blink each time (Maticus, 2026-11-12). The controls still follow the truth: they are off while it is away.
+    const RECONNECT_GRACE_MS = 8000;
+    let lastOnlineAt = 0;
+    let graceTimer = null;
+    let lastPainted = null;
+    function onlineNow(state) {
+        if (state.online) { lastOnlineAt = performance.now(); clearTimeout(graceTimer); graceTimer = null; return 'online'; }
+        const since = performance.now() - lastOnlineAt;
+        if (lastOnlineAt && since < RECONNECT_GRACE_MS) {
+            clearTimeout(graceTimer);
+            graceTimer = setTimeout(() => { graceTimer = null; if (lastPainted && !lastPainted.online) paint(lastPainted); }, RECONNECT_GRACE_MS - since + 50);
+            return 'reconnecting';
+        }
+        return 'offline';
+    }
     function send(kind, value) {
         if (!joined || !allowed.includes(kind)) return false;
         const id = newId();
@@ -1416,7 +1433,9 @@
         if (!pill) return;
         const queue = state.queue;
         let label = 'Online'; let dataState = 'online';
-        if (!state.online) { label = 'Offline'; dataState = 'offline'; }
+        const now = onlineNow(state);
+        if (now === 'reconnecting') { label = 'Reconnecting…'; dataState = 'busy'; }
+        else if (now === 'offline') { label = 'Offline'; dataState = 'offline'; }
         else if (queue && queue.active) { label = 'Your turn'; dataState = 'turn'; }
         else if (queue && queue.turn_ends_at) { label = 'Someone else driving'; dataState = 'busy'; }
         const text = $('[data-bot-state]');
@@ -1432,13 +1451,32 @@
         const ms = Math.max(0, Date.now() - then);
         return ms < 60000 ? `${Math.floor(ms / 1000)}s` : `${Math.floor(ms / 60000)}m`;
     }
+    // The head's mounting, as the tray reports it in sensors.p7_head { orientation, min, max, center } (raw 0-255, 255
+    // is down): Portrait adds a down-travel floor so a phone mounted upright cannot hit the chassis. Display only; the
+    // tray clamps every head command itself (Maticus, 2026-11-12).
+    function paintHeadRange(state) {
+        const sensors = state.telemetry && state.telemetry.sensors;
+        const h = sensors && sensors.p7_head && typeof sensors.p7_head === 'object' ? sensors.p7_head : null;
+        const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : null);
+        const orientation = h && typeof h.orientation === 'string' ? h.orientation.toLowerCase() : '';
+        const [min, max, center] = h ? [num(h.min), num(h.max), num(h.center)] : [null, null, null];
+        let text = '';
+        if (orientation === 'portrait' || orientation === 'landscape') {
+            const name = orientation === 'portrait' ? 'Portrait' : 'Landscape';
+            const range = min != null && max != null ? ` · ${min}–${max}` : '';
+            text = `${name}${range}${center != null ? `, centre ${center}` : ''}`;
+        }
+        for (const el of $$('[data-head-range]')) { el.textContent = text; el.hidden = !text; el.dataset.orientation = orientation || ''; }
+    }
     function paintBattery(state) {
         const fraction = state.battery;
         const sensors = state.telemetry && state.telemetry.sensors;
         const p7 = sensors && sensors.p7_battery && typeof sensors.p7_battery === 'object' ? sensors.p7_battery : null;
         let freshness = '';
         if (fraction != null && p7) {
-            if (p7.unverified === true) freshness = 'read at connect';
+            // The tray polls it now (source 'poll'): still provisional, but as fresh as its `at` (Maticus, 2026-11-12).
+            if (p7.source === 'poll' && p7.at != null) { const age = batteryAge(p7.at); freshness = age ? `provisional, updated ${age} ago` : 'provisional'; }
+            else if (p7.unverified === true) freshness = 'read at connect';
             else if (p7.at != null) {
                 const age = batteryAge(p7.at);
                 if (age) freshness = `updated ${age} ago`;
@@ -1454,8 +1492,10 @@
     }
     function paint(state) {
         if (!state) return;
+        lastPainted = state;
         paintFaults(state);
-        setOnline(state.online ? 'online' : 'offline', state.online ? 'Online' : 'Device offline');
+        const now = onlineNow(state);
+        setOnline(now === 'online' ? 'online' : now === 'reconnecting' ? 'disconnected' : 'offline', now === 'online' ? 'Online' : now === 'reconnecting' ? 'Reconnecting…' : 'Device offline');
         paintBotPill(state);
         main.dataset.deviceOnline = String(!!state.online);
         if (state.telemetry) lastTelemetryAt = performance.now();
@@ -1467,6 +1507,7 @@
             el.dataset.quality = quality(state.latency_ms, 120, 300);
         }
         paintBattery(state);
+        paintHeadRange(state);
         const sensors = state.telemetry && state.telemetry.sensors;
         headlightTelemetry(sensors);
         for (const el of $$('[data-telemetry]')) {

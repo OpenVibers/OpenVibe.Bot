@@ -208,7 +208,9 @@ function actuatorControl(name, a, enabled, profileId = '') {
     const off = disabledUnless(enabled);
     const label = humanName(name);
     if (a.type === 'number') {
-        return `<div class="control slider"><label class="slider-head"><span class="control-name">${esc(label)}</span><output class="control-value" data-value-of="${esc(name)}">0</output></label>`
+        // The head's mounting (Portrait or Landscape and its range), painted from sensors.p7_head when the robot sends it.
+        const note = name === 'head' ? '<span class="slider-note" data-head-range hidden></span>' : '';
+        return `<div class="control slider"><label class="slider-head"><span class="control-name">${esc(label)}</span>${note}<output class="control-value" data-value-of="${esc(name)}">0</output></label>`
             + `<div class="slider-row"><button type="button" class="step" data-step-for="${esc(name)}" data-step="-1" aria-label="${esc(`${label} down`)}"${off}>${icon('minus')}</button>`
             + `${numberRange(name, a, enabled, profileId)}`
             + `<button type="button" class="step" data-step-for="${esc(name)}" data-step="1" aria-label="${esc(`${label} up`)}"${off}>${icon('plus')}</button></div></div>`;
