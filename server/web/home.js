@@ -162,7 +162,7 @@ function moreSection({ config, kit: k, models }) {
     const base = config.baseUrl;
     const panel = rows([
         ['/try', 'Real controls', 'A touch joystick, the keyboard or a gamepad, plus buttons and sliders, laid out from the robot\'s profile, with a latency meter.'],
-        ['/docs/profiles', 'Safe by default', 'Per-robot limits, cooldowns and a turn budget on every command; a latched emergency stop that only the owner clears; a halt always gets through.'],
+        ['/docs/profiles', 'Safe by default', 'Per-robot limits, cooldowns and a turn budget on every command; a latched emergency stop that the owner or a Mod clears (the panel latch only); a halt always gets through.'],
         ['/robots', 'Every command on the record', 'Allowed or refused, each command is audited and kept for 30 days.'],
         ['/robots', 'Share control', 'Add people by @username as operators or viewers, or open a queue where visitors take turns.'],
         ['https://openvibe.live/', 'Show it on your channel', 'Bind the robot to your OpenVibe.Live channel: its panel shows under your stream, and anyone allowed takes the controls there.'],
@@ -225,7 +225,7 @@ function faqItems({ models }) {
         { q: 'Do I need to open ports on my router?', a: 'No. The robot\'s computer connects out to OpenVibe, so it works behind an ordinary home or mobile connection. The Adeept kit\'s own control server, with its fixed password, is never run.' },
         { q: 'Can I try it without a robot?', a: 'Yes. The simulated rover at openvibe.bot/try runs in your browser with no account and no hardware, through the same panel a paired robot gets.' },
         list ? { q: 'Which robots work today?', a: `${list}. Each has a profile the panel draws its controls from, and anything a local script can switch works through the relay robot.` } : null,
-        { q: 'How does it keep the robot safe?', a: 'Every command passes one gate with roles, per-robot limits, cooldowns and a turn budget. The emergency stop is latched until the owner clears it, a stop pressed on the robot holds until it is released there, and the device stops its motors by itself when commands stop arriving.' },
+        { q: 'How does it keep the robot safe?', a: 'Every command passes one gate with roles, per-robot limits, cooldowns and a turn budget. The emergency stop is latched until the owner or a Mod clears the panel latch, a stop pressed on the robot holds until it is released there, and the device stops its motors by itself when commands stop arriving.' },
         { q: 'Can other people drive my robot?', a: 'Only if you say so. Add people by @username as operators or viewers, or open a queue where signed-in visitors take timed turns. Listing a robot in the directory lets anyone watch it.' },
         { q: 'Can I show it on my stream?', a: 'Yes. Bind the robot to your OpenVibe.Live channel and its panel shows under your stream, where anyone you allow can take the controls.' },
         { q: 'Can my AI agent drive it?', a: 'Only when you turn on Your agent for that robot. Then your OpenVibe.Actor agent can read its state and run steps as you, through the same gate, and for nobody else.' },

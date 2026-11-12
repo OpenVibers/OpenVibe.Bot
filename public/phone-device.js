@@ -204,7 +204,7 @@
         stopBtn.textContent = localStop ? 'Resume' : 'Stop';
         stopBtn.classList.toggle('resume', localStop);
         const note = $('[data-safety]');
-        note.textContent = localStop ? 'Stopped on this phone: press Resume, then the owner clears the e-stop.' : remoteLatched ? 'The robot\'s e-stop is latched: the owner clears it on the panel.' : '';
+        note.textContent = localStop ? 'Stopped on this phone: press Resume, then the owner or a Mod clears the panel e-stop.' : remoteLatched ? 'The robot\'s e-stop is latched: the owner clears it on the panel.' : '';
         note.hidden = !note.textContent;
     }
 

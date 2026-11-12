@@ -30,14 +30,14 @@ const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ESC[c])
 /** A data-* attribute's JSON, escaped for a double-quoted attribute. */
 const data = (v) => esc(JSON.stringify(v));
 
-/** The e-stop is the owner's and an operator's; only the owner clears it (the gate enforces both). */
-const ESTOP_ROLES = new Set(['owner', 'operator']);
+/** The panel e-stop is the owner's, a Mod's and an operator's; the owner or a Mod clears it (the gate enforces it). */
+const ESTOP_ROLES = new Set(['owner', 'mod', 'operator']);
 /** The drive joystick's two axes, by preference: horizontal and vertical. The rest stay hold buttons. */
 const STICK_X = ['steer', 'x', 'rotation'];
 const STICK_Y = ['throttle', 'y'];
 const POLICIES = [['private', 'Only me and people I add'], ['invite', 'People I invite'], ['queue', 'Anyone, taking turns']];
 const POLICY_LABEL = Object.fromEntries(POLICIES.map(([v]) => [v, { private: 'Private', invite: 'Invite only', queue: 'Open queue' }[v]]));
-const ROLE_LABEL = { owner: 'Owner', operator: 'Operator', viewer: 'Viewer', queue: 'In the queue', watcher: 'Watching' };
+const ROLE_LABEL = { owner: 'Owner', mod: 'Mod', operator: 'Operator', viewer: 'Viewer', queue: 'In the queue', watcher: 'Watching' };
 
 // ── Icons: 24×24 strokes in currentColor, decorative (the text beside them is the label) ─────────────────────
 const PATHS = {
@@ -63,6 +63,16 @@ const PATHS = {
     external: '<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
 };
 const icon = (name, cls = 'icon') => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${PATHS[name] || ''}</svg>`;
+// The network's one glyph registry (openvibe-shared/glyphs): a Font Awesome name or a glyph name, drawn in the
+// panel's currentColor. The old inline PATHS stay for the controls they already draw.
+let glyphs = null;
+try { glyphs = require('openvibe-shared/glyphs'); } catch { /* an older shared pin: the inline PATHS only */ }
+const glyphIcon = (name, cls = 'icon') => {
+    if (!glyphs) return icon(name, cls);
+    const found = glyphs.path(name) ? name : glyphs.fromFa(name);
+    const d = found ? glyphs.path(found) : '';
+    return d ? `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${d}</svg>` : icon(name, cls);
+};
 /** Hold-button icons by axis: [negative, positive]. */
 const AXIS_ICONS = { throttle: ['down', 'up'], y: ['down', 'up'], steer: ['left', 'right'], x: ['left', 'right'], rotation: ['ccw', 'cw'], pan: ['left', 'right'], tilt: ['down', 'up'], zoom: ['minus', 'plus'] };
 const AXIS_NAME = { throttle: 'Forward / back', y: 'Forward / back', steer: 'Steer', x: 'Sideways', rotation: 'Turn on the spot', pan: 'Pan', tilt: 'Tilt', zoom: 'Zoom' };
@@ -312,14 +322,22 @@ function renderWidget(w, { profile = {}, allowed_commands = [], signaling_url = 
             inner = `<output class="readout" data-telemetry="${esc(w.capability || '')}">—</output>`;
             break;
         case 'battery':
-            inner = '<div class="battery"><meter min="0" max="1" low="0.25" high="0.6" optimum="1" data-battery></meter> <output class="readout" data-battery-text>—</output></div>';
+            // The LOOI status row: a big percentage, a fill bar, a dash and the word "unknown" when there is no
+            // reading (never 0 %), and a quiet provisional note when the tray sent an unverified FED8 read.
+            inner = '<div class="battery">'
+                + '<div class="battery-head"><output class="readout" data-battery-text>—</output><span class="battery-note" data-battery-note>unknown</span></div>'
+                + '<meter min="0" max="1" low="0.25" high="0.6" optimum="1" data-battery></meter>'
+                + '<span class="battery-provisional" data-battery-provisional hidden>provisional, at connect</span>'
+                + '</div>';
             break;
         case 'latency':
-            inner = '<div class="stats">'
-                + '<div class="stat"><output class="readout" data-latency data-quality="none">—</output><span class="stat-label">Round trip, median</span></div>'
-                + '<div class="stat"><output class="readout" data-telemetry-age data-quality="none">—</output><span class="stat-label">Telemetry age</span></div>'
-                + '<div class="stat"><output class="readout" data-link>—</output><span class="stat-label">Device link</span></div>'
-                + '</div>';
+            inner = profile.id === 'looi'
+                ? '<div class="stat"><output class="readout" data-latency data-quality="none">—</output><span class="stat-label">Latency, round trip</span></div>'
+                : '<div class="stats">'
+                    + '<div class="stat"><output class="readout" data-latency data-quality="none">—</output><span class="stat-label">Round trip, median</span></div>'
+                    + '<div class="stat"><output class="readout" data-telemetry-age data-quality="none">—</output><span class="stat-label">Telemetry age</span></div>'
+                    + '<div class="stat"><output class="readout" data-link>—</output><span class="stat-label">Device link</span></div>'
+                    + '</div>';
             break;
         case 'camera':
             inner = `<div class="cameras">${cameraTiles(w, profile, signaling_url,
@@ -530,7 +548,7 @@ const outLink = (href, text, cls = 'button') => `<a class="${cls}" href="${esc(h
  * Rendered only for the owner's own page.
  */
 function peopleCard(robot, people) {
-    const roleName = (r) => (r === 'viewer' ? 'Viewer' : 'Operator');
+    const roleName = (r) => ({ viewer: 'Viewer', mod: 'Mod', operator: 'Operator' }[r] || 'Operator');
     const row = (p) => {
         const remove = `<form method="post" action="/robots/${esc(robot.id)}/operators/${esc(encodeURIComponent(p.subject))}/remove"><button type="submit" class="quiet">Remove</button></form>`;
         const who = p.username
@@ -546,6 +564,94 @@ function peopleCard(robot, people) {
 ${(people || []).map(row).join('\n')}
 </ul>
 <form class="people-add" method="post" action="/robots/${esc(robot.id)}/operators"><label class="sr-only" for="people-name">Username</label><input id="people-name" name="username" placeholder="@username" required maxlength="41" autocomplete="off"><select name="role" aria-label="Role"><option value="operator">Operator</option><option value="viewer">Viewer</option></select><button type="submit">Add</button></form>
+</section>`;
+}
+
+/**
+ * The Operators card (Maticus's 2026-11-12 LOOI spec): the owner, every Mod and Operator with a live activity
+ * indicator and last command, the viewers' count, sole control, the per-person switches, promotion/demotion and
+ * the panel E-STOP. The server renders the whole roster; public/panel.js keeps it current from `operators_state`.
+ * Actions are in the panel's /control socket and are checked again in server/domain/index.js, never here.
+ */
+function operatorsCard(robot, operators, role, viewer = null) {
+    if (!operators) return '';
+    const canManage = role === 'owner' || role === 'mod';
+    const canRole = role === 'owner';
+    const memberName = (m) => {
+        if (!m) return 'Everyone';
+        if (m.role === 'owner' && (!m.username || !m.display_name)) return 'the owner';
+        return m.display_name || (m.username ? `@${m.username}` : m.subject);
+    };
+    const handle = (m) => (m.username ? `@${m.username}` : (m.display_name || String(m.subject).slice(0, 12)));
+    const initial = (m) => String(m.display_name || m.username || m.subject || '?').trim().charAt(0).toUpperCase() || '?';
+    const roleTag = { owner: 'OWNER', mod: 'MOD', operator: 'OPERATOR', viewer: 'VIEWER' };
+    const sole = operators.sole;
+    const soleName = sole ? memberName((operators.members || []).find((m) => m.subject === sole.subject)) : null;
+    const isMe = (m) => !!(viewer && m.subject === viewer.subject);
+    const toggle = (m) => {
+        const canToggle = m.role !== 'owner' && ((role === 'owner' && (m.role === 'operator' || m.role === 'mod'))
+            || (role === 'mod' && m.role === 'operator'));
+        const checked = m.role === 'owner' ? ' checked' : (m.enabled !== false ? ' checked' : '');
+        const disabled = canToggle ? '' : ' disabled';
+        const title = m.role === 'owner' ? 'The owner is always on' : canToggle ? (m.enabled !== false ? 'Switch this person off' : 'Switch this person on') : 'Only the owner switches Mods; the owner and Mods switch Operators';
+        return `<label class="ops-switch" title="${esc(title)}"><input type="checkbox" data-operator-toggle data-subject="${esc(m.subject)}"${checked}${disabled}><span class="ops-switch-track" aria-hidden="true"></span></label>`;
+    };
+    const soleButton = (m) => {
+        if (!canManage || m.role === 'owner') return '';
+        const active = !!(sole && sole.subject === m.subject);
+        return `<button type="button" class="ops-sole${active ? ' is-on' : ''}" data-operator-sole="${esc(m.subject)}" data-sole-active="${active ? 'true' : 'false'}"${m.enabled === false ? ' disabled' : ''}>${active ? 'Sole · on' : 'Sole control'}</button>`;
+    };
+    const roleButton = (m) => {
+        if (!canRole || (m.role !== 'operator' && m.role !== 'mod')) return '';
+        const next = m.role === 'operator' ? 'mod' : 'operator';
+        const label = m.role === 'operator' ? 'Make Mod' : 'Make Operator';
+        const title = m.role === 'operator' ? 'Promote this Operator to Mod' : 'Demote this Mod to Operator';
+        return `<button type="button" class="ops-role-btn" data-operator-role-set="${next}" data-operator-role data-subject="${esc(m.subject)}" title="${esc(title)}">${label}</button>`;
+    };
+    const activity = (m) => {
+        if (m.role === 'viewer' || m.role === 'owner') return '';
+        return `<span class="ops-live" data-operator-activity hidden><span class="dot"></span>Live</span>`
+            + `<small class="ops-last" data-operator-last>No command yet</small>`
+            + `<small class="ops-head-state" data-operator-head>Head idle</small>`;
+    };
+    const row = (m) => {
+        const you = isMe(m) && m.role !== 'owner';
+        const tag = m.role === 'owner' ? (isMe(m) ? 'OWNER · YOU' : 'OWNER') : (roleTag[m.role] || m.role);
+        const sub = m.role === 'owner'
+            ? 'Always has override, local STOP, and ARM'
+            : m.role === 'mod'
+                ? 'Can manage operators and clear the panel E-STOP. Cannot change speed, mode, or Viewer access, or promote Mods.'
+                : 'Can drive and tilt the head while switched on.';
+        return `<li class="ops-row ops-${esc(m.role)}" data-operator-subject="${esc(m.subject)}" data-operator-role="${esc(m.role)}" data-operator-enabled="${m.enabled !== false ? 'true' : 'false'}" data-operator-you="${isMe(m) ? 'true' : 'false'}" data-operator-name="${esc(handle(m))}">`
+            + `<span class="ops-avatar" aria-hidden="true">${esc(initial(m))}</span>`
+            + `<div class="ops-who"><p class="ops-name"><b>${esc(handle(m))}</b>${you ? ' <span class="ops-you">(you)</span>' : ''}`
+            + `<span class="ops-role" data-operator-role-tag>${esc(tag)}</span>${activity(m)}</p></div>`
+            + `<div class="ops-actions">${soleButton(m)}${toggle(m)}</div>`
+            + `<p class="ops-sub"><span data-operator-sub>${esc(sub)}</span>${roleButton(m)}</p></li>`;
+    };
+    const viewers = (operators.members || []).filter((m) => m.role === 'viewer');
+    const viewerRow = `<li class="ops-row ops-viewers"><span class="ops-avatar ops-count" aria-hidden="true">${esc(String(viewers.length))}</span>`
+        + `<div class="ops-who"><p class="ops-name"><b>Viewers</b> <span class="pill">${esc(String(viewers.length))} watching</span></p>`
+        + '<p class="ops-sub">Can watch only. No drive, head, lights, or speed/mode changes.</p></div>'
+        + `<span class="pill">${robot.embed_public ? 'Watching' : 'Hidden'}</span></li>`;
+    const latched = !!(robot.estop && robot.estop.latched);
+    const estopNote = latched
+        ? '<b>Panel E-STOP is tripped.</b> A Mod may clear it. That never clears the tray STOP latch or ARM; the robot cannot move until the owner clears STOP and re-arms on the tray.'
+        : '<b>Panel E-STOP is clear.</b> A Mod may trip it, or clear it after a panel stop. That never clears the tray STOP latch or ARM.';
+    const estopButton = canManage
+        ? `<button type="button" class="ops-estop-btn" data-operators-estop>${glyphIcon('stop')}<span>${latched ? 'Clear panel E-STOP' : 'Trip panel E-STOP'}</span></button>` : '';
+    const rows = (operators.members || []).filter((m) => m.role !== 'viewer').map(row).join('\n');
+    return `<section class="widget widget-operators" data-widget="operators" data-operators data-can-manage="${canManage ? 'true' : 'false'}" data-can-role="${canRole ? 'true' : 'false'}">
+<h2>${glyphIcon('users')} <span>Operators</span></h2>
+<div class="ops-head"><p class="ops-lede">People on this robot. Owner and Mods can hand sole control or switch someone off.${canRole ? ' Only you can promote a Mod, or change speed, mode, and Viewer access.' : ''}</p>
+<span class="pill ops-mode" data-operators-mode>${sole ? `Sole: ${esc(soleName)}` : 'Everyone'}</span>
+${canManage ? `<button type="button" class="ops-mode-btn" data-operators-clear${sole ? '' : ' hidden'}>Everyone</button>` : ''}</div>
+<ul class="ops-list">
+${rows}
+${viewerRow}
+</ul>
+<div class="ops-estop" data-operators-estop-box data-latched="${latched ? 'true' : 'false'}"><p data-operators-estop-note>${estopNote}</p>${estopButton}</div>
+<p class="ops-footer">Everyone returns shared control to all enabled operators. Sole control admits only that person's commands; others get a clear refusal. Toggles apply immediately, with no tray restart. The robot still cannot move until you Clear STOP and ARM on the tray. Owner always overrides.</p>
 </section>`;
 }
 
@@ -715,7 +821,7 @@ function renderBotSurface({ robot, profile, role, allowed_commands = [], holdRes
     return `<main id="panel" class="bot-surface" tabindex="0" data-robot-id="${esc(robot.id)}" data-role="${esc(role)}" data-hold-ms="${esc(holdResendMs)}" data-allowed="${data(allowed_commands)}" data-bot-view="${esc(view)}"${parentOrigins.length ? ` data-parent-origins="${esc(parentOrigins.join(' '))}"` : ''}>${body}${dataScript}</main>`;
 }
 
-function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs = 150, mode = 'page', view = 'panel', signedIn = true, streaming = null, people = null, signaling_url = null, profileForm = {}, tryIt = false, automation = null, parentOrigins = [], liveUrl = null, limitsInfo = null, arrange = null }) {
+function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs = 150, mode = 'page', view = 'panel', signedIn = true, streaming = null, people = null, operators = null, viewer = null, signaling_url = null, profileForm = {}, tryIt = false, automation = null, parentOrigins = [], liveUrl = null, limitsInfo = null, arrange = null }) {
     const embed = mode === 'embed';
     const botView = embed ? botViewOf(view) : 'panel';
     if (embed && botView !== 'panel') {
@@ -751,17 +857,32 @@ function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs
         widgets.push(`<section class="widget widget-stop" data-widget="stop" data-ov-part="stop" ${attrsOf(['stop']).stop || ''}>`
             + `<h2>Stop</h2><button type="button" class="stop" data-stop>${icon('square')}<span>Stop</span></button></section>`);
     }
+    // Maticus's LOOI status row: Battery | Latency, one compact row (public/panel.css). The server groups the two
+    // widgets when the person has not arranged the panel; an arranged layout keeps their separate grid cells.
+    if (!arrangeApply && profile.id === 'looi') {
+        const batteryAt = widgets.findIndex((html) => html.includes('data-widget="battery"'));
+        const latencyAt = widgets.findIndex((html) => html.includes('data-widget="latency"'));
+        if (batteryAt >= 0 && latencyAt >= 0) {
+            const pair = [widgets[batteryAt], widgets[latencyAt]];
+            const rest = widgets.filter((_, i) => i !== batteryAt && i !== latencyAt);
+            rest.splice(Math.min(batteryAt, rest.length), 0, `<div class="status-row" data-status-row>${pair.join('')}</div>`);
+            widgets.splice(0, widgets.length, ...rest);
+        }
+    }
+    // The Operators card sits under the controls, inside the same panel grid. A watcher has no roster and no card.
+    const operatorsHtml = profile.id === 'looi' ? operatorsCard(robot, operators, role, viewer) : '';
+    if (operatorsHtml) widgets.push(operatorsHtml);
     // A framed watcher may take the controls with Drive; its e-stop waits, hidden, for an owner's or operator's join.
     const estop = ESTOP_ROLES.has(role) ? `<button type="button" class="estop" data-estop>${icon('stop')}<span>E-stop</span></button>`
         : (embed && role === 'watcher' ? `<button type="button" class="estop" data-estop hidden>${icon('stop')}<span>E-stop</span></button>` : '');
-    const clear = role === 'owner' ? `<button type="button" class="estop-clear" data-estop-clear${latched ? '' : ' hidden'}>Clear e-stop</button>` : '';
+    const clear = (role === 'owner' || role === 'mod') ? `<button type="button" class="estop-clear" data-estop-clear${latched ? '' : ' hidden'}>Clear e-stop</button>` : '';
     const arrangeButton = arrange && arrange.src && role === 'owner'
         ? `<button type="button" class="arrange-btn" data-arrange data-arrange-src="${esc(arrange.src || '')}" title="Arrange the controls">${icon('sliders')}<span>Arrange</span></button>` : '';
     const body = `<header class="estop-banner" data-estop-banner data-latched="${latched}">
 ${embed ? '' : tryIt ? topbar('<span class="crumb">Try the panel</span>', '/') : topbar(`<span class="crumb">${esc(robot.name)}</span>`)}
-<div class="estop-bar"><p class="estop-state" role="status" aria-live="assertive"><span class="estop-dot"></span><span data-estop-state>${latched ? 'E-stop latched' : 'E-stop clear'}</span><span class="estop-note">${latched ? ' — the robot stays still until the owner clears it.' : ''}</span></p>${clear}${estop}</div>
+<div class="estop-bar"><p class="estop-state" role="status" aria-live="assertive"><span class="estop-dot"></span><span data-estop-state>${latched ? 'E-stop latched' : 'E-stop clear'}</span><span class="estop-note">${latched ? ' — the robot stays still until the owner or a Mod clears it.' : ''}</span></p>${clear}${estop}</div>
 </header>
-<main id="panel" tabindex="0" data-robot-id="${esc(robot.id)}" data-role="${esc(role)}" data-hold-ms="${esc(holdResendMs)}" data-allowed="${data(allowed_commands)}"${tryIt ? ' data-transport="local"' : ''} data-bot-view="${esc(botView)}"${embed && parentOrigins.length ? ` data-parent-origins="${esc(parentOrigins.join(' '))}"` : ''}>
+<main id="panel" tabindex="0" data-robot-id="${esc(robot.id)}" data-profile-id="${esc(profile.id || '')}" data-role="${esc(role)}" data-hold-ms="${esc(holdResendMs)}" data-allowed="${data(allowed_commands)}"${tryIt ? ' data-transport="local"' : ''} data-bot-view="${esc(botView)}"${embed && parentOrigins.length ? ` data-parent-origins="${esc(parentOrigins.join(' '))}"` : ''}>
 <div class="panel-head">
 ${kit.pageHead({ title: `${robot.name}`, icon: 'gear', back: embed ? null : { href: '/', label: 'Home' } })}
 <p class="meta"><span class="pill online" data-online-pill data-state="connecting"><span class="dot"></span><span data-online-label>Connecting…</span></span> <span class="pill">${esc(profile.name || robot.profile_id)}</span> <span class="pill role" data-role-label>${esc(ROLE_LABEL[role] || role)}</span></p>

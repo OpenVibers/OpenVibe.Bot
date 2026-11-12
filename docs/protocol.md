@@ -228,9 +228,10 @@ the camera's `GetStatus` position in telemetry under `camera`.
 
 **A device's `estop_state` is a report, never a clear.** `latched: true` latches each robot the device is
 attached to (if it is not already latched). `latched: false` is recorded as the device's reported state
-only (`robot_state.state.device_estop`); it never clears Bot's latch — clearing is the owner's alone
-(`estop_clear` on `/control`, `POST /robots/:id/estop/clear`), after which Bot sends `estop` with
-`latched: false`. A `robot_id` the device is not attached to is refused with `error` `bot.forbidden`
+only (`robot_state.state.device_estop`); it never clears Bot's latch — clearing the panel latch is the
+owner's or a Mod's (`estop_clear` on `/control`; `POST /robots/:id/estop/clear` stays owner-only), after
+which Bot sends `estop` with `latched: false`. The tray's own STOP latch and ARM are not this latch and
+are never cleared or armed remotely. A `robot_id` the device is not attached to is refused with `error` `bot.forbidden`
 and audited (`kind: estop_state`, `result: refused`); nothing changes on that robot.
 
 **A local stop** (`latched: true, local_stop: true`, with an optional `reason`) is one held on the machine
@@ -424,6 +425,13 @@ forward commands without holding a socket. The HTTP gate is the same gate but no
 with no role is not put into a `queue` robot's queue (as a socket `join` would), so over HTTP a chat viewer
 needs an explicit owner or operator role — a no-role caller is refused `bot.not_an_operator`.
 
+**Roles and sole control.** The owner, a Mod and an Operator may drive and press the panel e-stop; a Mod
+may also switch Operators on or off, grant or clear sole control, and clear the panel latch. Only the owner
+promotes an Operator to Mod or demotes a Mod, changes speed/mode/Viewer access, clears the tray's STOP or
+ARM, or switches a Mod. A switched-off Operator (or Mod) is refused `bot.operator_off`; under sole control
+every other subject's command is refused `bot.sole_control` (the owner and `halt` always pass). Each
+authority change is in `robot_operator_audit` with the actor and subject, never a token.
+
 ### Client → server
 
 | type | fields | notes |
@@ -431,16 +439,19 @@ needs an explicit owner or operator role — a no-role caller is refused `bot.no
 | `join` | `robot_id` | subscribe to a robot; refused with `error` `bot.not_an_operator` when the caller has no access |
 | `leave` | — | unsubscribe |
 | `command` | `id, kind, value, ms?` | the same `kind`s as the device; `ms` requests a deadline (capped by `max_command_ms`) |
-| `estop` | — | latch the e-stop (owner or operator) |
-| `estop_clear` | — | clear the latched e-stop (**owner only**) |
-| `give_back` | — | owner or operator: hand back a queue turn your driving paused (§1 Owner takeover); it resumes at once with its time kept |
+| `estop` | — | latch the panel e-stop (owner, Mod or operator) |
+| `estop_clear` | — | clear the latched **panel** e-stop (owner or Mod). It never clears the tray's local STOP or ARM |
+| `operators` | `id?, action, subject?, on?, role?` | `toggle` an Operator (owner or Mod) or a Mod (owner), `sole` grant/clear one subject (`subject: null` is Everyone), `role` promote an Operator to Mod or demote a Mod (owner). Every answer is `operators_result` |
+| `give_back` | — | owner, Mod or operator: hand back a queue turn your driving paused (§1 Owner takeover); it resumes at once with its time kept |
 
 ### Server → client
 
 | type | fields | notes |
 |---|---|---|
-| `joined` | `robot, role, profile, allowed_commands, state` | the answer to `join`; `allowed_commands` is the role's allowlist cut to the profile's kinds, with `halt` for every role that may drive |
-| `robot_state` | `state{robot_id, online, estop{latched,by,at}, latency_ms, battery, telemetry, status, device_estop{latched,at}, queue}` | on every change and on telemetry, ≤ 2 Hz (a telemetry frame with `events` always); `estop` is Bot's latch, `device_estop` the device's last report (or `null`) |
+| `joined` | `robot, role, profile, allowed_commands, state, operators` | the answer to `join`; `allowed_commands` is the role's allowlist cut to the profile's kinds, with `halt` for every role that may drive; `operators` is the roster, sole-control policy and Bot's command activity for the Operators card |
+| `robot_state` | `state{robot_id, online, estop{latched,by,at}, latency_ms, battery, telemetry, status, device_estop{latched,at}, queue}` | on every change and on telemetry, ≤ 2 Hz (a telemetry frame with `events` always); `estop` is Bot's panel latch, `device_estop` the device's last report (or `null`); `battery` is 0..1 (a Node 0..100 reading is divided by 100, and a missing reading is `null`) |
+| `operators_state` | `operators{sole, members[{subject, role, enabled}], viewers, activity{subject{last{kind,channel,at},drive_at,head_at,lights_at}}, now}` | the Operators card's live view: an accepted authority change at once, and activity at most twice a second. `channel` is drive, head, lights (non-motion), button, say, display or ptz |
+| `operators_result` | `id?, action, ok, code?, reason?` | the answer to an `operators` frame or a panel `estop`/`estop_clear`; a refusal is never a silent drop |
 | `command_result` | `id, result, code?, reason?, latency_ms?, cached?` | `result` is `ack`, `nack`, `refused` or `expired`; a repeated `id` is answered `cached: true` |
 | `error` | `code, detail` | a frame or join the server refused |
 
@@ -492,12 +503,13 @@ resumes it at once.
 
 ```json
 { "v": 1, "seq": 4, "ts": 1738065601000, "type": "estop" }
-{ "v": 1, "seq": 4, "ts": 1738065601001, "type": "error", "code": "bot.forbidden", "detail": "only the owner clears the e-stop" }
+{ "v": 1, "seq": 4, "ts": 1738065601001, "type": "error", "code": "bot.forbidden", "detail": "only the owner or a Mod clears the panel e-stop" }
 ```
 
 Refusal codes (the gate, in order): `bot.robot_not_found`, `bot.unknown_command`, `bot.command_not_allowed`
 (the profile takes no such kind), `bot.estop_latched`, `bot.not_an_operator`, `bot.sign_in`,
-`bot.read_only`, `bot.command_not_allowed` (the role's allowlist), `bot.device_offline`, `bot.cooldown`,
+`bot.read_only`, `bot.operator_off`, `bot.sole_control`, `bot.command_not_allowed` (the role's allowlist),
+`bot.device_offline`, `bot.cooldown`,
 `bot.not_your_turn`, `bot.owner_control` (the owner or an operator has taken the turn over), `bot.turn_budget`,
 `bot.unknown_actuator`, `bot.invalid_input`, `bot.text_too_long`.
 A `command` whose `id` is still in flight (the first one has not been acked) is answered `refused`

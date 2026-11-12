@@ -28,6 +28,12 @@ const TABLES = [
     { table: 'robots', subject: 'estop_by', file: null, erase: anonymize },
     { table: 'pairing_codes', subject: 'created_by', file: null, erase: anonymize },
     { table: 'robot_operators', subject: 'added_by', file: null, erase: anonymize },
+    // Sole control names the person it admits and who granted it; the audit names the actor and the subject. Both are
+    // authority records, not secrets: on deletion the person's id leaves them, the rest of the record stays.
+    { table: 'robot_operator_control', subject: 'sole_subject', file: null, erase: anonymize },
+    { table: 'robot_operator_control', subject: 'sole_by', file: null, erase: anonymize },
+    { table: 'robot_operator_audit', subject: 'subject', file: null, erase: anonymize },
+    { table: 'robot_operator_audit', subject: 'actor_subject', file: null, erase: anonymize },
     { table: 'live_conversions', subject: 'owner_subject', file: null },
     // A device's request to be added (server/claims.js): who approved or denied it. Short-lived; erased with the account.
     { table: 'device_claims', subject: 'owner_subject', file: null },
@@ -76,6 +82,7 @@ function create({ domain, log = console } = {}) {
             await t.exec(`UPDATE devices SET name = NULL WHERE NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(robot_ids) r WHERE NOT (r = ANY($1::text[])))
                 AND jsonb_array_length(robot_ids) > 0`, [ids]);
             counts.add(counts.erased, 'command_audit', await t.exec('DELETE FROM command_audit WHERE robot_id = ANY($1::text[])', [ids]));
+            counts.add(counts.erased, 'robot_operator_audit', await t.exec('DELETE FROM robot_operator_audit WHERE robot_id = ANY($1::text[])', [ids]));
             // Each robot the way its owner would remove it (OpenRestream key revoked first; a refusal there rolls this back and
             // Events retries).
             for (const id of ids) await domain.robots.remove(id);

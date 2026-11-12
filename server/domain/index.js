@@ -25,12 +25,14 @@ const USER_SUBJECT = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 
 const DEFAULT_ALLOW = {
     owner: ['drive', 'actuator', 'ptz', 'say', 'display', 'button', 'point', 'headlight', 'halt'],
+    mod: ['drive', 'actuator', 'ptz', 'say', 'display', 'button', 'point', 'headlight', 'halt'],
     operator: ['drive', 'actuator', 'ptz', 'say', 'display', 'button', 'point', 'headlight', 'halt'],
     queue: ['drive', 'button', 'point', 'halt'],
 };
 const KINDS = new Set(['drive', 'actuator', 'ptz', 'say', 'display', 'button', 'point', 'headlight', 'halt']);
 const MOTION = new Set(['drive', 'actuator', 'ptz']);
-const CONTROL_ROLES = new Set(['owner', 'operator', 'queue']);
+const CONTROL_ROLES = new Set(['owner', 'mod', 'operator', 'queue']);
+const OPERATOR_ROLES = new Set(['owner', 'mod', 'operator', 'viewer']);
 // Drive axes the owner's max_turn caps; every other drive axis is capped by max_speed.
 const TURN_AXES = new Set(['steer', 'rotation']);
 // The older drive names, still read for the axis they stand for.
@@ -122,7 +124,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         return db.many('SELECT subject, role, added_by, created_at FROM robot_operators WHERE robot_id = $1 ORDER BY created_at', [robotId]);
     }
     async function addOperator(robotId, subject, role, addedBy) {
-        if (!['owner', 'operator', 'viewer'].includes(role)) fail(422, 'bot.invalid_role', 'role must be owner, operator or viewer');
+        if (!OPERATOR_ROLES.has(role)) fail(422, 'bot.invalid_role', 'role must be owner, mod, operator or viewer');
         if (role === 'owner') fail(422, 'bot.invalid_role', 'ownership is not transferred by adding an operator');
         const before = await roleOf(robotId, subject);
         await db.query(
@@ -134,7 +136,11 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     async function removeOperator(robotId, subject) {
         const before = await roleOf(robotId, subject);
         await db.query(`DELETE FROM robot_operators WHERE robot_id = $1 AND subject = $2 AND role <> 'owner'`, [robotId, subject]);
-        if (before && before !== 'owner') membershipChanged(robotId, subject, 'you were removed from this robot');
+        if (before && before !== 'owner') {
+            const policy = await operatorPolicy(robotId);
+            if (policy.sole_subject === subject) await setSole(robotId, null, subject);
+            membershipChanged(robotId, subject, 'you were removed from this robot');
+        }
     }
     /**
      * A membership change: the person's live /control sockets on the robot are dropped (so their join
@@ -144,6 +150,118 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     function membershipChanged(robotId, subject, reason) {
         if (link && link.dropSubject) link.dropSubject(robotId, subject, reason);
         if (link && link.broadcast) link.broadcast(robotId);
+    }
+
+    // ── Operators, Mods and sole control (Maticus's 2026-11-12 LOOI spec) ─────────────────────────
+    // The owner always has all of this. A Mod may switch Operators (never Mods or the owner), grant or clear
+    // sole control, and trip or clear the panel E-STOP. Only the owner promotes a Mod. The gate reads `enabled`
+    // and `sole_subject` fresh before every command, so a change is immediate with no tray restart.
+    const GRANT_ROLES = new Set(['owner', 'mod', 'operator']);
+
+    async function operatorStateOf(robotId, subject, q = db) {
+        if (!subject) return null;
+        const row = await q.maybe(
+            `SELECT m.role, m.enabled, c.sole_subject FROM robot_operators m
+             LEFT JOIN robot_operator_control c ON c.robot_id = m.robot_id
+             WHERE m.robot_id = $1 AND m.subject = $2`, [robotId, subject]);
+        return row ? { role: row.role, enabled: row.enabled !== false, sole: row.sole_subject || null } : null;
+    }
+    async function operatorPolicy(robotId, q = db) {
+        const row = await q.maybe('SELECT sole_subject, sole_by, sole_at FROM robot_operator_control WHERE robot_id = $1', [robotId]);
+        return row
+            ? { sole_subject: row.sole_subject || null, sole_by: row.sole_by || null, sole_at: row.sole_at ? iso(new Date(row.sole_at).getTime()) : null }
+            : { sole_subject: null, sole_by: null, sole_at: null };
+    }
+    async function listRoster(robotId) {
+        const rows = await db.many('SELECT subject, role, enabled, added_by, created_at FROM robot_operators WHERE robot_id = $1 ORDER BY created_at', [robotId]);
+        return rows.map((r) => ({ subject: r.subject, role: r.role, enabled: r.role === 'owner' ? true : r.enabled !== false, added_by: r.added_by || null, created_at: iso(new Date(r.created_at).getTime()) }));
+    }
+    async function auditOperator(entry) {
+        const at = iso(entry.at != null ? entry.at : now());
+        return db.maybe(
+            `INSERT INTO robot_operator_audit (robot_id, actor_subject, actor_kind, actor_role, action, subject, role, value, at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9) RETURNING id, at`,
+            [entry.robotId, entry.actorSubject || null, entry.actorKind || null, entry.actorRole || null,
+                entry.action, entry.subject || null, entry.role || null, JSON.stringify(entry.value || {}), at]);
+    }
+    async function listOperatorAudit(robotId, { limit = 50 } = {}) {
+        const rows = await db.many('SELECT * FROM robot_operator_audit WHERE robot_id = $1 ORDER BY id DESC LIMIT $2', [robotId, Math.min(200, Math.max(1, limit))]);
+        return rows.map((r) => ({
+            id: Number(r.id), robot_id: r.robot_id, actor_subject: r.actor_subject, actor_kind: r.actor_kind,
+            actor_role: r.actor_role, action: r.action, subject: r.subject, role: r.role,
+            value: json(r.value, {}), at: iso(new Date(r.at).getTime()),
+        }));
+    }
+    /** Set or clear the one subject sole control admits; null is Everyone. */
+    async function setSole(robotId, subject, actor) {
+        const at = iso(now());
+        if (subject == null) {
+            await db.query('DELETE FROM robot_operator_control WHERE robot_id = $1', [robotId]);
+            return;
+        }
+        await db.query(
+            `INSERT INTO robot_operator_control (robot_id, sole_subject, sole_by, sole_at, updated_at)
+             VALUES ($1, $2, $3, $4, $4)
+             ON CONFLICT (robot_id) DO UPDATE SET sole_subject = EXCLUDED.sole_subject,
+                sole_by = EXCLUDED.sole_by, sole_at = EXCLUDED.sole_at, updated_at = EXCLUDED.updated_at`,
+            [robotId, subject, actor, at]);
+    }
+    async function setMemberEnabled(robotId, subject, enabled, actor, actorRole, targetRole) {
+        await db.query('UPDATE robot_operators SET enabled = $3 WHERE robot_id = $1 AND subject = $2', [robotId, subject, !!enabled]);
+        if (!enabled) {
+            const policy = await operatorPolicy(robotId);
+            if (policy.sole_subject === subject) await setSole(robotId, null, actor);
+        }
+        await auditOperator({ robotId, actorSubject: actor, actorKind: 'user', actorRole, action: 'operator.toggle', subject, role: targetRole, value: { enabled: !!enabled } });
+    }
+    async function setMemberRole(robotId, subject, next, actor, role) {
+        await db.query('UPDATE robot_operators SET role = $3 WHERE robot_id = $1 AND subject = $2', [robotId, subject, next]);
+        await auditOperator({ robotId, actorSubject: actor, actorKind: 'user', actorRole: role, action: 'operator.role', subject, role: next, value: { role: next } });
+        membershipChanged(robotId, subject, `your role on this robot is now ${next}`);
+    }
+    /**
+     * One authority change from a panel (/control `operators`). The actor's role is read fresh: a stale socket
+     * cannot act on a role it no longer has. Refusals carry a stable code and a plain reason the panel shows.
+     */
+    async function actOperator({ robotId, actorSubject, action, subject = null, enabled = null, role = null }) {
+        const robot = await getRobot(robotId);
+        if (!robot) fail(404, 'bot.robot_not_found', 'no such robot');
+        const actorRole = await roleOf(robotId, actorSubject);
+        if (!actorRole) fail(403, 'bot.not_an_operator', 'you have no access to this robot');
+        if (!subject && !['sole', 'policy', 'viewer_access'].includes(action)) fail(422, 'bot.invalid_input', 'name the person this change is for');
+        const target = subject ? await roleOf(robotId, subject) : null;
+        if (subject && !target) fail(404, 'bot.not_an_operator', 'that person is not on this robot');
+        if (action === 'toggle') {
+            if (actorRole !== 'owner' && actorRole !== 'mod') fail(403, 'bot.mod_limited', 'only the owner or a Mod may switch people on or off');
+            if (target === 'owner') fail(403, 'bot.owner_always_on', 'the owner is always on and cannot be switched off');
+            if (target !== 'operator' && target !== 'mod') fail(422, 'bot.invalid_input', 'switches are for Operators and Mods');
+            if (actorRole === 'mod' && target !== 'operator') fail(403, 'bot.mod_limited', 'Mods switch Operators on or off; only the owner switches Mods');
+            if (typeof enabled !== 'boolean') fail(422, 'bot.invalid_input', 'a switch needs on: true or false');
+            await setMemberEnabled(robotId, subject, enabled, actorSubject, actorRole, target);
+            return { action, subject, enabled, role: target };
+        }
+        if (action === 'sole') {
+            if (actorRole !== 'owner' && actorRole !== 'mod') fail(403, 'bot.mod_limited', 'only the owner or a Mod may change sole control');
+            if (subject != null) {
+                if (target === 'owner') fail(422, 'bot.invalid_input', 'the owner always overrides; sole control is for a Mod or an Operator');
+                if (!GRANT_ROLES.has(target)) fail(422, 'bot.invalid_input', 'sole control is for a Mod or an Operator');
+                const state = await operatorStateOf(robotId, subject);
+                if (!state || !state.enabled) fail(409, 'bot.operator_off', 'switch that person on before giving them sole control');
+            }
+            await setSole(robotId, subject == null ? null : subject, actorSubject);
+            await auditOperator({ robotId, actorSubject, actorKind: 'user', actorRole, action: 'operator.sole', subject: subject || null, role: target || null, value: subject ? { sole: subject } : { sole: null } });
+            return { action, subject: subject || null };
+        }
+        if (action === 'role') {
+            if (actorRole !== 'owner') fail(403, 'bot.owner_only', 'only the owner can promote or demote a Mod');
+            if (target === 'operator' && role === 'mod') { await setMemberRole(robotId, subject, 'mod', actorSubject, actorRole); return { action, subject, role: 'mod' }; }
+            if (target === 'mod' && role === 'operator') { await setMemberRole(robotId, subject, 'operator', actorSubject, actorRole); return { action, subject, role: 'operator' }; }
+            fail(422, 'bot.invalid_input', 'an Operator is promoted to Mod, or a Mod demoted to Operator');
+        }
+        // The panel accepts no speed, mode or Viewer-access change through this route, for anyone. The owner's own
+        // forms remain the only way, and a Mod is told exactly that.
+        if (action === 'viewer_access' || action === 'policy') fail(403, 'bot.mod_limited', 'Viewer access is the owner\'s switch');
+        fail(422, 'bot.invalid_input', `unknown operators action ${String(action).slice(0, 24)}`);
     }
 
     // ── Robots ────────────────────────────────────────────────────────────────────────────────────
@@ -182,7 +300,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         }
         if (limits.allow && typeof limits.allow === 'object') {
             out.allow = {};
-            for (const role of ['owner', 'operator', 'queue']) {
+            for (const role of ['owner', 'mod', 'operator', 'queue']) {
                 if (Array.isArray(limits.allow[role])) out.allow[role] = limits.allow[role].filter((k) => KINDS.has(k));
             }
         }
@@ -1076,10 +1194,11 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     }
 
     // ── E-stop (ADR-043 decision 6) ───────────────────────────────────────────────────────────────
-    // `estop.set` only latches: a clear goes through clearEstop (owner only), so no device report and no other
-    // caller can ever lift an owner's latch.
+    // `estop.set` only latches: a clear goes through clearEstop (the owner, or a Mod for the panel latch only), so
+    // no device report and no other caller can ever lift an owner's latch. The tray's local STOP and ARM are not
+    // this latch and are never touched here.
     async function setEstop(robotId, { latched, by, principalKind = 'device' }) {
-        if (!latched) fail(403, 'bot.forbidden', 'only the owner clears the e-stop');
+        if (!latched) fail(403, 'bot.forbidden', 'only the owner or a Mod clears the panel e-stop');
         return writeEstop(robotId, { latched: true, by, principalKind });
     }
     async function writeEstop(robotId, { latched, by, principalKind }) {
@@ -1095,11 +1214,11 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         });
         return updated;
     }
-    async function clearEstop(robotId, owner) {
+    async function clearEstop(robotId, actor, role = 'owner') {
         const robot = await getRobot(robotId);
         if (!robot) fail(404, 'bot.robot_not_found', 'no such robot');
-        if (robot.owner_subject !== owner) fail(403, 'bot.forbidden', 'only the owner clears the e-stop');
-        return writeEstop(robotId, { latched: false, by: owner, principalKind: 'user' });
+        if (robot.owner_subject !== actor && role !== 'mod') fail(403, 'bot.forbidden', 'only the owner or a Mod clears the panel e-stop');
+        return writeEstop(robotId, { latched: false, by: actor, principalKind: 'user' });
     }
 
     // ── Turn queue (ADR-043 decision 8) ───────────────────────────────────────────────────────────
@@ -1348,7 +1467,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         // Headlights are the owner's and People Operators' only, whatever an allow list says: never the queue,
         // never a viewer. Every role that may drive also gets halt, which no allow list removes.
         const kinds = (fromOwner || DEFAULT_ALLOW[role] || []).filter((k) => k !== 'halt' && profileTakes(profile, k)
-            && (k !== 'headlight' || role === 'owner' || role === 'operator'));
+            && (k !== 'headlight' || role === 'owner' || role === 'mod' || role === 'operator'));
         return CONTROL_ROLES.has(role) ? [...kinds, 'halt'] : kinds;
     };
 
@@ -1473,10 +1592,11 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         if (!KINDS.has(kind)) return { ok: false, code: 'bot.unknown_command', reason: `unknown command kind ${kind}`, robot };
         if (!profileTakes(profile, kind)) return { ok: false, code: 'bot.command_not_allowed', reason: `this robot takes no ${kind} commands`, robot };
         const halt = kind === 'halt';
-        if (robot.estop_latched && !halt) return { ok: false, code: 'bot.estop_latched', reason: 'the e-stop is latched; only the owner can clear it', robot };
+        if (robot.estop_latched && !halt) return { ok: false, code: 'bot.estop_latched', reason: 'the e-stop is latched; the owner or a Mod clears the panel e-stop', robot };
 
         const subject = principal && principal.kind !== 'device' ? principal.subject : null;
-        let role = await roleOf(robotId, subject);
+        const member = await operatorStateOf(robotId, subject);
+        let role = member ? member.role : null;
         if (!role && robot.access_policy === 'queue' && subject) {
             const turn = await currentTurn(robotId);
             if (turn && turn.subject === subject) role = 'queue';
@@ -1487,6 +1607,19 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         if (role === 'viewer') {
             if (robot.access_policy === 'queue') role = 'queue';
             else return { ok: false, code: 'bot.read_only', reason: 'you are a viewer on this robot', robot, role };
+        }
+        // A switched-off Operator or Mod is refused before the command reaches the device, with a message the panel
+        // shows; the owner is always on. This is read fresh on every command, so a toggle needs no reconnect.
+        if (role !== 'owner' && member && member.enabled === false) {
+            return { ok: false, code: 'bot.operator_off', reason: 'You are switched off on this robot. The owner or a Mod can switch you back on.', robot, role };
+        }
+        // Sole control: one authenticated subject's commands are admitted; the owner always overrides and a safety
+        // command (halt) always passes. This is a gate rule, not a motion kind, so it never renews a drive lease.
+        if (!halt && role !== 'owner' && subject) {
+            const policy = await operatorPolicy(robotId);
+            if (policy.sole_subject && policy.sole_subject !== subject) {
+                return { ok: false, code: 'bot.sole_control', reason: 'Sole control is on: only the person it was given to can send commands right now. The owner or a Mod can switch back to Everyone.', robot, role };
+            }
         }
         const allow = allowedFor(robot, role, profile);
         if (!allow.includes(kind)) return { ok: false, code: 'bot.command_not_allowed', reason: `${kind} is not allowed for ${role}`, robot, role };
@@ -1514,13 +1647,13 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
                 const budget = await consumeTurn(robotId, subject);
                 if (!budget.ok) return { ok: false, code: budget.code, reason: budget.code === 'bot.turn_budget' ? 'your turn budget is spent' : budget.code === 'bot.owner_control' ? PAUSED : 'it is not your turn', robot, role };
             }
-        } else if ((role === 'owner' || role === 'operator') && robot.access_policy === 'queue' && subject) {
+        } else if ((role === 'owner' || role === 'mod' || role === 'operator') && robot.access_policy === 'queue' && subject) {
             // Owner takeover: the holder's turn pauses and the robot halts before this command goes (takeOver).
             await takeOver(robotId, subject, role);
         }
         // The panel action must never become a queue or viewer path, even if an old allow list named it.
-        if (kind === 'headlight' && role !== 'owner' && role !== 'operator') {
-            return { ok: false, code: 'bot.command_not_allowed', reason: 'headlights are for the owner and operators', robot, role };
+        if (kind === 'headlight' && role !== 'owner' && role !== 'mod' && role !== 'operator') {
+            return { ok: false, code: 'bot.command_not_allowed', reason: 'headlights are for the owner, Mods and operators', robot, role };
         }
         let built;
         try { built = buildValue(kind, value, eff, profile); } catch (e) { return { ok: false, code: e.code || 'bot.invalid_input', reason: e.detail || e.message, robot, role }; }
@@ -1558,6 +1691,8 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
             setEmbedPublic, setListed, listListed, setAgentControl, remove: removeRobot,
             localProfile, saveLocalProfile, useCatalogueProfile },
         members: { roleOf, add: addOperator, remove: removeOperator, list: listOperators },
+        operators: { stateOf: operatorStateOf, policy: operatorPolicy, list: listRoster, act: actOperator,
+            audit: auditOperator, auditList: listOperatorAudit, setSole, roles: OPERATOR_ROLES },
         pairing: { create: createPairingCode, redeem, prune: prunePairingCodes, installerCommand, driverForProfile, whipUrl, onPaired },
         devices: { byCredential, bindNode, issuePublishKey, revokeVideo, updateDeclared, setFleet, revokeNode, ensureServerDevice, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, revokeByNode, touchSeen, setOnline, ownerOf, onChange,
             recordFirstRun, firstRunOf, firstRunFunnel },
