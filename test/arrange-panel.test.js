@@ -41,6 +41,14 @@ assert.ok(/data-ov-arranged="true"/.test(withLayout), 'a stored layout draws the
 assert.ok(/grid-column:1 \/ span 2/.test(withLayout), 'the stick is drawn in its cells');
 assert.ok(/data-ov-part="battery"[^>]*hidden/.test(withLayout) || /hidden[^>]*data-ov-part="battery"/.test(withLayout), 'a hidden readout is hidden before first paint');
 
+// Only the owner gets Arrange: a framed, signed-out watcher of a public robot sees the controls, not the editor.
+const watched = render.renderPanel({
+    robot, profile, role: 'watcher', allowed_commands: [], mode: 'embed', view: 'panel', signedIn: false,
+    arrange: { catalog, parts: surface.partsOf(profile), layout: defaults, device: 'phone', signedIn: false, layoutSource: 'default', src: '/shared/ov-arrange.js' },
+});
+assert.ok(!watched.includes('data-arrange'), 'a watcher has no Arrange button');
+assert.ok(watched.includes('data-ov-part="stop"'), 'but the parts are still there');
+
 const overlayCatalog = surface.overlayCatalog(profile, { slider: { name: 'head' }, hasStick: true, canDrive: false });
 const overlay = render.renderPanel({
     robot, profile, role: 'watcher', allowed_commands: [], mode: 'embed', view: 'overlay', signedIn: false,

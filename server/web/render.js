@@ -755,7 +755,7 @@ function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs
     const estop = ESTOP_ROLES.has(role) ? `<button type="button" class="estop" data-estop>${icon('stop')}<span>E-stop</span></button>`
         : (embed && role === 'watcher' ? `<button type="button" class="estop" data-estop hidden>${icon('stop')}<span>E-stop</span></button>` : '');
     const clear = role === 'owner' ? `<button type="button" class="estop-clear" data-estop-clear${latched ? '' : ' hidden'}>Clear e-stop</button>` : '';
-    const arrangeButton = arrange && arrange.src
+    const arrangeButton = arrange && arrange.src && role === 'owner'
         ? `<button type="button" class="arrange-btn" data-arrange data-arrange-src="${esc(arrange.src || '')}" title="Arrange the controls">${icon('sliders')}<span>Arrange</span></button>` : '';
     const body = `<header class="estop-banner" data-estop-banner data-latched="${latched}">
 ${embed ? '' : tryIt ? topbar('<span class="crumb">Try the panel</span>', '/') : topbar(`<span class="crumb">${esc(robot.name)}</span>`)}
