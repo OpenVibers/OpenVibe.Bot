@@ -18,16 +18,16 @@ const { boot, check, done } = require('./helpers/app');
 
         // The ways to connect: one pick block, a chip link per way, every way in the page.
         assert.ok(html.includes('<div class="pick" id="pick-connect">'), 'the ways to connect are one pick block');
-        assert.match(html, /<nav class="pick-row" data-ovk-scroll aria-label="The ways to connect">/);
+        assert.match(html, /<div class=\"ov-parts ov-parts--front\" data-parts=\"\d+\">/, 'its parts are tabs on a phone');
         const paneIds = [...html.matchAll(/<div class="pick-pane" id="(pp-connect-[a-z-]+)">/g)].map((m) => m[1]);
-        const chips = [...html.matchAll(/<a class="pick-chip" href="#(pp-connect-[a-z-]+)">([^<]+)<\/a>/g)];
+        const chips = [...html.matchAll(/<label for="ovp-[a-z0-9]+-(pp-connect-[a-z-]+)">([^<]+)(?: <span class="ov-parts-n">[^<]*<\/span>)?<\/label>/g)];
         assert.ok(chips.length >= 3, 'a chip per way to connect');
         assert.deepStrictEqual(chips.map((m) => m[1]), paneIds, 'one chip per pane, in the same order');
         // Every way stays in the page for the crawlers.
         for (const label of ['Simulated', 'A phone', 'On-board']) assert.ok(html.includes(`<strong>${label}</strong>`), `${label} is in the page`);
         // The chips are links, not radios, and their targets exist in the page.
         const pick = html.slice(html.indexOf('<div class="pick" id="pick-connect">'), html.indexOf('</section>', html.indexOf('<div class="pick" id="pick-connect">')));
-        assert.ok(!/type="radio"/.test(pick), 'no radio input inside the pick block');
+        assert.ok(/<input type=\"radio\" class=\"ov-parts-r\"[^>]* checked>/.test(pick), 'the first part is open on a phone (Shared pick(): tabs, 11-12)');
         assert.ok(!/pickRule|pk-connect/.test(html), 'no inline rule that shows one picked pane');
         for (const m of chips) assert.ok(html.includes(`id="${m[1]}"`), `the pane ${m[1]} exists`);
 
