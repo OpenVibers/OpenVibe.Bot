@@ -789,6 +789,9 @@ body.bot-mode-compact .bot-compact .bot-notice { color: var(--warn); background:
 #panel:not(.bot-surface) .control.slider { display: grid; gap: 0.4rem; align-items: stretch; }
 #panel:not(.bot-surface) .slider-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; margin: 0; }
 #panel:not(.bot-surface) .slider-head .control-name { min-width: 0; color: var(--text); font-weight: 600; font-size: 0.9rem; }
+/* The head's mounting beside its name (sensors.p7_head): Portrait and its range, quiet; display only. */
+.slider-head .slider-note { flex: 1 1 auto; min-width: 0; margin-left: 0.4rem; color: var(--muted, #8a96a8); font-size: 0.78rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.slider-head .slider-note[data-orientation="portrait"] { color: var(--accent, #60a5fa); }
 #panel:not(.bot-surface) .control-value { font-variant-numeric: tabular-nums; font-size: 0.85rem; color: var(--muted); }
 #panel:not(.bot-surface) .slider-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.5rem; }
 #panel:not(.bot-surface) .slider-row .step { width: 40px; height: 40px; min-width: 40px; min-height: 40px; padding: 0; border-radius: 50%; display: grid; place-items: center; }
