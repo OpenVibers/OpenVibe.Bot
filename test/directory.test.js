@@ -88,6 +88,13 @@ const { loadProfiles } = require('../server/profiles');
         assert.ok(cozmo.includes('<h1>Cozmo') && cozmo.includes('How it connects') && cozmo.includes('hardware-cozmo.md') && cozmo.includes('href="/robots/new?profile=cozmo"'));
         const sim = await (await get('/models/sim.rover')).text();
         assert.ok(sim.includes('href="/try"'), 'the simulated rover points at /try');
+        // LOOI's panel lists its mapped headlights (owner and Operators), once; and the page points to its free pack
+        // and to making your own buttons with AI (OpenVibe Elements on Design).
+        const looi = await (await get('/models/looi')).text();
+        assert.ok(looi.includes('<li>Headlights <span class="muted">(the owner and Operators)</span></li>'), 'the headlights are on the panel list');
+        assert.ok(!looi.includes('class="dir-chips"'), 'the panel is said once, not again as chips');
+        assert.ok(looi.includes('https://openvibe.design/gallery/looi-pack') && looi.includes('https://openvibe.design/create?kind=element'), 'its buttons: the pack, or made with AI');
+        assert.ok(sim.includes('https://openvibe.design/create?kind=element') && !sim.includes('looi-pack'), 'every model can make its own; only LOOI has a pack');
         assert.strictEqual((await get('/models/nope')).status, 404);
         const sitemap = await (await get('/sitemap.xml')).text();
         for (const p of profiles) assert.ok(sitemap.includes(`/models/${p.id}</loc>`), p.id);

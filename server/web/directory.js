@@ -186,8 +186,22 @@ ${community.length ? `<section class="dir-sec" aria-labelledby="g-community"><h2
 }
 
 // ── GET /models/:id ─────────────────────────────────────────────────────────────────────────────────
+// A profile's mapped actions, by what the panel calls them and who may use them (server/domain ROLE_KINDS).
+const ACTION_WORDS = { headlight: ['Headlights', 'the owner and Operators'] };
+
 function renderModel({ config, model, kit = null }) {
-    const controls = model.widgets.filter((w) => w.type !== 'latency').map((w) => `<li>${esc(w.label || w.type)}</li>`).join('');
+    // The panel's controls: its widgets, then the actions its profile maps (LOOI's headlights were missing from this
+    // list, and the capability chips under it said the list again: the 11-12 review).
+    const mapped = (model.profile && model.profile.mapping && model.profile.mapping.actions) || {};
+    const names = Array.isArray(mapped) ? mapped.filter((a) => typeof a === 'string') : Object.keys(typeof mapped === 'object' ? mapped : {});
+    const actions = names.map((a) => {
+        const [name, who] = ACTION_WORDS[a] || [a.replace(/[_-]+/g, ' ').replace(/^./, (c) => c.toUpperCase()), ''];
+        return `<li>${esc(name)}${who ? ` <span class="muted">(${esc(who)})</span>` : ''}</li>`;
+    }).join('');
+    const controls = model.widgets.filter((w) => w.type !== 'latency').map((w) => `<li>${esc(w.label || w.type)}</li>`).join('') + actions;
+    // Buttons viewers press under the stream: made with AI or installed from OpenVibe.Design's gallery (Elements).
+    const own = `<section class="dir-sec card"><h2>Your own buttons</h2><p class="muted">Add buttons viewers press under your stream: install free ones, or describe yours and the AI makes them. Every press still passes Bot's gate.</p>
+<p class="dir-actions">${model.id === 'looi' ? `${link('https://openvibe.design/gallery/looi-pack', 'The free LOOI pack', 'dir-btn dir-primary')} ` : ''}${link('https://openvibe.design/create?kind=element', 'Make one with AI', model.id === 'looi' ? 'dir-btn' : 'dir-btn dir-primary')} ${link('https://openvibe.design/gallery', 'Browse the gallery', 'dir-btn')}</p></section>`;
     const parts = kit ? `<section class="dir-sec card"><h2>What you need</h2><ul>${kit.parts.map((p) => `<li>${esc(p.qty)}× ${esc(p.name)}${p.note ? ` <span class="muted">(${esc(p.note)})</span>` : ''}</li>`).join('')}</ul>
 ${kit.build_guide_url ? `<p>${link(kit.build_guide_url, 'The kit\'s build guide')}</p>` : ''}</section>` : '';
     const add = model.connect === 'browser'
@@ -198,9 +212,10 @@ ${kit.build_guide_url ? `<p>${link(kit.build_guide_url, 'The kit\'s build guide'
 <div class="dir-cols">
 <section class="dir-sec card"><h2>How it connects</h2><p><b>${esc(CONNECT[model.connect].label)}.</b> ${esc(CONNECT[model.connect].text)}</p>
 ${model.setup.length ? `<ol>${model.setup.map((s) => `<li>${esc(s)}</li>`).join('')}</ol>` : ''}</section>
-<section class="dir-sec card"><h2>Its panel</h2><p class="muted">Laid out from its profile (<code>${esc(model.id)}</code>):</p><ul>${controls}</ul>${chips(model.capabilities)}</section>
+<section class="dir-sec card"><h2>Its panel</h2><p class="muted">Laid out from its profile (<code>${esc(model.id)}</code>):</p><ul>${controls}</ul></section>
 </div>
 ${parts}
+${own}
 ${model.community ? `<section class="dir-sec card"><h2>From the community</h2><p>Submitted by ${esc(ownerName(model.community.by))} and reviewed by an OpenVibe admin.${model.community.license ? ` Licence: ${esc(model.community.license)}.` : ''}</p>
 <ul>${model.community.driver_url ? `<li>Driver: ${link(model.community.driver_url, model.community.driver_url)}</li>` : ''}${model.community.guide_url ? `<li>Setup guide: ${link(model.community.guide_url, model.community.guide_url)}</li>` : ''}
 <li>Signed by OpenVibe.Bot (Ed25519, key <code>${esc(model.community.key_id || '')}</code>): ${link(`/api/v1/profiles/${model.id}`, 'the profile and its signature')} · ${link('/api/v1/profiles/signing-key', 'the public key')}</li>
