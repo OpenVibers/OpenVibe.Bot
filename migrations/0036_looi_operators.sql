@@ -1,8 +1,8 @@
 -- phase: expand
 -- LOOI Operators card (Maticus's 2026-11-12 spec): a Mod role between the owner and operators, a per-person
 -- on/off switch that the command gate reads before it forwards anything, sole control for one subject, and an
--- audit of who changed authority. A Stop is now one ordinary control (a halt command), not a latch; the old
--- robots.estop_* columns are left for a later contract migration and are no longer read or written.
+-- audit of who changed authority. Panel E-STOP stays the robots.estop_latched latch; the tray's local STOP and
+-- ARM are never touched by this table.
 ALTER TABLE robot_operators DROP CONSTRAINT IF EXISTS robot_operators_role_check;
 ALTER TABLE robot_operators ADD CONSTRAINT robot_operators_role_check CHECK (role IN ('owner', 'operator', 'viewer', 'mod'));
 ALTER TABLE robot_operators ADD COLUMN IF NOT EXISTS enabled boolean NOT NULL DEFAULT true;
@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS robot_operator_control (
 );
 
 -- Authority changes: who granted sole control, switched someone on or off, promoted or demoted a Mod, or
--- granted or cleared sole control. Subjects and roles only: no command values, tokens or secrets.
+-- tripped/cleared the panel E-STOP. Subjects and roles only: no command values, tokens or secrets.
 CREATE TABLE IF NOT EXISTS robot_operator_audit (
     id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     robot_id      text NOT NULL,
