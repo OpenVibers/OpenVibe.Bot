@@ -89,9 +89,9 @@ const { renderPanel, renderEmbedRefused } = require('../server/web/render');
 
     await check('the embedded panel asks its allowed page for a ticket; the refusal tells that page', () => {
         const SIM = { id: 'sim.rover', name: 'Rover', commands: { drive: { axes: { throttle: [-1, 1], steer: [-1, 1] } } }, widgets: [{ type: 'drive', label: 'Drive', command: { kind: 'drive' } }] };
-        const html = renderPanel({ robot: { id: 'rob_d1', name: 'Rover', profile_id: 'sim.rover', estop: { latched: false } }, profile: SIM, role: 'watcher', mode: 'embed', signedIn: false, parentOrigins: ['https://openvibe.live', 'https://www.openvibe.live'] });
+        const html = renderPanel({ robot: { id: 'rob_d1', name: 'Rover', profile_id: 'sim.rover' }, profile: SIM, role: 'watcher', mode: 'embed', signedIn: false, parentOrigins: ['https://openvibe.live', 'https://www.openvibe.live'] });
         assert.ok(html.includes('data-parent-origins="https://openvibe.live https://www.openvibe.live"'));
-        const page = renderPanel({ robot: { id: 'rob_d1', name: 'Rover', profile_id: 'sim.rover', estop: { latched: false } }, profile: SIM, role: 'watcher', mode: 'page', parentOrigins: ['https://openvibe.live'] });
+        const page = renderPanel({ robot: { id: 'rob_d1', name: 'Rover', profile_id: 'sim.rover' }, profile: SIM, role: 'watcher', mode: 'page', parentOrigins: ['https://openvibe.live'] });
         assert.ok(!page.includes('data-parent-origins'), 'only a framed panel');
         const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'panel.js'), 'utf8');
         assert.ok(js.includes("window.parent.postMessage({ type: 'ov-bot-ticket-request', robot_id: ROBOT_ID }, origin)"), 'asks each allowed origin only');

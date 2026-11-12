@@ -30,8 +30,6 @@ const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ESC[c])
 /** A data-* attribute's JSON, escaped for a double-quoted attribute. */
 const data = (v) => esc(JSON.stringify(v));
 
-/** The panel e-stop is the owner's, a Mod's and an operator's; the owner or a Mod clears it (the gate enforces it). */
-const ESTOP_ROLES = new Set(['owner', 'mod', 'operator']);
 /** The drive joystick's two axes, by preference: horizontal and vertical. The rest stay hold buttons. */
 const STICK_X = ['steer', 'x', 'rotation'];
 const STICK_Y = ['throttle', 'y'];
@@ -149,8 +147,9 @@ const DIRECTION_BUTTONS = [
 
 /**
  * The drive pad: a touch joystick for two axes (pointer events, see panel.js), hold buttons for the rest.
- * Its stick, Stop and direction buttons are the panel's arrangeable parts (make your own controls, stage 2):
+ * Its stick and direction buttons are the panel's arrangeable parts (make your own controls, stage 2):
  * the section around them flattens (`display: contents`) so each is a cell of the panel's grid.
+ * Stop is its own optional part, off by default, added from the Arrange palette.
  */
 function drivePad(axes, enabled, attrs = {}, flatten = false) {
     const x = STICK_X.find((a) => axes[a]);
@@ -166,8 +165,7 @@ function drivePad(axes, enabled, attrs = {}, flatten = false) {
             + `<span class="stick-knob" data-knob></span></div>`
         : '';
     const pad = Object.keys(rest).length ? `<div class="pad" data-ov-part="pad" ${attrs.pad || ''}>${axisButtons(rest, enabled)}</div>` : '';
-    return `<div class="drive-pad" data-axes="${data(axes)}"${flatten ? ' data-ov-flatten="true"' : ''}>${joystick}${pad}`
-        + `<button type="button" class="stop" data-stop data-ov-part="stop" ${attrs.stop || ''}${disabledUnless(enabled)}>${icon('square')}<span>Stop</span></button></div>`;
+    return `<div class="drive-pad" data-axes="${data(axes)}"${flatten ? ' data-ov-flatten="true"' : ''}>${joystick}${pad}</div>`;
 }
 
 /** An actuator's name as a label: backpack_lights → Backpack lights. */
@@ -281,7 +279,7 @@ function renderWidget(w, { profile = {}, allowed_commands = [], signaling_url = 
             const qe = headName ? ' · <kbd>Q</kbd> / <kbd>E</kbd> to tilt' : axes.rotation ? ' · <kbd>Q</kbd> / <kbd>E</kbd> to turn' : '';
             inner = drivePad(axes, enabled, partAttrs, flatten)
                 + `<p class="hint" data-ov-decor><kbd>W A S D</kbd> or arrows to drive${qe} · <kbd>Space</kbd> to stop. `
-                + `<span class="pad-hint" data-pad-hint>${icon('gamepad')} A gamepad works too: left stick drives, A sounds, B stops, Start is the e-stop.</span></p>`;
+                + `<span class="pad-hint" data-pad-hint>${icon('gamepad')} A gamepad works too: left stick drives, A sounds, B stops.</span></p>`;
             break;
         }
         case 'ptz': {
@@ -392,7 +390,7 @@ function routinesCard(robot, profile, a) {
     };
     const t = v.trigger || 'manual';
     return `<section class="setting-card" id="routines" aria-labelledby="routines-h"><h2 id="routines-h">Routines</h2>
-<p class="setting-note">Steps the robot runs by itself, through the same limits, cooldowns and e-stop as you. Run one now, on a schedule, or each time the robot comes online; anything the robot refuses stops it there.</p>
+<p class="setting-note">Steps the robot runs by itself, through the same limits and cooldowns as you. Run one now, on a schedule, or each time the robot comes online; anything the robot refuses stops it there.</p>
 ${a.routineError ? `<p class="error" role="alert">${esc(a.routineError)}</p>` : ''}
 ${a.routines.length ? `<ul class="people-list">${a.routines.map(row).join('\n')}</ul>` : ''}
 <details${a.routineError ? ' open' : ''}><summary>Add a routine</summary>
@@ -431,7 +429,7 @@ ${a.hooks.length ? `<ul class="people-list">${a.hooks.map(row).join('\n')}</ul>`
 function agentForm(robot) {
     return `<section class="setting-card" id="agent" aria-labelledby="agent-h"><h2 id="agent-h">Your agent</h2>
 <form class="embed-form" method="post" action="/robots/${esc(robot.id)}/agent">
-${toggle('agent_control', robot.agent_control, 'Let my OpenVibe.Actor agent drive this robot', 'Ask your agent on openvibe.actor to move it, speak or show something. It acts as you, through the same limits, cooldowns and e-stop, and every command it sends is on the record.')}
+${toggle('agent_control', robot.agent_control, 'Let my OpenVibe.Actor agent drive this robot', 'Ask your agent on openvibe.actor to move it, speak or show something. It acts as you, through the same limits and cooldowns, and every command it sends is on the record.')}
 <button type="submit">Save</button>
 </form></section>`;
 }
@@ -456,7 +454,7 @@ function onStreamCard(robot, { liveUrl = null } = {}) {
         ? `<p class="setting-ok" role="status">${icon('check')}<span>Its panel shows wherever it is embedded. Bound to your channel, viewers see it under your stream.</span></p>`
         : '';
     return `<section class="setting-card on-stream" id="on-stream" aria-labelledby="on-stream-h"><h2 id="on-stream-h">On your stream</h2>
-<p class="setting-note">Put this robot's buttons under your OpenVibe.Live stream so your viewers can drive it there. Your stream stays the video; the panel adds the buttons, the e-stop and the latency.</p>
+<p class="setting-note">Put this robot's buttons under your OpenVibe.Live stream so your viewers can drive it there. Your stream stays the video; the panel adds the buttons and the latency.</p>
 ${state}${liveUrl ? `<form method="post" action="/robots/${esc(robot.id)}/on-stream"><button type="submit" class="button primary">${icon('gamepad')}<span>Put the buttons under my OpenVibe.Live stream</span></button></form>
 <p class="setting-note">Opens your channel on OpenVibe.Live, which asks you to confirm. To take it off, choose no robot there, or turn off the panel below.</p>` : ''}
 <form class="access-form" method="post" action="/robots/${esc(robot.id)}/access">
@@ -558,7 +556,7 @@ function peopleCard(robot, people) {
     };
     const queue = robot.access_policy === 'queue' ? ' Anyone signed in can also take a turn: this robot uses the open queue.' : '';
     return `<section class="setting-card people" aria-labelledby="people-h"><h2 id="people-h">People</h2>
-<p class="setting-note">Operators drive and can press the e-stop; viewers watch.${queue}</p>
+<p class="setting-note">Operators drive; viewers watch.${queue}</p>
 <ul class="people-list">
 <li class="person"><span class="who"><b>You</b><small>Owner</small></span></li>
 ${(people || []).map(row).join('\n')}
@@ -569,8 +567,8 @@ ${(people || []).map(row).join('\n')}
 
 /**
  * The Operators card (Maticus's 2026-11-12 LOOI spec): the owner, every Mod and Operator with a live activity
- * indicator and last command, the viewers' count, sole control, the per-person switches, promotion/demotion and
- * the panel E-STOP. The server renders the whole roster; public/panel.js keeps it current from `operators_state`.
+ * indicator and last command, the viewers' count, sole control, the per-person switches and promotion/demotion.
+ * The server renders the whole roster; public/panel.js keeps it current from `operators_state`.
  * Actions are in the panel's /control socket and are checked again in server/domain/index.js, never here.
  */
 function operatorsCard(robot, operators, role, viewer = null) {
@@ -618,9 +616,9 @@ function operatorsCard(robot, operators, role, viewer = null) {
         const you = isMe(m) && m.role !== 'owner';
         const tag = m.role === 'owner' ? (isMe(m) ? 'OWNER · YOU' : 'OWNER') : (roleTag[m.role] || m.role);
         const sub = m.role === 'owner'
-            ? 'Always has override, local STOP, and ARM'
+            ? 'Always has override.'
             : m.role === 'mod'
-                ? 'Can manage operators and clear the panel E-STOP. Cannot change speed, mode, or Viewer access, or promote Mods.'
+                ? 'Can switch Operators on or off and give or clear sole control. Cannot change speed, mode, or Viewer access, or promote Mods.'
                 : 'Can drive and tilt the head while switched on.';
         return `<li class="ops-row ops-${esc(m.role)}" data-operator-subject="${esc(m.subject)}" data-operator-role="${esc(m.role)}" data-operator-enabled="${m.enabled !== false ? 'true' : 'false'}" data-operator-you="${isMe(m) ? 'true' : 'false'}" data-operator-name="${esc(handle(m))}">`
             + `<span class="ops-avatar" aria-hidden="true">${esc(initial(m))}</span>`
@@ -634,12 +632,6 @@ function operatorsCard(robot, operators, role, viewer = null) {
         + `<div class="ops-who"><p class="ops-name"><b>Viewers</b> <span class="pill">${esc(String(viewers.length))} watching</span></p>`
         + '<p class="ops-sub">Can watch only. No drive, head, lights, or speed/mode changes.</p></div>'
         + `<span class="pill">${robot.embed_public ? 'Watching' : 'Hidden'}</span></li>`;
-    const latched = !!(robot.estop && robot.estop.latched);
-    const estopNote = latched
-        ? '<b>Panel E-STOP is tripped.</b> A Mod may clear it. That never clears the tray STOP latch or ARM; the robot cannot move until the owner clears STOP and re-arms on the tray.'
-        : '<b>Panel E-STOP is clear.</b> A Mod may trip it, or clear it after a panel stop. That never clears the tray STOP latch or ARM.';
-    const estopButton = canManage
-        ? `<button type="button" class="ops-estop-btn" data-operators-estop>${glyphIcon('stop')}<span>${latched ? 'Clear panel E-STOP' : 'Trip panel E-STOP'}</span></button>` : '';
     const rows = (operators.members || []).filter((m) => m.role !== 'viewer').map(row).join('\n');
     return `<section class="widget widget-operators" data-widget="operators" data-operators data-can-manage="${canManage ? 'true' : 'false'}" data-can-role="${canRole ? 'true' : 'false'}">
 <h2>${glyphIcon('users')} <span>Operators</span></h2>
@@ -650,8 +642,7 @@ ${canManage ? `<button type="button" class="ops-mode-btn" data-operators-clear${
 ${rows}
 ${viewerRow}
 </ul>
-<div class="ops-estop" data-operators-estop-box data-latched="${latched ? 'true' : 'false'}"><p data-operators-estop-note>${estopNote}</p>${estopButton}</div>
-<p class="ops-footer">Everyone returns shared control to all enabled operators. Sole control admits only that person's commands; others get a clear refusal. Toggles apply immediately, with no tray restart. The robot still cannot move until you Clear STOP and ARM on the tray. Owner always overrides.</p>
+<p class="ops-footer">Everyone returns shared control to all enabled operators. Sole control admits only that person's commands; others get a clear refusal. Toggles apply immediately, with no tray restart. The tray's own Stop stays local. The owner always overrides.</p>
 </section>`;
 }
 
@@ -713,21 +704,21 @@ function commissionForm(robot, profile) {
 ${field('max_speed', 'Top speed', own.max_speed != null ? own.max_speed : limits.max_speed, ceiling.max_speed)}
 ${field('max_turn', 'Top turn', own.max_turn != null ? own.max_turn : limits.max_turn, ceiling.max_turn)}
 <button type="submit" class="primary">Save the limits</button></form>
-<p class="setting-note">The robot gets them at once. The e-stop, cooldowns and command length (${esc(limits.max_command_ms)} ms) stay as they are.</p>
+<p class="setting-note">The robot gets them at once. Cooldowns and command length (${esc(limits.max_command_ms)} ms) stay as they are.</p>
 <form method="post" action="/robots/${esc(robot.id)}/uncommission"><button type="submit" class="quiet">Return to the profile defaults (${esc(limits.max_speed)} speed, ${esc(limits.max_turn)} turn)</button></form></section>`;
     }
     // Not commissioned: one deliberate act, with the owner saying what they checked.
     return `<section class="setting-card" id="commission" aria-labelledby="commission-h"><h2 id="commission-h">Commissioned limits</h2>
 <p class="setting-note">The profile's speed (${esc(limits.max_speed)}) and turn (${esc(limits.max_turn)}) limits clamp every command. Commissioning this robot lets you set its own higher values ${allow}. It records that you did it and when, and it is yours alone: operators and your agent can never do it.</p>
 <form method="post" action="/robots/${esc(robot.id)}/commission" class="setting-form">
-<label class="setting-check"><input type="checkbox" name="confirm" value="on" required> I have checked this robot can move faster safely: there is clear space around it, and I can reach its e-stop.</label>
+<label class="setting-check"><input type="checkbox" name="confirm" value="on" required> I have checked this robot can move faster safely: there is clear space around it, and I can reach its Stop.</label>
 <button type="submit" class="primary">Commission this robot</button></form></section>`;
 }
 
 
 // ── The same controls over a picture ({mode=overlay}) or in a narrow card ({mode=compact}) ───────────────
 // The embeddable panel normally draws the whole page. Over a stream it must draw only the live controls:
-// the first stick, the first slider, the e-stop and a way to the full panel. Which ones exist comes from the
+// the first stick, the first slider, Drive and a way to the full panel. Which ones exist comes from the
 // robot's profile (commands + widgets), exactly as the full panel does; nothing here is robot-specific.
 const BOT_VIEWS = new Set(['panel', 'overlay', 'compact']);
 const botViewOf = (v) => (BOT_VIEWS.has(v) ? v : 'panel');
@@ -787,13 +778,9 @@ function overlaySlider(profile, allowed) {
 }
 
 const botPill = (robot, attrs = '') => `<span class="bot-pill bot-control" data-bot-pill data-online-pill data-state="connecting" data-bot-hit data-ov-part="pill" ${attrs}><span class="dot"></span><b class="bot-pill-name">${esc(robot.name)}</b><span class="bot-pill-state" data-bot-state>Connecting…</span></span>`;
-// A watcher (the anonymous embed on a stream) takes the controls with Drive, as on the full panel; the e-stop waits,
-// hidden, for the join that makes them an operator (public/panel.js onFrame), and the line under the controls says
-// what the page around answered (sign in there, or the owner decides who drives). Ask 353, 2026-11-11: on a phone over
-// the stream there was no way to start driving at all.
-const botEstop = (role, canDrive = false, attrs = '') => (ESTOP_ROLES.has(role)
-    ? `<button type="button" class="bot-estop bot-control" data-estop data-bot-hit data-ov-part="estop" ${attrs} aria-label="E-stop" title="E-stop">${icon('stop')}</button>`
-    : canDrive ? `<button type="button" class="bot-estop bot-control" data-estop data-bot-hit data-ov-part="estop" data-ov-role-hidden="true" ${attrs} aria-label="E-stop" title="E-stop" hidden>${icon('stop')}</button>` : '');
+// A watcher (the anonymous embed on a stream) takes the controls with Drive, as on the full panel, and the line
+// under the controls says what the page around answered (sign in there, or the owner decides who drives). Ask 353,
+// 2026-11-11: on a phone over the stream there was no way to start driving at all.
 const botDrive = (canDrive, attrs = '') => (canDrive
     ? `<button type="button" class="bot-drive bot-control" data-drive data-drive-bar data-bot-hit data-ov-part="drive" ${attrs} title="Take the controls">${icon('gamepad')}<span>Drive</span></button>` : '');
 const botNotice = '<p class="bot-notice bot-control" data-notice data-bot-hit role="alert" hidden></p>';
@@ -807,7 +794,7 @@ function renderBotSurface({ robot, profile, role, allowed_commands = [], holdRes
     const stick = overlayStickMarkup(profile, allowed_commands);
     const slider = overlaySlider(profile, allowed_commands);
     const canDrive = role === 'watcher' && !signedIn;
-    const stop = botEstop(role, canDrive, attrs('estop')) + botDrive(canDrive, attrs('drive'));
+    const stop = botDrive(canDrive, attrs('drive'));
     const sliderLabel = slider ? esc(humanName(slider.name)) : '';
     const sliderMarkup = slider
         ? `<div class="bot-slider bot-control" data-bot-hit data-ov-part="slider" ${attrs('slider')}><section class="widget bot-widget" data-command="${data(slider.widget.command)}"><label class="control bot-range-label"><span class="sr-only">${sliderLabel}</span>${numberRange(slider.name, slider.actuator, slider.enabled, profile.id)}</label></section></div>`
@@ -817,7 +804,7 @@ function renderBotSurface({ robot, profile, role, allowed_commands = [], holdRes
     const body = view === 'compact'
         ? `<div class="bot-compact" data-bot-compact${slider ? '' : ' data-no-slider'} ${surfaceAttrs}>${botPill(robot, attrs('pill'))}${stickMarkup}${sliderMarkup}${stop}${botMore(attrs('more'))}${botNotice}</div>`
         : `<div class="bot-overlay" data-bot-overlay ${surfaceAttrs}>${botPill(robot, attrs('pill'))}${stickMarkup}${sliderMarkup}${stop}${botMore(attrs('more'))}${botNotice}</div>`;
-    const dataScript = arrange ? `<script type="application/json" id="ov-arrange-data">${JSON.stringify({ catalog: arrange.catalog, layout: arrange.layout, device: arrange.device, surface: arrange.catalog.id, signedIn: arrange.signedIn, layoutSource: arrange.layoutSource || 'default', save: arrange.save || null, suggest: arrange.suggest || null, share: arrange.share || null, reset: arrange.reset || null, author: arrange.author || null }).replace(/</g, '\\u003c')}</script>` : '';
+    const dataScript = arrange ? `<script type="application/json" id="ov-arrange-data">${JSON.stringify({ catalog: arrange.catalog, layout: arrange.layout, device: arrange.device, surface: arrange.catalog.id, signedIn: arrange.signedIn, layoutSource: arrange.layoutSource || 'default', save: arrange.save || null, suggest: arrange.suggest || null, share: arrange.share || null, reset: arrange.reset || null, author: arrange.author || null, defaultLayout: arrange.defaultLayout || null }).replace(/</g, '\\u003c')}</script>` : '';
     return `<main id="panel" class="bot-surface" tabindex="0" data-robot-id="${esc(robot.id)}" data-role="${esc(role)}" data-hold-ms="${esc(holdResendMs)}" data-allowed="${data(allowed_commands)}" data-bot-view="${esc(view)}"${parentOrigins.length ? ` data-parent-origins="${esc(parentOrigins.join(' '))}"` : ''}>${body}${dataScript}</main>`;
 }
 
@@ -836,10 +823,9 @@ function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs
     }
     const minSize = BOT_VIEW_MIN.panel;
     const htmlAttrs = embed ? ` data-bot-view="panel" data-bot-min-width="${minSize[0]}" data-bot-min-height="${minSize[1]}"` : '';
-    const latched = !!(robot.estop && robot.estop.latched);
     const widgetOrder = (profile.widgets || []).map((w, i) => ({ w, i }))
         .sort((a, b) => (a.w.order != null ? a.w.order : 1e9 + a.i) - (b.w.order != null ? b.w.order : 1e9 + b.i));
-    // The arrangeable part ids each widget draws: the drive is split into its stick, Stop and direction buttons.
+    // The arrangeable part ids each widget draws: the drive is split into its stick and direction buttons.
     const byWidget = new Map();
     for (const p of (arrange && arrange.catalog ? arrange.catalog.parts || [] : [])) {
         const source = (arrange.parts || []).find((x) => x.id === p.id);
@@ -851,11 +837,12 @@ function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs
     const arrangeApply = !!(arrange && arrange.layoutSource === 'account');
     const attrsOf = (ids) => Object.fromEntries(ids.map((id) => [id, arrange ? require('./surface').attrsFor(arrange.catalog, arrange.layout, arrange.device, id, { apply: arrangeApply }) : '']));
     const widgets = widgetOrder.map(({ w, i }) => renderWidget(w, { profile, allowed_commands, signaling_url, part: widgetParts(i)[0] || null, partAttrs: attrsOf(widgetParts(i)), flatten: arrangeApply }));
-    // A robot with no drive widget still gets its Stop: a required part of bot.controls, drawn on its own.
-    const drawn = new Set([...byWidget.values()].flat());
-    if (arrange && !drawn.has('stop') && require('./surface').partOf(arrange.catalog, 'stop')) {
-        widgets.push(`<section class="widget widget-stop" data-widget="stop" data-ov-part="stop" ${attrsOf(['stop']).stop || ''}>`
-            + `<h2>Stop</h2><button type="button" class="stop" data-stop>${icon('square')}<span>Stop</span></button></section>`);
+    // Stop is one ordinary part of bot.controls, off by default: it appears only when a layout adds it.
+    if (arrange && require('./surface').partOf(arrange.catalog, 'stop')) {
+        // The default layout places Stop hidden (off), so apply its attributes even when the page keeps its own look.
+        const stopAttrs = require('./surface').attrsFor(arrange.catalog, arrange.layout, arrange.device, 'stop', { apply: true });
+        widgets.push(`<section class="widget widget-stop" data-widget="stop" data-ov-part="stop" ${stopAttrs}>`
+            + `<button type="button" class="stop plain-stop" data-stop>${icon('square')}<span>Stop</span></button></section>`);
     }
     // Maticus's LOOI status row: Battery | Latency, one compact row (public/panel.css). The server groups the two
     // widgets when the person has not arranged the panel; an arranged layout keeps their separate grid cells.
@@ -872,15 +859,10 @@ function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs
     // The Operators card sits under the controls, inside the same panel grid. A watcher has no roster and no card.
     const operatorsHtml = profile.id === 'looi' ? operatorsCard(robot, operators, role, viewer) : '';
     if (operatorsHtml) widgets.push(operatorsHtml);
-    // A framed watcher may take the controls with Drive; its e-stop waits, hidden, for an owner's or operator's join.
-    const estop = ESTOP_ROLES.has(role) ? `<button type="button" class="estop" data-estop>${icon('stop')}<span>E-stop</span></button>`
-        : (embed && role === 'watcher' ? `<button type="button" class="estop" data-estop hidden>${icon('stop')}<span>E-stop</span></button>` : '');
-    const clear = (role === 'owner' || role === 'mod') ? `<button type="button" class="estop-clear" data-estop-clear${latched ? '' : ' hidden'}>Clear e-stop</button>` : '';
     const arrangeButton = arrange && arrange.src && role === 'owner'
         ? `<button type="button" class="arrange-btn" data-arrange data-arrange-src="${esc(arrange.src || '')}" title="Arrange the controls">${icon('sliders')}<span>Arrange</span></button>` : '';
-    const body = `<header class="estop-banner" data-estop-banner data-latched="${latched}">
+    const body = `<header class="panel-top">
 ${embed ? '' : tryIt ? topbar('<span class="crumb">Try the panel</span>', '/') : topbar(`<span class="crumb">${esc(robot.name)}</span>`)}
-<div class="estop-bar"><p class="estop-state" role="status" aria-live="assertive"><span class="estop-dot"></span><span data-estop-state>${latched ? 'E-stop latched' : 'E-stop clear'}</span><span class="estop-note">${latched ? ' — the robot stays still until the owner or a Mod clears it.' : ''}</span></p>${clear}${estop}</div>
 </header>
 <main id="panel" tabindex="0" data-robot-id="${esc(robot.id)}" data-profile-id="${esc(profile.id || '')}" data-role="${esc(role)}" data-hold-ms="${esc(holdResendMs)}" data-allowed="${data(allowed_commands)}"${tryIt ? ' data-transport="local"' : ''} data-bot-view="${esc(botView)}"${embed && parentOrigins.length ? ` data-parent-origins="${esc(parentOrigins.join(' '))}"` : ''}>
 <div class="panel-head">
@@ -896,7 +878,7 @@ ${tryIt ? tryIntro() : ''}
 <div class="widgets"${arrange ? require('./surface').surfaceAttrs(arrange.catalog, arrange.layout, arrange.device, arrangeApply) : ''}>
 ${widgets.join('\n')}
 </div>
-${arrange ? `<script type="application/json" id="ov-arrange-data">${JSON.stringify({ catalog: arrange.catalog, layout: arrange.layout, device: arrange.device, surface: arrange.catalog.id, signedIn: arrange.signedIn, layoutSource: arrange.layoutSource || 'default', save: arrange.save || null, suggest: arrange.suggest || null, share: arrange.share || null, reset: arrange.reset || null, author: arrange.author || null }).replace(/</g, '\\u003c')}</script>` : ''}${tryIt ? tryOutro(profile) : ''}${role === 'owner' && !embed && !tryIt ? `<div class="owner-settings">${limitsCard(robot, limitsInfo, profile)}${onStreamCard(robot, { liveUrl })}${localProfileForm(robot, profile, profileForm)}${commissionForm(robot, profile)}${automation ? routinesCard(robot, profile, automation) + webhooksCard(robot, automation) : ''}${agentForm(robot)}${listingForm(robot)}${embedForm(robot)}${streamingForm(robot, streaming)}${people ? peopleCard(robot, people) : ''}</div>` : ''}
+${arrange ? `<script type="application/json" id="ov-arrange-data">${JSON.stringify({ catalog: arrange.catalog, layout: arrange.layout, device: arrange.device, surface: arrange.catalog.id, signedIn: arrange.signedIn, layoutSource: arrange.layoutSource || 'default', save: arrange.save || null, suggest: arrange.suggest || null, share: arrange.share || null, reset: arrange.reset || null, author: arrange.author || null, defaultLayout: arrange.defaultLayout || null }).replace(/</g, '\\u003c')}</script>` : ''}${tryIt ? tryOutro(profile) : ''}${role === 'owner' && !embed && !tryIt ? `<div class="owner-settings">${limitsCard(robot, limitsInfo, profile)}${onStreamCard(robot, { liveUrl })}${localProfileForm(robot, profile, profileForm)}${commissionForm(robot, profile)}${automation ? routinesCard(robot, profile, automation) + webhooksCard(robot, automation) : ''}${agentForm(robot)}${listingForm(robot)}${embedForm(robot)}${streamingForm(robot, streaming)}${people ? peopleCard(robot, people) : ''}</div>` : ''}
 </main>`;
     return page(tryIt ? 'Try the panel with a simulated rover' : robot.name, body, {
         scripts: panelScripts(profile, tryIt, embed), bodyClass: embed ? 'embed-page' : 'panel-page',
@@ -905,13 +887,13 @@ ${arrange ? `<script type="application/json" id="ov-arrange-data">${JSON.stringi
     });
 }
 
-const TRY_DESCRIPTION = 'Drive a simulated rover from your browser with no account or hardware: the same Bot panel, safety gate and e-stop a real robot gets, with a live camera.';
+const TRY_DESCRIPTION = 'Drive a simulated rover from your browser with no account or hardware: the same Bot panel and safety gate a real robot gets, with a live camera.';
 
 /** /try's opening lines: what this is, and that nothing here is real hardware. */
 function tryIntro() {
     return `<section class="try-intro" aria-labelledby="try-h">
 <h2 id="try-h">Drive a rover, right here</h2>
-<p>This rover is simulated in your browser, so nothing you press moves real hardware. It goes through the same panel a paired robot gets: the same controls, the same limits, and an e-stop that holds until it is cleared.</p>
+<p>This rover is simulated in your browser, so nothing you press moves real hardware. It goes through the same panel a paired robot gets: the same controls and the same limits.</p>
 <ul class="try-keys"><li><kbd>W A S D</kbd> or the arrows, or drag the joystick</li><li><kbd>Space</kbd> stops</li><li>Follow the yellow tape, or find the crates</li></ul>
 <p><button type="button" class="button quiet" data-try-reset>Back to the start</button></p>
 </section>`;

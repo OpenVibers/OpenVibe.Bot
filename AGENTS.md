@@ -21,8 +21,7 @@ budget — over a panel built from the robot's profile rather than per-robot cod
   (`server/kits/*.json`, metadata only).
 - Devices and their credentials (hashed at rest, rotated, revoked, never readable back) and pairing
   codes (one-time, short-lived; `BOT_PAIRING_AUTHORITY=network` lets Network mint them).
-- The `/device`, `/control` and `/watch` WebSockets, the command gate, the operator queue and the
-  **latched e-stop**.
+- The `/device`, `/control` and `/watch` WebSockets, the command gate and the operator queue.
 - Routines (`server/routines.js`), owner webhooks (`server/webhooks.js`, signed, retried), community
   robot profiles (`server/submissions.js`), the phone-as-robot device, the in-process simulator, the
   server-side ONVIF camera connector, and the job dispatcher for paired Link machines
@@ -93,7 +92,7 @@ migration; add a new number. The command audit is pruned after 30 days; job usag
 - User tokens (SSO session / `ov_token` cookie) and service tokens are both accepted on `/api/v1`;
   a **node token is refused** on person and service routes. A person acts only as themself — naming
   anyone else is refused, never ignored.
-- The **owner** can list a robot, add/remove operators, edit limits, clear the latched panel e-stop, set
+- The **owner** can list a robot, add/remove operators, edit limits, set
   the agent switch and flip streaming toggles. An operator drives within limits and cooldowns. An
   open-queue robot gives a viewer a turn, and leaving promotes the next person at once.
 - `svc:actor` may read/drive **only** the owner's robot and only with `robots.agent_control` on;
@@ -101,7 +100,7 @@ migration; add a new number. The command audit is pruned after 30 days; job usag
 - A machine runs only its owner's jobs: the dispatcher compares the job requester with the machine
   owner and refuses anyone else with `bot.not_owner`, whatever the placer chose.
 - Every command, allowed or refused, is audited. Pairing codes are one-time; `halt` always passes;
-  the owner or a Mod clears the panel e-stop, while the tray's STOP latch and ARM stay local.
+  Stop is one optional part of a layout, and the tray's own stop stays local.
 
 ## Frontend loading model
 
@@ -126,7 +125,7 @@ Unit [deploy/systemd/openvibe-bot.service](deploy/systemd/openvibe-bot.service) 
 
 `npm test` runs each `test/*.test.js` in its own process through `openvibe-shared/test-runner`, with
 PGlite and in-process Network/Events stubs. It covers the device and operator WebSocket gates, the
-REST routes, pairing paths, profiles and kits, the owner fence, the e-stop, the outbox, routines,
+REST routes, pairing paths, profiles and kits, the owner fence, the optional Stop, the outbox, routines,
 webhooks, jobs/metering, the embed/watch limits, the simulator and the ONVIF camera against a stub.
 `npm run test:pg` runs the same on PostgreSQL. `ov test` is the harness wrapper.
 
@@ -143,8 +142,8 @@ webhooks, jobs/metering, the embed/watch limits, the simulator and the ONVIF cam
 
 ## Pitfalls
 
-- **The panel e-stop is latched; the owner or a Mod clears it** (a Mod never clears the tray's local STOP/ARM);
-  `halt` always passes the gate and a layout cannot hide Stop or the overlay e-stop.
+- **Stop is one optional part, off by default.** It sends the robot's own `halt`; nothing latches and nothing
+  clears. The tray's own Stop stays local, and `halt` always passes the gate.
 - **Never widen the owner fence.** A person naming another subject, a service, a node token or
   `svc:actor` without the owner's switch must be refused.
 - **Device credentials are hashed and read-once.** Do not add a readable copy or a query-string form.

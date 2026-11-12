@@ -10,18 +10,17 @@ const { renderPanel } = require('../server/web/render');
 
 (async () => {
     const SIM = { id: 'sim.rover', name: 'Simulated rover', commands: { drive: { axes: { throttle: [-1, 1], steer: [-1, 1] } } }, widgets: [{ type: 'drive', label: 'Drive', command: { kind: 'drive' } }, { type: 'latency', label: 'Latency' }] };
-    const robotRow = { id: 'rob_e1', name: 'Rover', profile_id: 'sim.rover', estop: { latched: false } };
+    const robotRow = { id: 'rob_e1', name: 'Rover', profile_id: 'sim.rover' };
 
     await check('BOT_WATCH_MAX_PER_IP and BOT_WATCH_MAX_PER_ROBOT default to 20 and 500', () => {
         assert.deepStrictEqual(loadConfig({}).watch, { maxPerIp: 20, maxPerRobot: 500 });
         assert.deepStrictEqual(loadConfig({ BOT_WATCH_MAX_PER_IP: '3', BOT_WATCH_MAX_PER_ROBOT: '0' }).watch, { maxPerIp: 3, maxPerRobot: 1 });
     });
 
-    await check('embed mode: no topbar, the e-stop state always, controls only for the role, links open a new tab', () => {
+    await check('embed mode: no topbar, controls only for the role, links open a new tab', () => {
         const watcher = renderPanel({ robot: robotRow, profile: SIM, role: 'watcher', allowed_commands: [], mode: 'embed', signedIn: false });
         assert.ok(watcher.includes('class="embed-page"') && !watcher.includes('class="topbar"'));
-        assert.ok(watcher.includes('data-estop-banner') && watcher.includes('data-estop-state'));
-        assert.ok(!watcher.includes('data-estop>') && !watcher.includes('data-estop-clear') && !watcher.includes('data-embed-form'));
+        assert.ok(!watcher.includes('data-estop') && !watcher.includes('data-embed-form'));
         assert.ok(watcher.includes('data-role="watcher"') && watcher.includes('data-allowed="[]"'));
         assert.ok(!/<button(?![^>]*disabled)[^>]*data-(hold|stop)/.test(watcher), 'a control is enabled for a watcher');
         // Ask 353 (2026-11-11): in the head's row, as an icon with its words for screen readers.
@@ -30,7 +29,7 @@ const { renderPanel } = require('../server/web/render');
         const signedIn = renderPanel({ robot: robotRow, profile: SIM, role: 'watcher', allowed_commands: [], mode: 'embed', signedIn: true });
         assert.ok(!signedIn.includes('Open on openvibe.bot'));
         const owner = renderPanel({ robot: { ...robotRow, embed_public: true }, profile: SIM, role: 'owner', allowed_commands: ['drive', 'halt'], mode: 'embed' });
-        assert.ok(owner.includes('data-estop>') && owner.includes('data-estop-clear') && !owner.includes('data-embed-form') && !owner.includes('<a '));
+        assert.ok(!owner.includes('data-estop') && !owner.includes('data-embed-form') && !owner.includes('<a '));
         const page = renderPanel({ robot: robotRow, profile: SIM, role: 'owner', allowed_commands: ['drive'] });
         assert.ok(page.includes('class="panel-page"') && page.includes('class="topbar"') && page.includes('data-embed-form'));
     });
@@ -71,7 +70,7 @@ const { renderPanel } = require('../server/web/render');
         assert.strictEqual(r.headers.get('set-cookie'), null);
         const html = await r.text();
         assert.ok(html.includes('data-role="watcher"') && html.includes('data-allowed="[]"') && html.includes('class="embed-page"'));
-        assert.ok(html.includes('Open on openvibe.bot') && !html.includes('data-estop>'));
+        assert.ok(html.includes('Open on openvibe.bot'));
         assert.ok(t.hub.isOnline(`dev_sim_${open.id}`), 'the embed starts the simulator as the panel does');
         // The rest of the site still refuses every frame.
         assert.match((await get(`/panel/${open.id}`, alex)).headers.get('content-security-policy'), /frame-ancestors 'self';/);
@@ -91,7 +90,7 @@ const { renderPanel } = require('../server/web/render');
         const owner = await get(`/panel/${closed.id}/embed`, alex);
         assert.strictEqual(owner.status, 200);
         const oh = await owner.text();
-        assert.ok(oh.includes('data-role="owner"') && oh.includes('data-estop>') && !oh.includes('data-embed-form') && !oh.includes('Open on openvibe.bot'));
+        assert.ok(oh.includes('data-role="owner"') && !oh.includes('data-estop') && !oh.includes('data-embed-form') && !oh.includes('Open on openvibe.bot'));
         const stranger = await (await get(`/panel/${open.id}/embed`, bob)).text();
         assert.ok(stranger.includes('data-role="watcher"') && !stranger.includes('Open on openvibe.bot'));
     });
@@ -129,8 +128,7 @@ const { renderPanel } = require('../server/web/render');
         assert.deepStrictEqual(j.allowed_commands, []);
         assert.strictEqual(j.profile.id, 'sim.rover');
         assert.strictEqual(j.robot, undefined);
-        assert.deepStrictEqual(Object.keys(j.state).sort(), ['battery', 'estop', 'latency_ms', 'online', 'robot_id', 'telemetry']);
-        assert.deepStrictEqual(Object.keys(j.state.estop), ['latched']);
+        assert.deepStrictEqual(Object.keys(j.state).sort(), ['battery', 'latency_ms', 'online', 'robot_id', 'telemetry']);
         const s = await w.waitFor((m) => m.type === 'robot_state' && m.state.telemetry);
         // The profile's readouts by the driver's keys, and a simulated rover's camera view; never the raw drive or pose.
         assert.deepStrictEqual(Object.keys(s.state.telemetry).sort(), ['sensors', 'sim'], 'the drive and pose telemetry reached a watcher');
@@ -144,32 +142,19 @@ const { renderPanel } = require('../server/web/render');
         w.send({ type: 'join', robot_id: open.id });
         await w.waitFor((m) => m.type === 'joined');
         const before = await auditCount(open.id);
-        for (const f of [{ type: 'command', id: 'x1', kind: 'drive', value: { throttle: 1 } }, { type: 'command', kind: 'halt' }, { type: 'estop' }, { type: 'estop_clear' }, { type: 'pair' }]) w.send(f);
+        for (const f of [{ type: 'command', id: 'x1', kind: 'drive', value: { throttle: 1 } }, { type: 'command', kind: 'halt' }, { type: 'command', id: 'x2', kind: 'halt' }, { type: 'estop' }, { type: 'pair' }]) w.send(f);
         await w.waitFor(() => w.messages.filter((m) => m.type === 'error').length >= 5);
         assert.deepStrictEqual(w.messages.filter((m) => m.type === 'error').map((m) => m.code), Array(5).fill('bot.read_only'));
         assert.ok(!w.messages.some((m) => m.type === 'command_result'));
         await t.wait(100);
         assert.strictEqual(await auditCount(open.id), before);
-        assert.strictEqual((await t.domain.robots.get(open.id)).estop_latched, false);
-        const tele = (m) => m.type === 'robot_state' && m.state.telemetry;
+                const tele = (m) => m.type === 'robot_state' && m.state.telemetry;
         assert.ok(await w.waitFor(tele));
         assert.strictEqual(t.hub.deviceState(`dev_sim_${open.id}`).telemetry.drive.throttle || 0, 0, 'the robot moved');
         w.close();
     });
 
-    await check('the owner\'s e-stop reaches a watcher; readouts carry only the profile\'s sensor keys', async () => {
-        const w = await watch();
-        w.send({ type: 'join', robot_id: open.id });
-        await w.waitFor((m) => m.type === 'joined');
-        const c = await t.ws('/control', { headers: cookie(alex) });
-        c.send({ type: 'join', robot_id: open.id });
-        await c.waitFor((m) => m.type === 'joined');
-        c.send({ type: 'estop' });
-        assert.ok(await w.waitFor((m) => m.type === 'robot_state' && m.state.estop.latched === true));
-        c.send({ type: 'estop_clear' });
-        assert.ok(await w.waitFor((m) => m.type === 'robot_state' && m.state.estop.latched === false && w.messages.some((x) => x.state && x.state.estop.latched)));
-        c.close(); w.close();
-
+    await check('readouts carry only the profile\'s sensor keys', async () => {
         const { robot: arm } = await t.robot(alex, { name: 'Arm', profile_id: 'adeept.adr036' });
         await t.domain.robots.setEmbedPublic(arm.id, true);
         const dev = t.hub.attachSim({ id: 'dev_fake_arm', robot_ids: JSON.stringify([arm.id]), kind: 'onboard' }, { onFrame() {} });

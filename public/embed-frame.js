@@ -186,7 +186,7 @@
             if (doc.body) observer.observe(doc.body);
             observer.observe(html);
         }
-        // Over a picture the body never changes size, but its controls do: Drive gives way to the e-stop, a line
+        // Over a picture the body never changes size, but its controls do: Drive gives way to the panel, a line
         // appears under them. Their boxes are the page's clip, so a control shown or hidden is sent again.
         let watcher = null;
         if (view() === 'overlay' && typeof win.MutationObserver === 'function' && doc.body) {

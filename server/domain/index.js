@@ -7,12 +7,12 @@
  *
  * A robot (rob_…) is what the owner shares; a device (dev_…) is a running agent attached to one or more
  * robots, holding one rotatable, revocable credential (32 random bytes, stored hashed, shown once). The
- * gate applies, in order: the robot exists, its profile takes the command kind, the e-stop is clear, the
- * caller's role, the per-role command allowlist, the access policy (private/invite: owner + operators;
- * queue: the active turn holder too), the device being online (commands are never queued), cooldowns and
- * the per-turn budget, and finally builds the value from the profile's `commands` (names, shapes, ranges,
- * clamped by the owner's limits). `halt` passes the e-stop, the allowlist, cooldowns and the budget: a
- * stop is never refused to someone who may drive. Every decision — allowed or refused — is audited.
+ * gate applies, in order: the robot exists, its profile takes the command kind, the caller's role, the
+ * per-role command allowlist, the access policy (private/invite: owner + operators; queue: the active
+ * turn holder too), the device being online (commands are never queued), cooldowns and the per-turn
+ * budget, and finally builds the value from the profile's `commands` (names, shapes, ranges, clamped by
+ * the owner's limits). `halt` passes the allowlist, cooldowns and the budget: a Stop is never refused to
+ * someone who may drive. Every decision — allowed or refused — is audited.
  */
 const {
     BotError, fail, prefixedId, iso, token, hashSecret, secretEquals, json, text, storable, isRobotId,
@@ -89,7 +89,6 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         id: r.id, name: r.name, profile_id: r.profile_id, profile_version: r.profile_version,
         access_policy: r.access_policy, limits: json(r.limits, {}), agent_control: !!r.agent_control,
         commissioned: r.commissioned_at ? { at: iso(new Date(r.commissioned_at).getTime()), by: r.commissioned_by || null } : null,
-        estop: { latched: !!r.estop_latched, by: r.estop_by || null, at: r.estop_at ? iso(new Date(r.estop_at).getTime()) : null },
         created_at: iso(new Date(r.created_at).getTime()), updated_at: iso(new Date(r.updated_at).getTime()),
     } : null);
     // A device is presented without any hash: the credential and the publish key are shown once only.
@@ -153,9 +152,9 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     }
 
     // ── Operators, Mods and sole control (Maticus's 2026-11-12 LOOI spec) ─────────────────────────
-    // The owner always has all of this. A Mod may switch Operators (never Mods or the owner), grant or clear
-    // sole control, and trip or clear the panel E-STOP. Only the owner promotes a Mod. The gate reads `enabled`
-    // and `sole_subject` fresh before every command, so a change is immediate with no tray restart.
+    // The owner always has all of this. A Mod may switch Operators (never Mods or the owner) and grant or
+    // clear sole control. Only the owner promotes a Mod. The gate reads `enabled` and `sole_subject` fresh
+    // before every command, so a change is immediate with no tray restart.
     const GRANT_ROLES = new Set(['owner', 'mod', 'operator']);
 
     async function operatorStateOf(robotId, subject, q = db) {
@@ -1193,34 +1192,6 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         });
     }
 
-    // ── E-stop (ADR-043 decision 6) ───────────────────────────────────────────────────────────────
-    // `estop.set` only latches: a clear goes through clearEstop (the owner, or a Mod for the panel latch only), so
-    // no device report and no other caller can ever lift an owner's latch. The tray's local STOP and ARM are not
-    // this latch and are never touched here.
-    async function setEstop(robotId, { latched, by, principalKind = 'device' }) {
-        if (!latched) fail(403, 'bot.forbidden', 'only the owner or a Mod clears the panel e-stop');
-        return writeEstop(robotId, { latched: true, by, principalKind });
-    }
-    async function writeEstop(robotId, { latched, by, principalKind }) {
-        const robot = await getRobot(robotId);
-        if (!robot) fail(404, 'bot.robot_not_found', 'no such robot');
-        const at = iso(now());
-        const updated = await db.tx(async (t) => {
-            const row = await t.maybe('UPDATE robots SET estop_latched = $2, estop_by = $3, estop_at = CASE WHEN $2 THEN $4::timestamptz ELSE NULL END, updated_at = $4 WHERE id = $1 RETURNING *',
-                [robotId, latched, latched ? (by || null) : null, at]);
-            await emit(t, latched ? 'bot.estop.set' : 'bot.estop.cleared', { type: 'robot', id: robotId },
-                { robot_id: robotId, by: latched ? (by || null) : null, principal_kind: principalKind });
-            return row;
-        });
-        return updated;
-    }
-    async function clearEstop(robotId, actor, role = 'owner') {
-        const robot = await getRobot(robotId);
-        if (!robot) fail(404, 'bot.robot_not_found', 'no such robot');
-        if (robot.owner_subject !== actor && role !== 'mod') fail(403, 'bot.forbidden', 'only the owner or a Mod clears the panel e-stop');
-        return writeEstop(robotId, { latched: false, by: actor, principalKind: 'user' });
-    }
-
     // ── Turn queue (ADR-043 decision 8) ───────────────────────────────────────────────────────────
     const turnMs = (robot) => { const l = json(robot.limits, {}); return Number(l.turn_ms) > 0 ? Number(l.turn_ms) : config.control.queueTurnMs; };
     const turnBudget = (robot) => { const l = json(robot.limits, {}); return Number(l.turn_budget) > 0 ? Number(l.turn_budget) : config.control.queueTurnBudget; };
@@ -1592,7 +1563,6 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         if (!KINDS.has(kind)) return { ok: false, code: 'bot.unknown_command', reason: `unknown command kind ${kind}`, robot };
         if (!profileTakes(profile, kind)) return { ok: false, code: 'bot.command_not_allowed', reason: `this robot takes no ${kind} commands`, robot };
         const halt = kind === 'halt';
-        if (robot.estop_latched && !halt) return { ok: false, code: 'bot.estop_latched', reason: 'the e-stop is latched; the owner or a Mod clears the panel e-stop', robot };
 
         const subject = principal && principal.kind !== 'device' ? principal.subject : null;
         const member = await operatorStateOf(robotId, subject);
@@ -1703,7 +1673,6 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         deskLeases,
         streaming: { get: streaming, set: setStreaming },
         video: { live: liveVideo },
-        estop: { set: setEstop, clear: clearEstop },
         queue: { join: joinQueue, leave: leaveQueue, state: queueState, currentTurn, consume: consumeTurn, sweep: sweepQueues, onHandoff, onResume, epoch: epochOf, giveBack, OWNER_IDLE_MS },
         audit: { record: auditCommand, list: listAudit, listPage: listAuditPage, prune: pruneAudit },
         control: { prepare, allowedFor, effectiveLimits, deviceLimits, buildValue, DEFAULT_ALLOW, KINDS },

@@ -6,7 +6,7 @@
  * machine that opens a socket. Unlike the simulator it owns a real `kind: 'server'` device row
  * (domain.devices.ensureServerDevice), so the owner sees the camera as a device of the robot.
  *
- * It passes the same gate: it answers hello/config, acks commands, mirrors the e-stop and stops at a motion
+ * It passes the same gate: it answers hello/config, acks commands and stops at a motion
  * command's deadline. A `ptz` command is translated to ONVIF ContinuousMove (Stop for zeros/halt), and a
  * GetStatus after a move is parsed into the camera readout carried by telemetry:
  *
@@ -93,7 +93,7 @@ function createOnvif({ config, domain, hub, now = () => Date.now(), log = consol
 
     // ── Attach and lifecycle ──────────────────────────────────────────────────────────────────────
     function start(robot, profile, camera, device) {
-        const cam = { robotId: robot.id, robot, device, camera, profile, link: null, timers: [], stopTimer: null, estop: !!robot.estop_latched, readout: null, reachable: false, rttMs: null, clockOffsetMs: 0, at: now() };
+        const cam = { robotId: robot.id, robot, device, camera, profile, link: null, timers: [], stopTimer: null, readout: null, reachable: false, rttMs: null, clockOffsetMs: 0, at: now() };
         cameras.set(robot.id, cam);
         connect(cam);
         cam.timers.push(every(heartbeatMs, () => { if (cam.link) cam.link.deliver({ type: 'heartbeat', t: now(), rtt_ms: cam.rttMs }); }));
@@ -150,12 +150,10 @@ function createOnvif({ config, domain, hub, now = () => Date.now(), log = consol
 
     // ── Frames from the hub ───────────────────────────────────────────────────────────────────────
     function onFrame(cam, f) {
-        if (f.type === 'config') { cam.estop = !!f.estop_latched; if (cam.estop) halt(cam); return; }
-        if (f.type === 'estop') { cam.estop = !!f.latched; if (cam.estop) halt(cam); return; }
+        if (f.type === 'config' || f.type === 'estop') return;   // no remote latch: Stop is a command
         if (f.type !== 'command') return;
         const reply = (fields) => cam.link && cam.link.deliver({ id: f.id, ...fields });
         if (f.kind === 'halt') { halt(cam); return reply({ type: 'ack' }); }
-        if (cam.estop) return reply({ type: 'nack', fault_code: 'estop_latched' });
         if (f.kind !== 'ptz') return reply({ type: 'nack', fault_code: 'bot.unknown_command' });
         return ptz(cam, f, reply);
     }

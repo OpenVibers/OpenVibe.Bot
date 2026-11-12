@@ -73,9 +73,9 @@ function bad(why) { throw new BotError(500, 'bot.profile_invalid', why); }
  *                                                 `index` < count when given), tone { hz: [min, max] }, bool
  *   say       { max_chars }
  *   display   { modes: [text|face|image_png_b64], faces: [...] (with face), max_chars }
- *   halt      {}                                  every profile takes it; the gate never refuses it for the e-stop
+ *   halt      {}                                  every profile takes it: the machine's own Stop
  * A driver's side action that the closed `commands` schema cannot name (LOOI's headlight) is declared in the open
- * `mapping.actions`; the gate still decides the role, allow list, e-stop and value.
+ * `mapping.actions`; the gate still decides the role, allow list and value.
  */
 const AXES = { drive: new Set(['throttle', 'steer', 'x', 'y', 'rotation']), ptz: new Set(['pan', 'tilt', 'zoom']) };
 const ACTUATOR_TYPES = new Set(['number', 'rgb', 'tone', 'bool']);

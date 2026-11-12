@@ -220,7 +220,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             send(data) { setImmediate(() => { if (ws.readyState === OPEN) onFrame(JSON.parse(data)); }); },
             close() { if (ws.readyState !== OPEN) return; ws.readyState = 3; onClose(); },
         };
-        const conn = { ws, sim: true, seq: 0, pending: false, device: null, online: false, rttMs: null, telemetry: null, status: null, deviceEstop: new Map(), backlog: null, lastHeartbeat: now(), lastTelemetry: 0, sessionId: prefixedId('sess', now()) };
+        const conn = { ws, sim: true, seq: 0, pending: false, device: null, online: false, rttMs: null, telemetry: null, status: null, backlog: null, lastHeartbeat: now(), lastTelemetry: 0, sessionId: prefixedId('sess', now()) };
         attachDevice(conn, device);
         sendHello(conn);
         const ready = sendConfig(conn).then(() => bringOnline(conn)).catch((e) => log.warn(`[Bot] simulator ${device.id}: ${e.message}`));
@@ -236,9 +236,8 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     // ── Device side ───────────────────────────────────────────────────────────────────────────────
     async function onDeviceSocket(ws, req) {
         // backlog: while authentication (credential or pair) is in progress, frames wait here and are handled
-        // in order once it resolves, so a device's first status/estop_state is never lost or answered not_paired.
-        // deviceEstop: robot_id → the device's own last estop_state report (a report only, never a clear).
-        const conn = { ws, seq: 0, pending: true, device: null, online: false, rttMs: null, telemetry: null, status: null, deviceEstop: new Map(), backlog: null, lastHeartbeat: now(), lastTelemetry: 0, sessionId: prefixedId('sess', now()) };
+        // in order once it resolves, so a device's first status/stop report is never lost or answered not_paired.
+        const conn = { ws, seq: 0, pending: true, device: null, online: false, rttMs: null, telemetry: null, status: null, backlog: null, lastHeartbeat: now(), lastTelemetry: 0, sessionId: prefixedId('sess', now()) };
         ws.conn = conn;
         ws.on('message', (raw) => onDeviceFrame(conn, raw));
         ws.on('close', () => { conn.backlog = null; dropDevice(conn); });
@@ -360,7 +359,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         const allowed = conn.computerAllowed ? [...new Set([...base, ...COMPUTER_KINDS, SCREEN_KIND])] : base;
         sendFrame(conn, 'config', {
             heartbeat_ms: config.device.heartbeatMs, limits, allowed_commands: allowed,
-            estop_latched: robot ? !!robot.estop_latched : false,
+            estop_latched: false,   // the field stays for older devices; Bot has no remote stop latch
             // Vibe by voice: the machine listens for its call word only while its owner has voice on.
             ...(conn.device.voice_on ? { voice: true, call_word: voice.callWordOf(conn.device) } : {}),
             // What the machine does for the network (plan L34): the roles the owner gave it on the hub. The Link
@@ -368,16 +367,11 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             roles: json(conn.device.roles, []),
         });
     }
-    /** Re-send `config` to the robot's connected devices (the owner changed its limits or allowlist, or the latch moved). */
+    /** Re-send `config` to the robot's connected devices (the owner changed its limits or allowlist). */
     async function refreshConfig(robotId) {
         for (const conn of [...deviceConns.values()]) {
             if (conn.online && deviceRobotIds(conn.device).includes(robotId)) await sendConfig(conn);
         }
-    }
-    /** Tell the robot's devices the latch moved: the `estop` frame acts at once, then `config` carries the new state. */
-    async function pushEstop(robotId, latched, by) {
-        sendToRobotDevices(robotId, { type: 'estop', latched, by, at: iso(now()) });
-        await refreshConfig(robotId);
     }
     /** The online/offline event and last_seen are a real machine's: a simulator (no devices row) reports neither. */
     function reportOnline(conn, online) {
@@ -628,7 +622,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
                 return conn.device.node_principal ? persistDeclared(conn, msg) : undefined;
             case 'reauth': if (conn.node) return onReauth(conn, msg); return sendError(conn, 'bot.unknown_message', `unknown type ${msg.type}`);
             case 'ack': case 'nack': return onAck(conn, msg);
-            case 'estop_state': return onEstopState(conn, msg);
+            case 'estop_state': return onStopReport(conn, msg);
             case 'voice_ask': return onVoiceAsk(conn, msg);
             // Machine-to-machine relay (Contracts 0.409.0) and Network's agent tasks to a machine.
             case 'relay.open': return onRelayOpen(conn, msg);
@@ -731,30 +725,15 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         sendFrame(p.conn, 'command_result', { id: p.opId, result, reason: message || msg.fault_code || null, latency_ms: latency, ...(data ? { data } : {}) });
     }
 
-    // A device reports its own latch. It may latch a robot it is attached to; it never clears one — latched:false
-    // is recorded as the device's report only, and Bot's panel latch stands until the owner or a Mod clears it.
-    async function onEstopState(conn, msg) {
+    // A device may report a Stop held on the machine itself (the tray's own button or a driver's local stop).
+    // That stays local: Bot does not latch it, gate on it, clear it or audit it. The field keeps its old name
+    // because devices already send it; the tray itself decides when the robot moves again.
+    async function onStopReport(conn, msg) {
         const attached = deviceRobotIds(conn.device);
-        const latched = !!msg.latched;
         if (msg.robot_id != null && !attached.includes(msg.robot_id)) {
-            await domain.audit.record({ robotId: String(msg.robot_id).slice(0, 64), deviceId: conn.device.id, operatorKind: 'device', kind: 'estop_state', value: { latched }, result: 'refused', reason: 'bot.forbidden' });
             return sendError(conn, 'bot.forbidden', 'this device is not attached to that robot');
         }
-        // local_stop: the latch is held on the machine itself (openvibe-link stop, a driver's own stop button), which
-        // only a release on the machine lifts; the owner's clear does not. Shown on the panel, never trusted for more.
-        const local = latched && msg.local_stop === true;
-        const reason = local && typeof msg.reason === 'string' ? msg.reason.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 120) || null : null;
-        for (const robotId of msg.robot_id != null ? [msg.robot_id] : attached) {
-            conn.deviceEstop.set(robotId, { latched, local, reason, at: iso(now()) });
-            if (latched) {
-                const robot = await domain.robots.get(robotId);
-                if (robot && !robot.estop_latched) {
-                    await domain.estop.set(robotId, { latched: true, by: conn.device.id, principalKind: 'device' });
-                    await refreshConfig(robotId);
-                }
-            }
-            broadcast(robotId);
-        }
+        return undefined;
     }
 
     // ── Operator side ─────────────────────────────────────────────────────────────────────────────
@@ -796,8 +775,6 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             case 'join': return onJoin(conn, msg);
             case 'leave': unsubscribe(conn); conn.robotId = null; return undefined;
             case 'command': return onOperatorCommand(conn, msg);
-            case 'estop': return onOperatorEstop(conn, true);
-            case 'estop_clear': return onOperatorEstop(conn, false);
             case 'operators': return onOperatorsAction(conn, msg);
             case 'give_back': return onGiveBack(conn);
             default: return sendError(conn, 'bot.unknown_message', `unknown type ${msg.type}`);
@@ -1148,31 +1125,6 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         return undefined;
     }
 
-    async function onOperatorEstop(conn, latched) {
-        if (!conn.robotId) return sendError(conn, 'bot.not_joined', 'join a robot first');
-        const robotId = conn.robotId;
-        let role = null;
-        try {
-            role = await domain.members.roleOf(robotId, conn.subject);
-            if (latched) {
-                if (!['owner', 'mod', 'operator'].includes(role)) return sendError(conn, 'bot.forbidden', 'only an operator, a Mod or the owner may set the panel e-stop');
-                await domain.estop.set(robotId, { latched: true, by: conn.subject, principalKind: conn.principal.kind });
-            } else {
-                if (!['owner', 'mod'].includes(role)) return sendError(conn, 'bot.forbidden', 'only the owner or a Mod clears the panel e-stop');
-                // This clears the panel latch only. A device's local STOP latch (device_estop.local) and ARM stay on
-                // the tray; nothing here sends a STOP clear or an ARM to the machine.
-                await domain.estop.clear(robotId, conn.subject, role);
-            }
-            await domain.operators.audit({ robotId, actorSubject: conn.subject, actorKind: conn.principal.kind,
-                actorRole: role, action: latched ? 'estop.trip' : 'estop.clear', value: { latched: !!latched } });
-        } catch (e) { return sendError(conn, e.code || 'bot.forbidden', e.detail || e.message); }
-        await pushEstop(robotId, latched, conn.subject);
-        broadcast(robotId);
-        await queueOperatorsState(robotId, true);
-        sendFrame(conn, 'operators_result', { action: latched ? 'estop.trip' : 'estop.clear', ok: true, latched: !!latched });
-        return undefined;
-    }
-
     // ── Watcher side (read-only, anonymous) ───────────────────────────────────────────────────────────
     /** The caller's address as Express decides it with the same trust proxy hop count (config.trustProxy). */
     function clientAddress(req) {
@@ -1358,12 +1310,10 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             battery: batteryFraction(telemetry),
             telemetry,
             status: online && conn.status ? conn.status : null,
-            device_estop: online ? (conn.deviceEstop.get(robotId) || null) : null,
         };
         const robot = await domain.robots.get(robotId);
         const state = {
             robot_id: robotId, online,
-            estop: robot ? { latched: !!robot.estop_latched, by: robot.estop_by || null, at: robot.estop_at ? iso(new Date(robot.estop_at).getTime()) : null } : null,
             ...live,
             queue: null,
         };
@@ -1384,7 +1334,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         return [...keys];
     }
     /**
-     * What a watcher may see: online, the latch, latency, battery and the readouts' sensor values. Never the
+     * What a watcher may see: online, latency, battery and the readouts' sensor values. Never the
      * queue, a subject, the device's ids, its status or the rest of its telemetry.
      */
     function publicState(state, readouts) {
@@ -1399,7 +1349,6 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         const sim = t && t.sim && typeof t.sim === 'object' && t.sim.pose ? simView(t.sim) : null;
         return {
             robot_id: state.robot_id, online: state.online,
-            estop: { latched: !!(state.estop && state.estop.latched) },
             latency_ms: state.latency_ms, battery: state.battery,
             telemetry: t ? { sensors: picked, ...(sim ? { sim } : {}) } : null,
         };
@@ -1464,7 +1413,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         },
         /** A one-time ticket for the embedded panel's Drive (POST /panel/:id/ticket), or null. */
         issueControlTicket(principal, robotId) { return tickets.issue(principal, robotId); },
-        isOnline, deviceState, sendToDevice, sendToRobotDevices, broadcast, closeDevice, robotState, refreshConfig, pushEstop, closeWatchers, dropSubject, operatorCommand,
+        isOnline, deviceState, sendToDevice, sendToRobotDevices, broadcast, closeDevice, robotState, refreshConfig, closeWatchers, dropSubject, operatorCommand,
         operatorActivity: operatorActivityOf,
         machineCommand, machineScreen, computerOf, machineChanged,
         // Network's grant relay and agent tasks (Contracts 0.409.0): close every relay under a revoked grant, and

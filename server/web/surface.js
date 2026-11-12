@@ -6,9 +6,10 @@
  * that put a person's layout on the parts the pages render.
  *
  * A catalog is built from the robot's profile: the parts a layout may place are exactly the controls this robot
- * has (the drive stick, Stop, a head slider, battery, latency, the camera, the buttons, ...). Stop and the
- * overlay's e-stop are required and carry their own minimum pixel size. The default layout keeps the panel's
- * familiar order: the camera, then the stick and Stop side by side, then the rest.
+ * has (the drive stick, a head slider, battery, latency, the camera, the buttons, ...). Stop is one ordinary part,
+ * off by default: a person adds it from the Arrange palette when they want it. Nothing is required, so every part
+ * can be hidden or left out. The default layout keeps the panel's familiar order: the camera, then the stick,
+ * then the rest.
  *
  * A layout only arranges: every command still goes through the panel's one gate and the robot's limits.
  */
@@ -42,7 +43,7 @@ function basePart(id, name, kind, extra = {}) {
     };
 }
 
-/** The parts one widget contributes: the drive is split into its stick, Stop and direction buttons. */
+/** The parts one widget contributes: the drive is split into its stick and direction buttons. */
 function driveParts(profile, widget) {
     const kind = widget && widget.command ? widget.command.kind : 'drive';
     const command = (profile.commands || {})[kind];
@@ -55,11 +56,6 @@ function driveParts(profile, widget) {
         pressed: true, min: { w: 2, h: 2 }, never_covers: ['stop'],
         styles: { tints: ['surface', 'accent'], shapes: ['round', 'square'], opacity: { min: 0.4, max: 1 }, label: false },
         bindings: { keys: STICK_KEYS, gamepad: ['left-stick', 'dpad'] },
-    }), { widgetIndex: null }]);
-    parts.push([basePart('stop', 'Stop', 'button', {
-        required: true, pressed: true, min: { w: 2, h: 2, px: 68 },
-        styles: { tints: ['danger', 'surface'], shapes: ['round', 'pill'], opacity: { min: 0.7, max: 1 }, label: true },
-        bindings: { keys: ['Space'], gamepad: ['south'] },
     }), { widgetIndex: null }]);
     if (rest.length) parts.push([basePart('pad', 'Direction buttons', 'button', {
         pressed: true, min: { w: 2, h: 2 }, never_covers: ['stop'],
@@ -120,14 +116,12 @@ function partsOf(profile) {
             }), { widgetIndex: i, widgetType: w.type });
         }
     });
-    if (!drive) {
-        // Every robot with a panel can be stopped, even one made only of a pan-tilt camera or buttons.
-        if (!seen.has('stop')) add(basePart('stop', 'Stop', 'button', {
-            required: true, pressed: true, min: { w: 2, h: 2, px: 68 },
-            styles: { tints: ['danger', 'surface'], shapes: ['round', 'pill'], opacity: { min: 0.7, max: 1 }, label: true },
-            bindings: { keys: ['Space'], gamepad: ['south'] },
-        }));
-    }
+    // Stop is a plain, optional control: every robot may have one, and a person adds it when they want it.
+    if (!seen.has('stop')) add(basePart('stop', 'Stop', 'button', {
+        pressed: true, min: { w: 1, h: 1, px: 44 },
+        styles: { tints: ['surface'], shapes: ['pill', 'square'], opacity: { min: 0.4, max: 1 }, label: true },
+        bindings: { keys: ['Space'], gamepad: ['south'] },
+    }));
     return out;
 }
 
@@ -135,7 +129,7 @@ function partsOf(profile) {
 function controlsCatalog(profile) {
     return {
         id: 'bot.controls', version: 1, name: 'Robot controls',
-        description: 'The full OpenVibe.Bot panel: the drive stick, Stop, the head or camera slider, the buttons, the camera and the readouts.',
+        description: 'The full OpenVibe.Bot panel: the drive stick, the head or camera slider, the buttons, the camera and the readouts. Stop is an optional part.',
         devices: DEVICES, grid: GRID, theme_tokens: THEME_TOKENS,
         parts: partsOf(profile).map((p) => {
             const { widgetIndex, widgetType, ...part } = p;   // eslint-disable-line no-unused-vars
@@ -144,31 +138,31 @@ function controlsCatalog(profile) {
     };
 }
 
-/** The overlay's catalog: the stick, the slider, the e-stop, more and the pill (plus Drive for a watcher). */
+/** The overlay's catalog: the stick, the slider, the more button, the pill and an optional Stop (plus Drive for a watcher). */
 function overlayCatalog(profile, { slider = null, hasStick = false, canDrive = false } = {}) {
     const parts = [
         basePart('pill', 'The robot', 'readout', { pressed: false, min: { w: 1, h: 1 }, styles: { tints: ['surface'], shapes: ['pill'], opacity: { min: 0.4, max: 1 }, label: true }, bindings: { keys: [], gamepad: [] } }),
         basePart('more', 'More', 'button', { pressed: true, min: { w: 1, h: 1 }, styles: { tints: ['surface'], shapes: ['round'], opacity: { min: 0.4, max: 1 }, label: false }, bindings: { keys: [], gamepad: [] } }),
-        basePart('estop', 'E-stop', 'button', {
-            required: true, pressed: true, min: { w: 2, h: 2, px: 56 }, never_covers: ['more', 'pill'],
-            styles: { tints: ['danger'], shapes: ['round'], opacity: { min: 0.7, max: 1 }, label: true },
-            bindings: { keys: ['Space'], gamepad: ['start'] },
+        basePart('stop', 'Stop', 'button', {
+            pressed: true, min: { w: 1, h: 1, px: 44 }, never_covers: ['more', 'pill'],
+            styles: { tints: ['surface'], shapes: ['pill', 'square'], opacity: { min: 0.4, max: 1 }, label: true },
+            bindings: { keys: ['Space'], gamepad: ['south'] },
         }),
     ];
     if (hasStick) parts.push(basePart('stick', 'Stick', 'stick', {
-        pressed: true, min: { w: 2, h: 2 }, never_covers: ['estop', 'pill'],
+        pressed: true, min: { w: 2, h: 2 }, never_covers: ['stop', 'pill'],
         styles: { tints: ['surface', 'accent'], shapes: ['round'], opacity: { min: 0.4, max: 1 }, label: false },
         bindings: { keys: STICK_KEYS, gamepad: ['left-stick', 'dpad'] },
     }));
     if (slider) parts.push(basePart('slider', slider.name || 'Slider', 'slider', {
-        pressed: true, min: { w: 2, h: 1 }, never_covers: ['estop'],
+        pressed: true, min: { w: 2, h: 1 }, never_covers: ['stop'],
         styles: { tints: ['surface', 'accent'], shapes: ['pill'], opacity: { min: 0.4, max: 1 }, label: true },
         bindings: { keys: [], gamepad: [] },
     }));
     if (canDrive) parts.push(basePart('drive', 'Drive', 'button', { pressed: true, min: { w: 2, h: 1 }, styles: { tints: ['accent'], shapes: ['pill'], opacity: { min: 0.4, max: 1 }, label: true }, bindings: { keys: [], gamepad: [] } }));
     return {
         id: 'bot.overlay', version: 1, name: 'Robot over a stream',
-        description: 'The controls over a robot’s stream: the stick, the slider, the e-stop, more and the robot’s pill.',
+        description: 'The controls over a robot’s stream: the stick, the slider, more, the robot’s pill and an optional Stop.',
         devices: DEVICES, grid: GRID, theme_tokens: THEME_TOKENS, parts,
     };
 }
@@ -202,24 +196,26 @@ function resolvedEntry(catalog, layout, device, id) {
 }
 
 /**
- * The default layout: the camera, then the stick and Stop, then the rest in the catalog's order. Phone rows are
- * full width; a computer gives the camera eight of its twelve columns and keeps the stick and Stop beside it.
+ * The default layout: the camera, then the stick, then the rest in the catalog's order. Stop is placed last and
+ * hidden: it is off until a person adds it. Phone rows are full width; a computer gives the camera eight of its
+ * twelve columns and keeps the stick beside it.
  */
 function defaultLayout(catalog, device = 'computer') {
     const d = DEVICES.includes(device) ? device : 'computer';
     const cols = GRID.columns[d];
     const order = [...(catalog.parts || [])].sort((a, b) => {
-        const rank = (p) => (p.id === 'camera' ? -3 : p.id === 'stick' ? -2 : p.id === 'stop' ? -1 : p.id === 'pad' ? 0 : 1);
+        const rank = (p) => (p.id === 'camera' ? -3 : p.id === 'stick' ? -2 : p.id === 'pad' ? 0 : p.id === 'stop' ? 2 : 1);
         return rank(a) - rank(b);
     });
     let x = 0; let y = 0; let rowH = 0;
     const parts = order.map((p) => {
         const camera = p.id === 'camera';
-        const side = p.id === 'stick' || p.id === 'stop';
+        const side = p.id === 'stick';
         let w = camera ? (d === 'computer' ? 8 : cols) : side ? 2 : Math.min(cols, Math.max(p.min.w, d === 'phone' ? cols : 4));
         if (p.kind === 'readout' && d !== 'phone') w = Math.min(cols, Math.max(2, p.min.w));
+        if (p.id === 'stop') w = 1;
         w = Math.min(cols, w);
-        let h = camera ? 3 : p.kind === 'readout' ? 1 : p.id === 'stop' || p.id === 'stick' ? 2 : Math.max(p.min.h, 2);
+        let h = camera ? 3 : p.kind === 'readout' ? 1 : p.id === 'stop' ? 1 : p.id === 'stick' ? 2 : Math.max(p.min.h, 2);
         if (p.kind === 'slider') h = Math.max(1, p.min.h);
         if (p.id === 'latency') h = 2;
         if (x + w > cols) { x = 0; y += rowH; rowH = 0; }
@@ -227,12 +223,12 @@ function defaultLayout(catalog, device = 'computer') {
         x += w;
         rowH = Math.max(rowH, h);
         const st = styleOf(p, null);
-        return { id: p.id, visible: true, place, style: st, bindings: { keys: [], gamepad: [] } };
+        return { id: p.id, visible: p.id !== 'stop', place, style: st, bindings: { keys: [], gamepad: [] } };
     });
     return { surface: catalog.id, surface_version: catalog.version, device: d, name: 'Default', author: { name: 'OpenVibe' }, sharing: 'private', parts };
 }
 
-/** The overlay's default layout: the pill and stick left, more and e-stop right, the slider at the bottom. */
+/** The overlay's default layout: the pill and stick left, more and Drive right, the slider at the bottom. */
 function overlayDefaultLayout(catalog, device = 'computer') {
     const dockedOf = (id, dock, order, w = 1, h = 1) => {
         const p = partOf(catalog, id);
@@ -244,7 +240,6 @@ function overlayDefaultLayout(catalog, device = 'computer') {
         dockedOf('stick', 'left', 1, 2, 2),
         dockedOf('slider', 'bottom', 0, 2, 1),
         dockedOf('more', 'right', 0, 1, 1),
-        dockedOf('estop', 'right', 2, 2, 2),
         dockedOf('drive', 'right', 0, 2, 1),
     ].filter(Boolean);
     return { surface: catalog.id, surface_version: catalog.version, device, name: 'Default', author: { name: 'OpenVibe' }, sharing: 'private', parts };
@@ -254,8 +249,7 @@ const escAttr = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace
 
 /**
  * The attributes that put one part's entry on the element: its grid area (or dock edge), its style variables
- * and whether this person hid it. `roleHidden` marks a part the page hides for a role reason (the e-stop before
- * a watcher takes the controls): the editor must not unhide it.
+ * and whether this person hid it.
  */
 function attrsFor(catalog, layout, device, id, { apply = true } = {}) {
     if (!apply) return '';

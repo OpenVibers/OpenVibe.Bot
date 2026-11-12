@@ -1,7 +1,7 @@
 'use strict';
 // The T15 lane H proving test: one end-to-end Adeept dry-run through Bot, using the frames OpenVibe Link
 // actually sends (internal/protocol, internal/link, testdata/bot). An owner pairs a fake ADR036, drives
-// and actuates it over the /control socket, reads battery and latency back, latches and clears the e-stop,
+// and actuates it over the /control socket, reads battery and latency back, and stops it with halt,
 // and never sees the device's secrets in a read. BOT_WHIP_BASE is set, so pairing must answer a whip_url.
 //
 // The scenario follows the node-plan-t15-t14 audit's last OpenVibe.Bot item: "an end-to-end Adeept dry-run
@@ -46,8 +46,8 @@ const WHIP_BASE = 'https://whip.test/ingest';
         assert.strictEqual(paired.json.profile.id, 'adeept.adr036');
     });
 
-    // ── 2. the socket handshake: hello, config, then the device's first status/estop_state ────────────
-    await check('step 2: hello (session/robot_ids/ISO time) then config (allowed, latch false) precede status', async () => {
+    // ── 2. the socket handshake: hello, config, then the device's first status ──────────────────────────
+    await check('step 2: hello (session/robot_ids/ISO time) then config (allowed) precede status', async () => {
         dev = await t.ws('/device', { headers: { Authorization: `Bearer ${paired.json.credential}` } });
         const hello = await dev.waitFor((m) => m.type === 'hello');
         assert.ok(hello, 'hello arrived');
@@ -57,15 +57,12 @@ const WHIP_BASE = 'https://whip.test/ingest';
         assert.ok(!Number.isNaN(Date.parse(hello.server_time)), `an ISO server_time: ${hello.server_time}`);
         const config = await dev.waitFor((m) => m.type === 'config');
         assert.ok(config, 'config arrived after hello');
-        assert.strictEqual(config.estop_latched, false);
         assert.deepStrictEqual(config.allowed_commands, ['drive', 'actuator', 'halt'], 'the adeept profile takes drive/actuator/halt');
         assert.ok(Number.isInteger(config.heartbeat_ms) && config.heartbeat_ms > 0, `a heartbeat interval: ${config.heartbeat_ms}`);
         // Only now does the Link report: its link holds every frame until hello.
         dev.send({ type: 'status', firmware: 'openvibe-link-0.1.0', capabilities: {}, agent_version: '0.1.0',
-            device_kind: 'onboard', os: 'linux', arch: 'arm64', drivers: [], faults: [], estop_latched: false, local_stop: false });
-        dev.send({ type: 'estop_state', latched: false, robot_id: robot.id, local_stop: false });
+            device_kind: 'onboard', os: 'linux', arch: 'arm64', drivers: [], faults: [] });
         assert.ok(await poll(() => t.hub.isOnline(deviceId)), 'the device is online');
-        assert.strictEqual((await t.domain.robots.get(robot.id)).estop_latched, false, 'a device latch:false does not latch');
     });
 
     // ── 3. drive, pan, tilt, lights and horn reach the device in the Adeept plugin's shapes ──────────
@@ -126,26 +123,6 @@ const WHIP_BASE = 'https://whip.test/ingest';
         assert.strictEqual(t.hub.deviceState(deviceId).rtt_ms, 42, 'the reported RTT is the recorded latency');
         const seqs = dev.messages.map((m) => m.seq);
         assert.ok(seqs.every((s, i) => i === 0 || s > seqs[i - 1]), `the envelope seq is monotonic: ${seqs.join(',')}`);
-    });
-
-    // ── 6. the owner's e-stop latches, a device report cannot clear it, the owner clears it ──────────
-    await check('step 6: owner latch sends estop true and refuses drive; a device false is not a clear', async () => {
-        op.send({ type: 'estop' });
-        const latched = await dev.waitFor((m) => m.type === 'estop' && m.latched === true);
-        assert.ok(latched, 'the device is told to latch');
-        assert.ok(await poll(() => t.domain.robots.get(robot.id).then((r) => !!r.estop_latched)), 'the robot is latched');
-        op.send({ type: 'command', id: 'e-stop-drive', kind: 'drive', value: { throttle: 0.2 } });
-        const refused = await result('e-stop-drive');
-        assert.strictEqual(refused.result, 'refused');
-        assert.strictEqual(refused.code, 'bot.estop_latched');
-        // The device reporting its own latch:false is recorded, never an owner clear.
-        dev.send({ type: 'estop_state', latched: false, robot_id: robot.id, local_stop: false });
-        await t.wait(60);
-        assert.strictEqual((await t.domain.robots.get(robot.id)).estop_latched, true, 'the owner latch stands');
-        op.send({ type: 'estop_clear' });
-        const cleared = await dev.waitFor((m) => m.type === 'estop' && m.latched === false);
-        assert.ok(cleared, 'the owner clear reaches the device as estop false');
-        assert.ok(await poll(() => t.domain.robots.get(robot.id).then((r) => !r.estop_latched)), 'the robot is unlatched');
     });
 
     // ── 7. no owner read route or state frame carries a device secret or a WHIP URL ──────────────────

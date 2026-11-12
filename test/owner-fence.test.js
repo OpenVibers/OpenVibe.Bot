@@ -93,7 +93,7 @@ const { boot, check, done } = require('./helpers/app');
             ['GET', `/robots/${id}`], ['PATCH', `/robots/${id}`, { name: 'x' }], ['DELETE', `/robots/${id}`],
             ['POST', `/robots/${id}/pairing-code`], ['GET', `/robots/${id}/operators`], ['POST', `/robots/${id}/operators`, { subject: alex.subject }],
             ['DELETE', `/robots/${id}/operators/${alex.subject}`], ['GET', `/robots/${id}/devices`], ['GET', `/robots/${id}/audit`],
-            ['POST', `/robots/${id}/estop`], ['POST', `/robots/${id}/estop/clear`], ['POST', `/devices/${dev}/rotate`], ['POST', `/devices/${dev}/revoke`],
+            ['POST', `/devices/${dev}/rotate`], ['POST', `/devices/${dev}/revoke`],
         ];
         const shape = (r) => ({ status: r.status, code: r.json && r.json.code, title: r.json && r.json.title, detail: r.json && r.json.detail });
         const real = routes(bobsRobot.id, realDevice);

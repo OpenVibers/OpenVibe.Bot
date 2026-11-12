@@ -1,6 +1,6 @@
 'use strict';
 // Agent Streams S7, Bot's part: an agent's commands are steps on its stream, chat cannot drive through the agent
-// stream, and Live's kill switch latches the robot's e-stop through Bot.
+// stream, and Live's stop reaches the robot through Bot.
 const assert = require('assert');
 const { boot, check, done } = require('./helpers/app');
 
@@ -42,24 +42,17 @@ const AGS = 'ags_01JAB2C3D4E5F6G7H8J9K0MNPS';
         assert.strictEqual(r.status, 403, r.text);
         assert.strictEqual(r.json.code, 'bot.chat_cannot_drive');
         const state = await asAgent('GET', '/steps');
-        assert.strictEqual(state.json.estop.latched, false, 'the refused call did not reach the robot');
     });
 
-    await check('Live\'s kill switch latches the e-stop through Bot, and the next command is refused', async () => {
-        const wrong = await t.call('POST', `/internal/robots/${robot.id}/estop`, { headers: { 'X-OV-Bot-Kill': 'not-the-secret' }, body: {} });
+    await check('Live\'s stop reaches the robot through Bot as a halt', async () => {
+        const wrong = await t.call('POST', `/internal/robots/${robot.id}/stop`, { headers: { 'X-OV-Bot-Kill': 'not-the-secret' }, body: {} });
         assert.strictEqual(wrong.status, 401, wrong.text);
-        const ok = await t.call('POST', `/internal/robots/${robot.id}/estop`, { headers: { 'X-OV-Bot-Kill': 'test-kill-secret' }, body: { reason: 'agent_stream_ended' } });
+        const ok = await t.call('POST', `/internal/robots/${robot.id}/stop`, { headers: { 'X-OV-Bot-Kill': 'test-kill-secret' }, body: { reason: 'agent_stream_ended' } });
         assert.strictEqual(ok.status, 200, ok.text);
-        assert.strictEqual(ok.json.estop.latched, true);
-        const state = await asAgent('GET', '/steps');
-        assert.strictEqual(state.json.estop.latched, true, 'the robot is stopped');
-        const refused = await asAgent('POST', '/commands', { id: 's7-2', kind: 'drive', value: { throttle: 0.5 }, ms: 500, agent_stream_id: AGS });
-        assert.strictEqual(refused.status, 409, refused.text);
-        assert.strictEqual(refused.json.code, 'bot.estop_latched');
-        const steps = await asAgent('GET', `/steps?agent_stream=${AGS}`);
-        const last = steps.json.commands[steps.json.commands.length - 1];
-        assert.strictEqual(last.status, 'refused', 'the refused command is still a step, with the reason');
-        assert.strictEqual(last.reason, 'bot.estop_latched');
+        assert.strictEqual(ok.json.stop, true);
+        const sent = await asAgent('POST', '/commands', { id: 's7-2', kind: 'drive', value: { throttle: 0.5 }, ms: 500, agent_stream_id: AGS });
+        assert.strictEqual(sent.status, 200, sent.text);
+        assert.strictEqual(sent.json.result, 'ack', 'a Stop is one command, not a latch');
     });
 
     await check('the step title is the command, never markup or unbounded text', async () => {

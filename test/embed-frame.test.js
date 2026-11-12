@@ -77,7 +77,7 @@ const themeMessage = (tokens, extra = {}) => ({ type: 'ov-bot-theme', robot_id: 
 
     await check('embed page: the frame adapter is loaded for the embed only, with the trusted origins on the panel', () => {
         const profile = { id: 'sim.rover', name: 'Rover', commands: { drive: { axes: { throttle: [-1, 1], steer: [-1, 1] } } }, widgets: [] };
-        const robot = { id: 'rob_x1', name: 'Rover', profile_id: 'sim.rover', estop: { latched: false } };
+        const robot = { id: 'rob_x1', name: 'Rover', profile_id: 'sim.rover' };
         const embed = renderPanel({ robot, profile, role: 'watcher', allowed_commands: [], mode: 'embed', signedIn: false, parentOrigins: [PARENT, 'https://www.openvibe.live'] });
         const at = (s) => embed.indexOf(s);
         assert.ok(embed.includes('<html lang="en" class="embed-page" data-bot-view="panel" data-bot-min-width="320" data-bot-min-height="480">'), 'the embed follows prefers-color-scheme before the first token message, and names its view');

@@ -1,7 +1,7 @@
 'use strict';
 // The LOOI Operators card and battery (Maticus's 2026-11-12 spec): a Mod role, per-person on/off, sole control,
-// the panel E-STOP that never touches the tray's local STOP/ARM, authority audit, and the battery bound to the
-// Node's top-level `battery` (0..100). No hardware: the fake device and the real HTTP panel only.
+// the authority audit, and the battery bound to the Node's top-level `battery` (0..100). A tray's own Stop stays
+// local. No hardware: the fake device and the real HTTP panel only.
 const assert = require('assert');
 const { boot, check, done } = require('./helpers/app');
 const { loadProfiles } = require('../server/profiles');
@@ -144,7 +144,7 @@ require('../server/realtime');
         a.close(); b2.close(); c.close(); dev.close();
     });
 
-    await check('Mods may grant/clear sole control and trip/clear the panel E-STOP; they may not promote, change Viewer access, or clear tray STOP/ARM', async () => {
+    await check('Mods may grant/clear sole control; they may not promote, change Viewer access, or touch the tray', async () => {
         const { robot, pairing } = await t.robot(alex, { profile_id: 'looi' });
         await invite(robot.id, bob.subject, 'operator');
         await invite(robot.id, carol.subject, 'operator');
@@ -173,26 +173,6 @@ require('../server/realtime');
         const limits = await fetch(`${t.base}/robots/${robot.id}/limits`, { method: 'POST', redirect: 'manual',
             headers: { ...cookie(bob), 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'max_speed=0.9&max_turn=0.9' });
         assert.strictEqual(limits.status, 403, 'a Mod cannot change speed or turn');
-        // The panel E-STOP is the Mod's: trip and clear. It never touches the tray's local stop.
-        b2.send({ type: 'estop' });
-        const tripped = await b2.waitFor((m) => m.type === 'robot_state' && m.state.estop && m.state.estop.latched === true);
-        assert.ok(tripped);
-        cmd(b2, { id: 'estop-drive', kind: 'drive', value: { throttle: 0.2, steer: 0 } });
-        assert.strictEqual((await result(b2, 'estop-drive')).code, 'bot.estop_latched');
-        b2.send({ type: 'estop_clear' });
-        await b2.waitFor((m) => m.type === 'operators_result' && m.action === 'estop.clear' && m.ok === true);
-        await b2.waitFor((m) => m.type === 'robot_state' && m.state.estop && m.state.estop.latched === false);
-        // A tray local STOP arrives as device_estop.local; the Mod's clear clears only Bot's panel latch.
-        dev.send({ type: 'estop_state', latched: true, local_stop: true, reason: 'button on the base' });
-        const held = await b2.waitFor((m) => m.type === 'robot_state' && m.state.device_estop && m.state.device_estop.local === true);
-        assert.strictEqual(held.state.estop.latched, true, 'the local stop also latches Bot');
-        b2.send({ type: 'estop_clear' });
-        const cleared = await b2.waitFor((m) => m.type === 'robot_state' && m.state.estop && m.state.estop.latched === false && m.state.device_estop && m.state.device_estop.latched === true);
-        assert.ok(cleared, 'the tray STOP latch stays latched after a panel clear');
-        assert.strictEqual(cleared.state.device_estop.local, true, 'and stays local, for the tray only');
-        const estopAudit = await t.domain.operators.auditList(robot.id, { limit: 50 });
-        assert.ok(estopAudit.some((r) => r.action === 'estop.trip' && r.actor_subject === bob.subject), 'the trip is audited');
-        assert.ok(estopAudit.some((r) => r.action === 'estop.clear' && r.actor_subject === bob.subject), 'the clear is audited');
         // The viewer never drives.
         const d = await op(dave); await join(d, robot.id);
         cmd(d, { id: 'viewer-drive', kind: 'drive', value: { throttle: 0.2, steer: 0 } });
@@ -247,8 +227,8 @@ require('../server/realtime');
         const ownerHtml = await (await get(`/panel/${robot.id}`, alex)).text();
         assert.ok(ownerHtml.includes('data-operators'), 'the owner sees the card');
         assert.ok(ownerHtml.includes('data-operator-subject='), 'rows carry their subject');
+        assert.ok(!ownerHtml.includes('data-operators-estop') && !/E-STOP|estop|emergency stop/i.test(ownerHtml.replace(/estop_state|estop_latched/g, '')), 'the card has no E-STOP row, button or note');
         assert.ok(ownerHtml.includes('Make Mod'), 'the owner can promote an Operator');
-        assert.ok(ownerHtml.includes('data-operators-estop>'), 'the panel E-STOP control is there');
         const ownerOp = await op(alex); await join(ownerOp, robot.id);
         await promotedMod(ownerOp, robot.id, bob.subject);
         ownerOp.close();
@@ -259,7 +239,7 @@ require('../server/realtime');
         const opHtml = await (await get(`/panel/${robot.id}`, carol)).text();
         assert.ok(opHtml.includes('data-operators') && !opHtml.includes('data-operator-sole'), 'an Operator sees the roster but no controls');
         const viewerHtml = await (await get(`/panel/${robot.id}`, dave)).text();
-        assert.ok(viewerHtml.includes('Viewers') && !viewerHtml.includes('data-operator-sole') && !viewerHtml.includes('data-operators-estop>'), 'a viewer watches only');
+        assert.ok(viewerHtml.includes('Viewers') && !viewerHtml.includes('data-operator-sole'), 'a viewer watches only');
     });
 
     await t.close();

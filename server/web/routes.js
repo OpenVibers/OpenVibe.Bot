@@ -79,19 +79,19 @@ const PUBLIC_PAGES = ['/', '/try', '/robots', '/models', '/docs', '/docs/drivers
 // written from what the page and its renderer actually say (README "Owns", web/home.js, web/docs.js, shared/legal).
 const LLMS_NAME = 'OpenVibe.Bot';
 const LLMS_SUMMARY = 'An open control panel for robots: pair a robot with one pasted command and drive it from any '
-    + 'browser, with roles, limits and a latched emergency stop on every command.';
+    + 'browser, with roles and limits on every command.';
 const LLMS_NO_TWIN = new Set(['/terms', '/privacy', '/dmca']);
 const LLMS_LEGAL = new Set(['/terms', '/privacy', '/dmca']);
 const LLMS_PAGES = [
     {
         path: '/', title: 'OpenVibe.Bot — drive your robot from any browser',
         note: 'What Bot is, and how a robot goes from added to driving.',
-        text: 'OpenVibe.Bot is the open control panel for robots. Add a robot and pick its profile, pair it by pasting one command on the robot\'s computer, then drive it from any browser. The panel lays its controls out from the robot\'s profile: a touch joystick, the keyboard, a gamepad, buttons and sliders, with a latency meter. Every command passes one gate with roles, per-robot limits, cooldowns and a turn budget, and a latched emergency stop that the owner or a Mod clears (the panel latch only; the tray\'s STOP and ARM stay local); a stop pressed on the robot itself holds until it is released there. An owner can add people by username as operators or viewers, or open a queue where visitors take turns. A simulated rover runs inside Bot, so the whole panel can be tried before any hardware exists.',
+        text: 'OpenVibe.Bot is the open control panel for robots. Add a robot and pick its profile, pair it by pasting one command on the robot\'s computer, then drive it from any browser. The panel lays its controls out from the robot\'s profile: a touch joystick, the keyboard, a gamepad, buttons and sliders, with a latency meter. Every command passes one gate with roles, per-robot limits, cooldowns and a turn budget. Stop is one optional button that sends the machine\'s own stop; a stop pressed on the robot itself stays local. An owner can add people by username as operators or viewers, or open a queue where visitors take turns. A simulated rover runs inside Bot, so the whole panel can be tried before any hardware exists.',
     },
     {
         path: '/try', title: 'Try the panel with a simulated rover',
         note: 'Drive a simulated rover in the browser, no account and no hardware.',
-        text: 'A rover simulated in the visitor\'s own browser, driven through the same OpenVibe.Bot panel a paired robot gets: a touch joystick, the keyboard (W A S D or the arrows, Space to stop) or a gamepad, with the same command shaping, deadman and latched e-stop. It has a front camera drawn from its position in a small arena, an ultrasonic distance sensor, three line sensors over a strip of yellow tape, a battery, RGB headlights and a horn. Nothing pressed there moves real hardware, and nothing needs an account. The page ends with the way to a real robot: add one, pair its computer with one pasted command, and the same panel drives it.',
+        text: 'A rover simulated in the visitor\'s own browser, driven through the same OpenVibe.Bot panel a paired robot gets: a touch joystick, the keyboard (W A S D or the arrows, Space to stop) or a gamepad, with the same command shaping and deadman. It has a front camera drawn from its position in a small arena, an ultrasonic distance sensor, three line sensors over a strip of yellow tape, a battery, RGB headlights and a horn. Nothing pressed there moves real hardware, and nothing needs an account. The page ends with the way to a real robot: add one, pair its computer with one pasted command, and the same panel drives it.',
     },
     {
         path: '/setup/sd-card', title: 'A robot from a blank microSD card',
@@ -116,7 +116,7 @@ const LLMS_PAGES = [
     {
         path: '/docs/drivers', title: 'Write a driver',
         note: 'The driver protocol: lifecycle, every message and the safety rules.',
-        text: 'The driver protocol spec for OpenVibe.Bot. A driver is a separate executable the OpenVibe Link core starts, in any language, and the two speak JSON lines over stdin/stdout. The page covers what a driver is, the three connection kinds (on-board, bridge and server-side), the start-up lifecycle and restart rules, every message in both directions (hello, command, heartbeat, stop, estop, resume; describe, ready, fault, ack, nack, telemetry, event and video), the safety rules, a minimal Python driver, and how to test and contribute one.',
+        text: 'The driver protocol spec for OpenVibe.Bot. A driver is a separate executable the OpenVibe Link core starts, in any language, and the two speak JSON lines over stdin/stdout. The page covers what a driver is, the three connection kinds (on-board, bridge and server-side), the start-up lifecycle and restart rules, every message in both directions (hello, command, heartbeat, stop; describe, ready, fault, ack, nack, telemetry, event and video), the safety rules, a minimal Python driver, and how to test and contribute one.',
     },
     {
         path: '/docs/profiles', title: 'Robot profiles',
@@ -126,7 +126,7 @@ const LLMS_PAGES = [
     {
         path: '/docs/automation', title: 'Routines, webhooks and your agent',
         note: 'Steps on a schedule, signed webhooks for a robot\'s events, and the switch that lets your OpenVibe.Actor agent drive.',
-        text: 'How a robot on OpenVibe.Bot moves without anyone at the controls, through the same gate as a person (limits, cooldowns, e-stop, audit). GET /api/v1/me answers a person\'s account ID (subject, username, display_name); a robot\'s answer carries owner_subject, effective_limits (max_speed, max_turn, max_command_ms, heartbeat_ms) and limits_source. POST /api/v1/robots/:id/commission lets its owner raise max_speed and max_turn above the profile default, up to the profile ceiling, and POST /robots/:id/uncommission returns to the defaults; only the owner as a person may do either. Steps are plain lines checked against the robot\'s profile: forward, back, left and right for seconds at a speed, stop, wait, say, face, show, an actuator or camera axis with a value and a hold time, and press for a button; held steps are re-sent inside the deadman window and a refused step stops the rest with its reason. Routines run steps as the owner on demand, every N minutes (at least 5), daily at a UTC time on chosen weekdays, or each time the robot comes online; one runs at a time; 60 steps, 60 seconds a step, 10 minutes in all. Webhooks send a robot\'s bot.robot.online, bot.robot.offline, bot.estop.set, bot.estop.cleared and bot.command.refused events to up to five https addresses, each with its own whsec_ secret shown once, signed like OpenVibe.Events deliveries (X-OpenVibe-Timestamp, X-OpenVibe-Signature-V2, checked with verifyDeliveryV2 from openvibe-sdk/events), to public addresses only, retried after 30 seconds, 2, 10, 30 and 120 minutes. The Your agent switch, off until the owner turns it on, lets the owner\'s OpenVibe.Actor agent see their robots and run steps on that one as the owner, never for anyone else; a steps call on Bot\'s API runs up to 20 steps and 30 seconds and answers done, or stopped with the reason.',
+        text: 'How a robot on OpenVibe.Bot moves without anyone at the controls, through the same gate as a person (limits, cooldowns, audit). GET /api/v1/me answers a person\'s account ID (subject, username, display_name); a robot\'s answer carries owner_subject, effective_limits (max_speed, max_turn, max_command_ms, heartbeat_ms) and limits_source. POST /api/v1/robots/:id/commission lets its owner raise max_speed and max_turn above the profile default, up to the profile ceiling, and POST /robots/:id/uncommission returns to the defaults; only the owner as a person may do either. Steps are plain lines checked against the robot\'s profile: forward, back, left and right for seconds at a speed, stop, wait, say, face, show, an actuator or camera axis with a value and a hold time, and press for a button; held steps are re-sent inside the deadman window and a refused step stops the rest with its reason. Routines run steps as the owner on demand, every N minutes (at least 5), daily at a UTC time on chosen weekdays, or each time the robot comes online; one runs at a time; 60 steps, 60 seconds a step, 10 minutes in all. Webhooks send a robot\'s bot.robot.online, bot.robot.offline and bot.command.refused events to up to five https addresses, each with its own whsec_ secret shown once, signed like OpenVibe.Events deliveries (X-OpenVibe-Timestamp, X-OpenVibe-Signature-V2, checked with verifyDeliveryV2 from openvibe-sdk/events), to public addresses only, retried after 30 seconds, 2, 10, 30 and 120 minutes. The Your agent switch, off until the owner turns it on, lets the owner\'s OpenVibe.Actor agent see their robots and run steps on that one as the owner, never for anyone else; a steps call on Bot\'s API runs up to 20 steps and 30 seconds and answers done, or stopped with the reason.',
     },
     {
         path: '/docs/computers', title: 'Your computer for your agents',
@@ -266,7 +266,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
     r.get('/try', (req, res) => {
         res.setHeader('Cache-Control', 'public, max-age=300');
         res.type('html').send(renderPanel({
-            robot: { id: 'try', name: 'Practice rover', profile_id: TRY_PROFILE.id, access_policy: 'private', estop: { latched: false } },
+            robot: { id: 'try', name: 'Practice rover', profile_id: TRY_PROFILE.id, access_policy: 'private' },
             profile: TRY_PROFILE, role: 'owner', allowed_commands: tryAllowed, holdResendMs: HOLD_RESEND_MS, tryIt: true,
         }));
     });
@@ -982,7 +982,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
             const stored = usable(catalog, storedRaw, fallbackLayout);
             arrange = {
                 catalog, layout: stored || fallbackLayout, device,
-                signedIn: !!signedIn, layoutSource: stored ? 'account' : 'default',
+                signedIn: !!signedIn, layoutSource: stored ? 'account' : 'default', defaultLayout: fallbackLayout,
                 save: `/panel/${robot.id}/arrange`, suggest: `/panel/${robot.id}/arrange/suggest`, share: `/panel/${robot.id}/arrange/share`, reset: `/panel/${robot.id}/arrange/reset`,
                 author: req.viewer ? { name: req.viewer.username || req.viewer.name || 'Me' } : null,
             };
@@ -995,7 +995,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
             try { src = sharedServe.url('ov-arrange.js'); } catch { /* an older openvibe-shared pin: no editor */ }
             arrange = {
                 catalog, parts: surface.partsOf(profile), layout: stored || fallbackLayout, device,
-                signedIn: !!signedIn, layoutSource: stored ? 'account' : 'default', src,
+                signedIn: !!signedIn, layoutSource: stored ? 'account' : 'default', src, defaultLayout: fallbackLayout,
                 save: `/panel/${robot.id}/arrange`, suggest: `/panel/${robot.id}/arrange/suggest`, share: `/panel/${robot.id}/arrange/share`, reset: `/panel/${robot.id}/arrange/reset`,
                 author: req.viewer ? { name: req.viewer.username || req.viewer.name || 'Me' } : null,
             };

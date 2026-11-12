@@ -4,7 +4,7 @@
  * The simulated device (ADR-043 decision 3): an in-process stand-in for a robot whose profile's driver is
  * `sim` (sim.rover), so the panel has something to drive before any hardware exists. It is attached to the
  * hub without a socket or a credential (hub.attachSim) and passes the same gate as real hardware: it answers
- * `hello`/`config`, sends heartbeats and telemetry, acks each command, mirrors the e-stop and stops by itself
+ * `hello`/`config`, sends heartbeats and telemetry, acks each command and stops by itself
  * at a motion command's `deadline_ms` unless a newer command arrived first (the Link's deadman).
  *
  *   attach(robotId)   start the robot's simulator if its profile is a `sim` one (idempotent; pass the profile if loaded) → true/false
@@ -36,7 +36,7 @@ function createSimulator({ config, domain, hub, now = () => Date.now(), log = co
     function start(robot) {
         if (sims.has(robot.id)) return sims.get(robot.id);
         const device = { id: `dev_sim_${robot.id}`, robot_ids: [robot.id], kind: 'server', name: 'simulator' };
-        const sim = { robotId: robot.id, device, link: null, timers: [], stopTimer: null, estop: !!robot.estop_latched, drive: {}, other: {}, battery: 100, pose: { ...world.START }, bumped: false, headlights: null, horn: null, hornUntil: 0, at: now(), sentAt: 0, ticks: 0 };
+        const sim = { robotId: robot.id, device, link: null, timers: [], stopTimer: null, drive: {}, other: {}, battery: 100, pose: { ...world.START }, bumped: false, headlights: null, horn: null, hornUntil: 0, at: now(), sentAt: 0, ticks: 0 };
         sims.set(robot.id, sim);
         connect(sim);
         sim.timers.push(every(heartbeatMs, () => sim.link && sim.link.deliver({ type: 'heartbeat', t: now(), rtt_ms: 1 })));
@@ -55,12 +55,10 @@ function createSimulator({ config, domain, hub, now = () => Date.now(), log = co
     }
 
     function onFrame(sim, f) {
-        if (f.type === 'config') { sim.estop = !!f.estop_latched; if (sim.estop) halt(sim); return; }
-        if (f.type === 'estop') { sim.estop = !!f.latched; if (sim.estop) halt(sim); return; }
+        if (f.type === 'config' || f.type === 'estop') return;   // no remote latch: Stop is a command
         if (f.type !== 'command') return;
         const reply = (fields) => sim.link && sim.link.deliver({ id: f.id, ...fields });
         if (f.kind === 'halt') { halt(sim); return reply({ type: 'ack' }); }
-        if (sim.estop) return reply({ type: 'nack', fault_code: 'estop_latched' });
         if (f.kind === 'drive') {
             sim.drive = { ...f.value };
             if (sim.stopTimer) clearTimeout(sim.stopTimer);

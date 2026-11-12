@@ -20,7 +20,7 @@ the owner's embed opt-in:
   when the switch goes off.
 - `server/realtime.js` — the third WebSocket, `wss://…/watch`: no credential, ever. A `join` on an
   `embed_public` robot answers `joined { role: "watcher", allowed_commands: [], state }` where `state` is the
-  **public state** (online, e-stop latch, latency, battery, and only the sensor keys the profile's `telemetry`
+  **public state** (online, latency, battery, and only the sensor keys the profile's `telemetry`
   widgets read); an unknown or non-public robot answers `bot.not_an_operator` alike. Every other frame answers
   `bot.read_only` and reaches neither a device nor the audit. Frames over 4 KiB close 1009; over
   `BOT_WATCH_MAX_PER_IP` open sockets per client address (default 20) or `BOT_WATCH_MAX_PER_ROBOT` watchers on
@@ -97,9 +97,8 @@ adds it from this file at the verified head; it resolves to:
    'self'`.
 4. Anonymous `wss://openvibe.bot/watch` (through nginx, HTTP 101) with `{"type":"join","robot_id":"<public id>"}`
    answers `joined` with `role: "watcher"`, `allowed_commands: []` and the public state only; the same join on
-   a **non-public or unknown** robot answers `bot.not_an_operator` and reveals nothing. A `command`/`estop`/
-   `estop_clear` frame answers `bot.read_only` and produces no device frame and no audit row. The owner's
-   e-stop reaches a joined watcher; the owner turning `embed_public` off closes its watchers with 4003.
+   a **non-public or unknown** robot answers `bot.not_an_operator` and reveals nothing. A `command`/`stop` frame answers `bot.read_only` and produces no device frame and no audit row. A state
+   change reaches a joined watcher; the owner turning `embed_public` off closes its watchers with 4003.
 5. With `BOT_WATCH_MAX_PER_IP=2` / `BOT_WATCH_MAX_PER_ROBOT=3` on a scratch start, the 3rd socket from one
    address and the 4th watcher on one robot close 4003; a frame over 4 KiB closes 1009.
 6. The row counts from the backup step are unchanged (this PR writes none); `robots.embed_public` is only ever
@@ -146,7 +145,7 @@ node test/panel.test.js
    `GET /panel/:id/embed` serves a public robot to anyone with its own CSP, `no-store` and no cookie and never
    a redirect; a non-public robot is `403` with no data and a member keeps their role; `/watch` answers the
    public state only and refuses a non-public or unknown robot; any other frame is `bot.read_only` and reaches
-   neither device nor audit; the owner's e-stop reaches a watcher and readouts carry only the profile's sensor
+   neither device nor audit; a state change reaches a watcher and readouts carry only the profile's sensor
    keys; turning embedding off closes watchers 4003; the per-address/per-robot caps close 4003) and
    `node test/panel.test.js` (the signed-in panel page, its controls and the simulated robot still render).
 3. It confirms **0 pending** migrations afterwards and the fixture row counts unchanged — this PR writes no

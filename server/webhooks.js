@@ -23,7 +23,7 @@ const { signDeliveryHeaders } = require('openvibe-sdk/events');
 const { BotError, prefixedId, iso } = require('./util');
 const { checkWebhookUrl, WebhookRefused } = require('./net/webhook-post');
 
-const EVENTS = ['bot.robot.online', 'bot.robot.offline', 'bot.estop.set', 'bot.estop.cleared', 'bot.command.refused'];
+const EVENTS = ['bot.robot.online', 'bot.robot.offline', 'bot.command.refused'];
 const BACKOFF_S = [30, 120, 600, 1800, 7200];
 const MAX_HOOKS = 5;
 const TICK_MS = 5000;

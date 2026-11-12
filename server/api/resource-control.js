@@ -6,10 +6,8 @@
  * common.resource-control-result@1 (200 for every outcome, without `resource`: robots have no OVRN; a malformed request
  * is a 400 problem).
  *
- *   stop      latch the robot's remote e-stop, as POST /robots/:id/estop: every actuator stops and nothing moves
- *             until it is cleared
- *   resume    clear that e-stop, as POST /robots/:id/estop/clear (a local stop on the robot itself still holds). An
- *             agent's resume needs the owner's confirmation, which Services asks for before it sends one.
+ *   stop      send the robot's own Stop command (halt): every actuator stops, and nothing is latched.
+ *   resume    answer that nothing was latched, so there is nothing to clear. A Stop on the machine itself stays local.
  *
  * Any other action is refused `control.unsupported_action`. Only the owner Bot holds may be named: a robot of another
  * person is refused as unknown, never confirmed to exist. dry_run decides and explains without applying. The first
@@ -59,24 +57,16 @@ function router({ domain, apiAuth, hub, now = () => Date.now() }) {
         if (!robot || robot.owner_subject !== request.owner.id) {
             return result(request, 'refused', { problem: problem(404, 'resources.unknown_resource', `no robot ${request.owned.id} of this person`) });
         }
-        const asker = request.on_behalf_of || { type: 'user', id: request.owner.id };
-        if (request.action === 'resume' && asker.type !== 'user' && !request.confirmation_id) {
-            return result(request, 'refused', { problem: problem(403, 'control.confirmation_needed', 'an agent resumes a robot only with its owner\'s confirmation') });
-        }
-        const latched = !!robot.estop_latched;
+        const owner = { kind: 'user', subject: robot.owner_subject };
         if (request.action === 'stop') {
-            if (latched) return result(request, 'done', { result: { estop: true, changed: false } });
-            if (request.dry_run) return result(request, 'done', { result: { dry_run: true, would: 'latch the robot\'s e-stop' } });
-            const by = asker.id;
-            await domain.estop.set(robot.id, { latched: true, by, principalKind: asker.type === 'user' ? 'user' : 'agent' });
-            if (hub) { await hub.pushEstop(robot.id, true, by); hub.broadcast(robot.id); }
-            return result(request, 'done', { result: { estop: true, changed: true } });
+            if (request.dry_run) return result(request, 'done', { result: { dry_run: true, would: 'send the robot a Stop' } });
+            const out = hub
+                ? await hub.operatorCommand(robot.id, owner, robot.owner_subject, { id: `rc-${crypto.randomUUID()}`, kind: 'halt', value: {}, ms: 5000 })
+                : { result: 'refused', code: 'bot.device_offline' };
+            return result(request, 'done', { result: { stop: true, changed: out.result === 'ack', ...(out.result === 'ack' ? {} : { reason: out.reason || out.code || 'the robot is offline' }) } });
         }
-        if (!latched) return result(request, 'done', { result: { estop: false, changed: false } });
-        if (request.dry_run) return result(request, 'done', { result: { dry_run: true, would: 'clear the robot\'s e-stop' } });
-        await domain.estop.clear(robot.id, robot.owner_subject);
-        if (hub) { await hub.pushEstop(robot.id, false, robot.owner_subject); hub.broadcast(robot.id); }
-        return result(request, 'done', { result: { estop: false, changed: true } });
+        // Nothing is latched any more: a resume has nothing to clear. A Stop held on the machine itself stays local.
+        return result(request, 'done', { result: { stop: false, changed: false } });
     }
 
     r.post('/', firstParty, json, wrap(async (req, res) => {

@@ -13,8 +13,8 @@
  *            plays it. Restarted with backoff when it drops
  *   commands say (speechSynthesis), display (a face or text, full screen), actuator torch (the camera's torch) and
  *            chime (a tone while it is held: its deadline ends it, as a motor's does), halt; each acked or nacked
- *   safety   Bot's e-stop silences everything and refuses all but halt; the phone's own Stop button latches a local
- *            stop (estop_state local_stop) that only this phone's Resume releases
+ *   safety   the phone's own Stop button latches a local stop (the old estop_state local_stop report) that only
+ *            this phone's Resume releases; it stays local
  *
  * The page needs one tap to start (browsers allow sound, the camera and the wake lock only after a gesture).
  */
@@ -95,7 +95,7 @@
     // ── Running ───────────────────────────────────────────────────────────────────────────────────────────
     let ws = null; let seq = 0; let retry = 0; let running = false;
     let heartbeatMs = 1000; let heartbeatTimer = null; let telemetryTimer = null;
-    let rtt = null; let remoteLatched = false; let localStop = false;
+    let rtt = null; let localStop = false;
     let front = false;
     const linkEl = $('[data-link-state]');
     const videoEl = $('[data-video-state]');
@@ -152,18 +152,16 @@
         if (m.type === 'hello') { retry = 0; return; }
         if (m.type === 'config') {
             heartbeatMs = Math.max(250, Math.min(5000, Number(m.heartbeat_ms) || 1000));
-            remoteLatched = !!m.estop_latched;
             clearInterval(heartbeatTimer); clearInterval(telemetryTimer);
             heartbeatTimer = setInterval(() => out('heartbeat', { t: Date.now(), rtt_ms: rtt }), heartbeatMs);
             telemetryTimer = setInterval(sendTelemetry, 1000);
-            out('status', { firmware: AGENT, capabilities: { torch: torchSupported(), speech: 'speechSynthesis' in window }, faults: faults(), estop_latched: remoteLatched || localStop });
+            out('status', { firmware: AGENT, capabilities: { torch: torchSupported(), speech: 'speechSynthesis' in window }, faults: faults() });
             if (localStop) out('estop_state', { latched: true, local_stop: true, reason: 'stopped on the phone' });
             paintSafety();
             setLink('Connected', 'online');
             return;
         }
         if (m.type === 'heartbeat_ack') { if (Number.isFinite(m.echo)) rtt = Math.max(0, Date.now() - m.echo); return; }
-        if (m.type === 'estop') { remoteLatched = !!m.latched; if (remoteLatched) stopEffects(); paintSafety(); return; }
         if (m.type === 'command') return onCommand(m);
         if (m.type === 'rotate') return undefined;   // a Network-paired machine's frame; a phone holds a Bot credential
         return undefined;
@@ -175,7 +173,6 @@
         const v = m.value && typeof m.value === 'object' ? m.value : {};
         if (m.kind === 'halt') { stopEffects(); return ack(); }
         if (localStop) return nack('local_stop');
-        if (remoteLatched) return nack('estopped');
         if (m.kind === 'say') return speak(String(v.text || '')) ? ack() : nack('unsupported');
         if (m.kind === 'display') {
             if (v.face) showFace(String(v.face)); else if (v.text) showText(String(v.text)); else return nack('invalid');
@@ -200,11 +197,11 @@
         paintSafety();
     });
     function paintSafety() {
-        main.dataset.stopped = String(localStop || remoteLatched);
+        main.dataset.stopped = String(localStop);
         stopBtn.textContent = localStop ? 'Resume' : 'Stop';
         stopBtn.classList.toggle('resume', localStop);
         const note = $('[data-safety]');
-        note.textContent = localStop ? 'Stopped on this phone: press Resume, then the owner or a Mod clears the panel e-stop.' : remoteLatched ? 'The robot\'s e-stop is latched: the owner clears it on the panel.' : '';
+        note.textContent = localStop ? 'Stopped on this phone: press Resume when it is safe to move again.' : '';
         note.hidden = !note.textContent;
     }
 

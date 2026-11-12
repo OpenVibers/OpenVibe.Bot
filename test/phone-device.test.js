@@ -55,7 +55,7 @@ const { loadProfiles } = require('../server/profiles');
         assert.ok(await d.waitFor((m) => m.type === 'hello'));
         const config = await d.waitFor((m) => m.type === 'config');
         assert.ok(config.allowed_commands.includes('say') && config.allowed_commands.includes('display'));
-        d.send({ v: 1, type: 'status', firmware: 'openvibe-phone/1', capabilities: {}, faults: [], estop_latched: false });
+        d.send({ v: 1, type: 'status', firmware: 'openvibe-phone/1', capabilities: {}, faults: [] });
         d.send({ v: 1, type: 'telemetry', battery: { percent: 81 }, sensors: { tilt: { pitch: 4, roll: -2 } } });
         const c = await t.ws('/control', { headers: cookie(alex) });
         c.send({ type: 'join', robot_id: robot.id });

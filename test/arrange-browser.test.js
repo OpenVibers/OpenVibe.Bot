@@ -1,9 +1,9 @@
 'use strict';
 // The Arrange editor on the real panel, in headless Chrome (make your own controls, stage 2): the panel is drawn
-// with its parts, Arrange loads openvibe-shared/ov-arrange.js only when pressed, Stop moves on the grid, Save posts
-// the layout to the panel's own route, and Ask OpenVibe previews a suggestion before Keep. No robot and no
-// Network: the page is rendered by renderPanel and the two arrange endpoints answer with a stub. Skipped without
-// Chrome.
+// with its parts, Arrange loads openvibe-shared/ov-arrange.js only when pressed, the palette adds the optional Stop,
+// Stop moves on the grid, Save posts the layout to the panel's own route, and Ask OpenVibe previews a suggestion
+// before Keep. No robot and no Network: the page is rendered by renderPanel and the two arrange endpoints answer
+// with a stub. Skipped without Chrome.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -21,7 +21,7 @@ const sharedRoot = path.dirname(require.resolve('openvibe-shared/package.json'))
 const catalog = surface.controlsCatalog(profile);
 const defaults = surface.defaultLayout(catalog, 'phone');
 const allowed = Object.keys(profile.commands);
-const robot = { id: 'r1', name: 'Looi', profile_id: profile.id, access_policy: 'private', estop: { latched: false } };
+const robot = { id: 'r1', name: 'Looi', profile_id: profile.id, access_policy: 'private' };
 const pageHtml = render.renderPanel({
     robot, profile, role: 'owner', allowed_commands: allowed,
     arrange: {
@@ -80,12 +80,18 @@ const server = http.createServer((req, res) => {
         assert.ok(await until(`!!window.OVArrange && !!window.ovArrange`), 'Arrange loads the editor and opens it');
         if (!await until(`!!document.querySelector('[data-ov-custom]')`)) console.log('DEBUG', await evalv(`JSON.stringify({custom: !!document.querySelector('[data-ov-custom]'), surfaces: [...document.querySelectorAll('[data-ov-surface]')].map(e=>e.className+':'+e.getAttribute('data-ov-custom')), bar: !!document.querySelector('.ov-arrange-bar'), status: document.querySelector('.ov-arrange-status') && document.querySelector('.ov-arrange-status').textContent, err: window.__err})`));
         assert.ok(await until(`!!document.querySelector('[data-ov-custom]')`), 'the editor applies the layout to the real surface');
+        // Stop is off by default; the Arrange palette adds it as one ordinary part.
+        assert.ok(await evalv(`document.querySelector('[data-ov-part="stop"]').hidden`), 'Stop is hidden by default');
+        assert.ok(await until(`!!document.querySelector('[data-add-stop]')`), 'the palette offers Stop');
+        await evalv(`document.querySelector('[data-add-stop]').click()`);
+        assert.ok(await until(`!document.querySelector('[data-ov-part="stop"]').hidden`), 'Add Stop shows it');
+        const savedIt = async () => { const end = Date.now() + 8000; while (Date.now() < end) { if (calls.save && calls.save.layout) return true; await wait(50); } return false; };
+        assert.ok(await savedIt(), 'adding it saves the layout');
         // The stick and Stop are in their own cells; the old pad wrapper flattens.
         assert.ok(await evalv(`getComputedStyle(document.querySelector('.widget-drive')).display === 'contents'`), 'the drive section flattens so its parts are grid cells');
-        const before = await evalv(`window.ovArrange.layout().parts.find((p) => p.id === 'stop').place.x`);
+        const before = await evalv(`window.ovArrange.layout().parts.find((p) => p.id === 'stick').place.y`);
         for (let i = 0; i < 2; i++) await evalv(`(() => { const el = document.querySelector('[data-ov-part="stick"]'); el.focus(); el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); })()`);
-        await evalv(`(() => { const el = document.querySelector('[data-ov-part="stop"]'); el.focus(); el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })); })()`);
-        assert.equal(await evalv(`window.ovArrange.layout().parts.find((p) => p.id === 'stop').place.x`), before - 1, 'Stop moved one cell left');
+        assert.equal(await evalv(`window.ovArrange.layout().parts.find((p) => p.id === 'stick').place.y`), before + 2, 'the stick moved two cells down');
         await evalv(`document.querySelector('[data-save]').click()`);
         assert.ok(calls.save && calls.save.layout, 'Save posted the layout to the panel route');
         // Ask OpenVibe: previewed, then kept.
@@ -103,8 +109,8 @@ const server = http.createServer((req, res) => {
         await p2.goto(base + '/panel/r1', { maxMs: 8000 });
         assert.ok(await p2until(`localStorage.getItem('ov-bot-pad-prefs') === null`), 'the old store is retired after one migration');
         const migrated = JSON.parse(await p2.evaluate(`document.getElementById('ov-arrange-data').textContent`));
-        assert.deepEqual(migrated.layout.parts.find((p) => p.id === 'stop').place, { x: 0, y: 0, w: 2, h: 2 }, 'Stop takes the left hand');
-        assert.deepEqual(migrated.layout.parts.find((p) => p.id === 'stick').place, { x: 0, y: 2, w: 3, h: 3 }, 'the pad takes its larger size, moved clear of Stop on a phone');
+        assert.strictEqual(migrated.layout.parts.find((p) => p.id === 'stop').visible, false, 'Stop stays off in a migrated layout');
+        assert.deepEqual(migrated.layout.parts.find((p) => p.id === 'stick').place, { x: 0, y: 0, w: 3, h: 3 }, 'the pad takes its larger size');
         assert.equal(migrated.layout.parts.find((p) => p.id === 'battery').visible, false, 'the readouts are folded');
         assert.ok(await p2until(`!!document.querySelector('.widgets[data-ov-arranged]')`), 'the migrated layout is drawn on the parts');
         assert.equal(JSON.parse(await p2.evaluate(`document.getElementById('ov-arrange-data').textContent`)).layoutSource, 'default', 'the page was drawn from the default before the migration');

@@ -27,8 +27,6 @@
  * | GET    /robots/:id/devices                     | bot.robot.read         | a member                            |
  * | POST   /devices/:id/rotate, /revoke            | bot.device.connect     | the robot's owner                   |
  * | POST   /devices/bind                            | — (a Link token)       | a machine paired for Bot on Network |
- * | POST   /robots/:id/estop                        | bot.robot.control      | owner or operator                   |
- * | POST   /robots/:id/estop/clear                  | bot.robot.control      | the owner only                      |
  * | POST   /robots/:id/commands                     | bot.robot.control      | owner or operator                   |
  * | POST   /robots/:id/control-ticket               | bot.robot.control      | a member (or anyone on a queue robot): a Drive ticket |
  * | GET    /robots/:id/audit                        | bot.robot.read         | owner (paged)                       |
@@ -463,23 +461,6 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         const robot = await owner(req, req.params.id);
         const subject = req.principal.kind === 'user' ? me(req) : userSubject(req.headers['x-ov-subject'] || req.body?.owner, 'subject');
         res.json(await domain.streaming.set(req.params.id, { subject, kind: req.principal.kind }, { to: req.body?.to, on: req.body?.on }));
-    }));
-
-    // ── E-stop ────────────────────────────────────────────────────────────────────────────────────
-    r.post('/robots/:id/estop', control, wrap(async (req, res) => {
-        const { robot } = await member(req, req.params.id, ['owner', 'operator']);
-        if (req.principal.kind === 'service') requireControlCap(req);
-        if (!robot.estop_latched) await domain.estop.set(req.params.id, { latched: true, by: me(req) || req.principal.sub, principalKind: req.principal.kind });
-        await hub.pushEstop(req.params.id, true, me(req) || req.principal.sub);
-        hub.broadcast(req.params.id);
-        res.json({ robot: domain.present.robot(await domain.robots.get(req.params.id)) });
-    }));
-    r.post('/robots/:id/estop/clear', control, wrap(async (req, res) => {
-        const robot = await owner(req, req.params.id);
-        await domain.estop.clear(req.params.id, robot.owner_subject);
-        await hub.pushEstop(req.params.id, false, robot.owner_subject);
-        hub.broadcast(req.params.id);
-        res.json({ robot: domain.present.robot(await domain.robots.get(req.params.id)) });
     }));
 
     // ── A Drive ticket for an embedded panel (server/control-tickets.js) ───────────────────────────
@@ -949,7 +930,7 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         const st = await hub.robotState(robot.id);
         const sensors = st.telemetry && st.telemetry.sensors && typeof st.telemetry.sensors === 'object' ? st.telemetry.sensors : {};
         res.json({
-            robot_id: robot.id, name: robot.name, profile_id: robot.profile_id, online: st.online, estop: st.estop, battery: st.battery, sensors,
+            robot_id: robot.id, name: robot.name, profile_id: robot.profile_id, online: st.online, battery: st.battery, sensors,
             steps: stepHelp(profile), max_steps: AGENT_MAX_STEPS, max_seconds: AGENT_MAX_S,
             // S7: the commands an agent drove through Bot, as steps ("Drive forward 1 m": passed). A command that
             // named its stream is filterable with ?agent_stream=ags_…; the list never carries a second way to command.
@@ -1048,7 +1029,7 @@ function commandRefusalStatus(code) {
     if (code === 'bot.robot_not_found') return 404;
     if (code === 'bot.not_an_operator' || code === 'bot.read_only' || code === 'bot.forbidden' || code === 'bot.not_your_turn') return 403;
     if (code === 'bot.cooldown' || code === 'bot.turn_budget') return 429;
-    if (code === 'bot.device_offline' || code === 'bot.estop_latched' || code === 'bot.command_pending' || code === 'bot.computer_off' || code === 'bot.person_driving') return 409;
+    if (code === 'bot.device_offline' || code === 'bot.command_pending' || code === 'bot.computer_off' || code === 'bot.person_driving') return 409;
     return 422;   // unknown_command, command_not_allowed, unknown_actuator, invalid_input, text_too_long
 }
 

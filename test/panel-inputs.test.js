@@ -58,14 +58,14 @@ const buttonsOf = (profile, allowed = ['button']) => renderWidget(profile.widget
         assert.ok(!renderWidget(w, { profile: zoomOnly, allowed_commands: ['ptz'] }).includes('data-ptz-stick'));
     });
 
-    await check('panel.js: a held slider repeats its value as new commands and stops on release, cancel, blur, a hidden page and the e-stop', () => {
+    await check('panel.js: a held slider repeats its value as new commands and stops on release, cancel, blur, a hidden page and Stop', () => {
         const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'panel.js'), 'utf8');
         assert.ok(js.includes("const every = Number(el.dataset.holdRepeat) || 0;"), 'only a slider that asks for it');
         assert.ok(js.includes("if (Date.now() - lastSent >= every - 5) sendNow();"), 'each tick is a new send of the current value, skipped right after a move');
         assert.ok(js.includes("el.addEventListener(ev, stop);"), 'release, cancel and a lost capture stop it');
         assert.ok(js.includes("['pointerup', 'pointercancel', 'lostpointercapture']) el.addEventListener(ev, stop)"), 'all three pointer ends');
         assert.ok(js.includes("window.addEventListener('blur', stopRepeats);") && js.includes("if (document.hidden) stopRepeats();") && js.includes("window.addEventListener('pagehide', stopRepeats);"), 'blur, a hidden page and pagehide stop it');
-        assert.ok(js.includes("window.dispatchEvent(new Event('ov-bot-release-all'))") && js.includes("window.addEventListener('ov-bot-release-all', stopRepeats);"), 'releaseAll (the e-stop) stops it');
+        assert.ok(js.includes("window.dispatchEvent(new Event('ov-bot-release-all'))") && js.includes("window.addEventListener('ov-bot-release-all', stopRepeats);"), 'releaseAll (Stop) stops it');
     });
 
     await check('panel.js: keys, stick and gamepad press direction buttons; the PTZ stick holds pan and tilt', () => {
@@ -80,10 +80,10 @@ const buttonsOf = (profile, allowed = ['button']) => renderWidget(profile.widget
         assert.ok(js.includes("() => holdRelease(kind, 'ptzstick'));"), 'let go stops the camera');
         assert.ok(js.includes("for (const k of [...dirRepeats.keys()]) { const i = k.indexOf('|'); dirRelease(k.slice(0, i), k.slice(i + 1)); }"), 'releaseAll lets every repeat go');
         assert.ok(/\[data-joystick\], \[data-button-stick\], \[data-ptz-stick\]/.test(js), 'the new sticks follow the allowed state');
-        // The pad on a button robot keeps the drive's latch, B lets go, Start is the e-stop.
+        // The pad on a button robot keeps the drive's latch, B lets go.
         const branch = js.slice(js.indexOf('if (buttonDrive) {', js.indexOf('function padPoll')), js.indexOf('const v = stickValue(ax(0), -ax(1), PAD_DEADZONE);'));
         assert.ok(branch.includes('if (!pad.latched) pad.reset();') && branch.includes('if (!want && !now.size) pad.latched = false;'));
-        assert.ok(branch.includes('now.has(1) && !pad.down.has(1)') && branch.includes('now.has(9) && !pad.down.has(9)'));
+        assert.ok(branch.includes('now.has(1) && !pad.down.has(1)') && !branch.includes('now.has(9)'));
     });
 
     await check('Q and E tilt the head where the robot has one: Q up, E down, through the head command, nothing on release', () => {
@@ -96,7 +96,7 @@ const buttonsOf = (profile, allowed = ['button']) => renderWidget(profile.widget
         assert.ok(js.includes("if (up === down) return headStop();") && js.includes("if (up === down) return;   // none, or both"), 'both held: nothing');
         assert.ok(js.includes("head.timer = setInterval(headStep, Number(el && el.dataset.holdRepeat) || HOLD_MS);"), 'the slider\'s hold cadence (LOOI: 90 ms)');
         assert.ok(js.includes("function headRelease(code) { if (!head.down.delete(code)) return; headRun(); }") && !/headRelease[\s\S]{0,200}send\('actuator'/.test(js), 'release sends nothing: head 0 is Center, not stop');
-        assert.ok(js.includes("window.addEventListener('ov-bot-release-all', headReleaseAll);") && js.includes("function stopDrive() {\n        headReleaseAll();"), 'blur, a hidden page, a lost socket, the e-stop and STOP stop it');
+        assert.ok(js.includes("window.addEventListener('ov-bot-release-all', headReleaseAll);") && js.includes("function stopDrive() {\n        // The machine's own Stop (halt)"), 'blur, a hidden page, a lost socket and Stop stop it');
         assert.ok(js.includes("if (textEntry(e.target)) return;"), 'never while typing');
         assert.ok(js.includes("if (headSlider() && headEnabled()) { keys.add('KeyQ'); keys.add('KeyE'); keys.add('Space'); }"), 'the page around the frame is offered Q and E, also with no drive');
         const looi = loadProfiles().get('looi');

@@ -60,7 +60,7 @@ credential, as above.
 
 Frames sent while authentication is still in progress — right after an upgrade that carries the
 header, or after `pair` until it is answered — are **kept** and handled in arrival order once it
-completes (after `hello` and `config`), so a device may send its first `status` and `estop_state`
+completes (after `hello` and `config`), so a device may send its first `status` and its Stop report
 straight after the upgrade. They are never answered `bot.not_paired`. If the credential is refused
 they are discarded with the socket; after a refused `pair` they are answered as on an unpaired socket.
 At most 64 frames wait; any more are answered `error` `bot.not_ready`.
@@ -71,9 +71,8 @@ At most 64 frames wait; any more are answered `error` `bot.not_ready`.
 |---|---|---|
 | `paired` | `device_id, credential, publish_key, whip_url, robot_ids, profile_id, profile` | the answer to `pair`; `credential`/`publish_key`/`whip_url` are shown **once**; without OpenRestream configured `video: "not_configured"` instead of `publish_key`/`whip_url` |
 | `hello` | `session_id, device_id, robot_ids, server_time` | on every authenticated connection |
-| `config` | `heartbeat_ms, limits, allowed_commands, estop_latched` | right after `hello`, and again whenever the owner changes the robot's limits (or `allow` lists) and whenever Bot's latch is set or cleared (after the `estop` frame) |
+| `config` | `heartbeat_ms, limits, allowed_commands, estop_latched` | right after `hello`, and again whenever the owner changes the robot's limits (or `allow` lists). `estop_latched` is a legacy field: Bot always sends `false` and no longer latches anything |
 | `command` | `id, kind, value, deadline_ms, operator{subject,role}, robot_id, provenance?` | an operator's command passed the gate; `provenance` is present on `headlight` |
-| `estop` | `latched, by, at` | the e-stop latched or the owner cleared it |
 | `heartbeat_ack` | `echo, t, server_time` | the answer to `heartbeat`; `echo` is the heartbeat's `t` (or `null`), so the device computes RTT, and `t` repeats a finite `t` (device ms) unchanged — the field OpenVibe Link reads. The envelope `seq` is Bot's own counter and never echoes the device's |
 | `rotate` | — | the owner forced a rotation of a Network-paired machine (`POST /devices/:id/rotate`); the machine rotates its credential with Network itself |
 | `error` | `code, detail` | a frame the server refused |
@@ -85,11 +84,11 @@ At most 64 frames wait; any more are answered `error` `bot.not_ready`.
 | `pair` | `robot, code, agent_version, device_kind, drivers[], capabilities{}, name` | the one-time pairing code; `robot` (from the installer command / QR) attributes a wrong try to that robot's code. With `BOT_PAIRING_AUTHORITY=network` → `error` `bot.pairing_moved` |
 | `heartbeat` | `t, rtt_ms` | every `heartbeat_ms` (1 s); `t` is the device's send time in unix ms (a finite number), returned as both `heartbeat_ack.echo` and `heartbeat_ack.t`; `rtt_ms` is the device's own measured latency |
 | `telemetry` | `battery, voltage, sensors{}, events[]?, …` | at most 2 Hz; extra frames are dropped — except a frame with a non-empty `events` array (a fault, a bump, low battery), which is always delivered and does not count against the samples' window. `battery` is either a 0..1 fraction or an object `{volts, percent}` with `percent` 0..100 (as OpenVibe Link sends it); `robot_state.battery` is always the fraction 0..1 (or `null`), while `robot_state.telemetry` keeps the raw frame |
-| `status` | `firmware, capabilities, faults[], estop_latched, device_kind?, drivers[]?, agent_version?` | on connect and on change. See below |
+| `status` | `firmware, capabilities, faults[], estop_latched, device_kind?, drivers[]?, agent_version?` | on connect and on change. See below. `estop_latched` is a legacy field and is not read |
 | `reauth` | `token` | a Network-paired machine only: a fresh node token for the same principal, before the last one expires (300 s); a refused one is answered `error` `bot.reauth_refused` and moves nothing |
 | `ack` | `id, data?` | a command ran (or, keyed by a job id, a job was accepted: §1.2); `data` is a computer command's answer or a headlight's `{stage, admitted}` |
 | `nack` | `id, fault_code` | a command (or a job, §1.2) was refused on the device |
-| `estop_state` | `latched, by, at, robot_id?, local_stop?, reason?` | the device's own latch, a **report**; `robot_id` omitted = every robot the device serves; `local_stop: true` = held on the machine itself. See below |
+| `estop_state` | `latched, by, at, robot_id?, local_stop?, reason?` | the old name of a machine's own Stop report; accepted and ignored. `robot_id` omitted = every robot the device serves; `local_stop: true` = held on the machine itself. See below |
 
 `kind` is one of `drive`, `actuator`, `ptz`, `say`, `display`, `button`, `point`, `headlight` and `halt`, and a
 device only ever gets the kinds its robot's profile declares (§1.1) or a custom action it declares in
@@ -97,8 +96,7 @@ device only ever gets the kinds its robot's profile declares (§1.1) or a custom
 `deadline_ms` is an absolute epoch-ms instant and is present on the motion kinds (`drive`, `actuator`, `ptz`), on a
 held `button`, and on `headlight` (which is not motion and never renews a motion deadline): the device **must** stop
 the motors at that instant if no newer command arrived, and on every disconnect or crash path, without asking the
-network. `halt` (value `{}`, no deadline) stops everything at once and passes the gate even while the e-stop is
-latched.
+network. `halt` (value `{}`, no deadline) stops everything at once and always passes the gate.
 
 **Headlights** (`headlight`, LOOI; `{ "on": true|false }`, explicit and never a toggle) are the owner's and People
 Operators' only, never an anonymous viewer, a plain watcher or the queue. Bot mints the trusted fields itself, never
@@ -223,24 +221,18 @@ against these):
 The two server drivers are not machines that connect: Bot attaches them in-process (`server/sim`,
 `server/onvif`). A `sim` device needs nothing; an `onvif` camera is configured with `BOT_ONVIF_CAMERAS`
 (its URL plus `username_ref`/`password_ref` secret references — never the profile) and Bot translates each
-`ptz` command into an ONVIF `ContinuousMove` (`Stop` at the deadline, on `halt` or on the e-stop), carrying
+`ptz` command into an ONVIF `ContinuousMove` (`Stop` at the deadline or on `halt`), carrying
 the camera's `GetStatus` position in telemetry under `camera`.
 
-**A device's `estop_state` is a report, never a clear.** `latched: true` latches each robot the device is
-attached to (if it is not already latched). `latched: false` is recorded as the device's reported state
-only (`robot_state.state.device_estop`); it never clears Bot's latch — clearing the panel latch is the
-owner's or a Mod's (`estop_clear` on `/control`; `POST /robots/:id/estop/clear` stays owner-only), after
-which Bot sends `estop` with `latched: false`. The tray's own STOP latch and ARM are not this latch and
-are never cleared or armed remotely. A `robot_id` the device is not attached to is refused with `error` `bot.forbidden`
-and audited (`kind: estop_state`, `result: refused`); nothing changes on that robot.
+**A machine's own Stop report stays local.** The frame's old name is `estop_state`; a device may still send it,
+and Bot accepts it without latching, gating, clearing or auditing anything. The tray's own Stop is its author's
+program, and only that machine releases it. A `robot_id` the device is not attached to is refused with `error`
+`bot.forbidden`; nothing changes on that robot.
 
-**A local stop** (`latched: true, local_stop: true`, with an optional `reason`) is one held on the machine
-itself: `openvibe-link stop`, or a driver's own stop button through it. Only a release on that machine
-(`openvibe-link resume`) lifts it; the owner's clear does not. The Link keeps refusing motion (`nack`
-`local_stop`) and reports the latch again after the owner's clear, which latches the robot again. Bot keeps
-`local` and `reason` (plain text, at most 120 characters) in `device_estop`, and the panel says the robot is
-stopped on the robot and holds back its Clear button until the device reports the release. After the release
-(`latched: false`) Bot's own latch still waits for the owner: two keys, the robot's and the owner's.
+**A local stop** is one held on the machine itself: `openvibe-link stop`, or a driver's own stop button through it.
+Only a release on that machine (`openvibe-link resume`) lifts it. The Link keeps refusing motion (`nack` `local_stop`)
+and reports the stop again. Bot does not keep that latch and never clears it; a remote stop is the plain `halt`
+command, nothing more.
 
 ### Examples
 
@@ -321,13 +313,9 @@ not confirmed) or `{ "stage": "headlight_refused", "admitted": false }` (busy/ra
 
 ```json
 { "v": 1, "seq": 14, "ts": 1738065600900, "type": "status", "firmware": "adeept-0.1.0",
-  "capabilities": { "drive": { "type": "differential", "axes": ["throttle", "steer"] } }, "faults": [], "estop_latched": false }
+  "capabilities": { "drive": { "type": "differential", "axes": ["throttle", "steer"] } }, "faults": [] }
 ```
 
-```json
-{ "v": 1, "seq": 15, "ts": 1738065601200, "type": "estop_state", "latched": true, "by": "device", "at": "2026-09-29T19:20:01.200Z" }
-{ "v": 1, "seq": 6, "ts": 1738065601201, "type": "estop", "latched": false, "by": "usr_01J8…", "at": "2026-09-29T19:20:01.201Z" }
-```
 
 Liveness: the server marks a device **offline** when no frame arrives within
 `heartbeat_ms × 2 + 3000 ms` (2 missed beats plus the grace) and never queues a command for it; a
@@ -425,12 +413,11 @@ forward commands without holding a socket. The HTTP gate is the same gate but no
 with no role is not put into a `queue` robot's queue (as a socket `join` would), so over HTTP a chat viewer
 needs an explicit owner or operator role — a no-role caller is refused `bot.not_an_operator`.
 
-**Roles and sole control.** The owner, a Mod and an Operator may drive and press the panel e-stop; a Mod
-may also switch Operators on or off, grant or clear sole control, and clear the panel latch. Only the owner
-promotes an Operator to Mod or demotes a Mod, changes speed/mode/Viewer access, clears the tray's STOP or
-ARM, or switches a Mod. A switched-off Operator (or Mod) is refused `bot.operator_off`; under sole control
-every other subject's command is refused `bot.sole_control` (the owner and `halt` always pass). Each
-authority change is in `robot_operator_audit` with the actor and subject, never a token.
+**Roles and sole control.** The owner, a Mod and an Operator may drive; a Mod may also switch Operators on
+or off and grant or clear sole control. Only the owner promotes an Operator to Mod or demotes a Mod, changes
+speed/mode/Viewer access, or switches a Mod. A switched-off Operator (or Mod) is refused `bot.operator_off`;
+under sole control every other subject's command is refused `bot.sole_control` (the owner and `halt` always
+pass). Each authority change is in `robot_operator_audit` with the actor and subject, never a token.
 
 ### Client → server
 
@@ -439,8 +426,6 @@ authority change is in `robot_operator_audit` with the actor and subject, never 
 | `join` | `robot_id` | subscribe to a robot; refused with `error` `bot.not_an_operator` when the caller has no access |
 | `leave` | — | unsubscribe |
 | `command` | `id, kind, value, ms?` | the same `kind`s as the device; `ms` requests a deadline (capped by `max_command_ms`) |
-| `estop` | — | latch the panel e-stop (owner, Mod or operator) |
-| `estop_clear` | — | clear the latched **panel** e-stop (owner or Mod). It never clears the tray's local STOP or ARM |
 | `operators` | `id?, action, subject?, on?, role?` | `toggle` an Operator (owner or Mod) or a Mod (owner), `sole` grant/clear one subject (`subject: null` is Everyone), `role` promote an Operator to Mod or demote a Mod (owner). Every answer is `operators_result` |
 | `give_back` | — | owner, Mod or operator: hand back a queue turn your driving paused (§1 Owner takeover); it resumes at once with its time kept |
 
@@ -449,9 +434,9 @@ authority change is in `robot_operator_audit` with the actor and subject, never 
 | type | fields | notes |
 |---|---|---|
 | `joined` | `robot, role, profile, allowed_commands, state, operators` | the answer to `join`; `allowed_commands` is the role's allowlist cut to the profile's kinds, with `halt` for every role that may drive; `operators` is the roster, sole-control policy and Bot's command activity for the Operators card |
-| `robot_state` | `state{robot_id, online, estop{latched,by,at}, latency_ms, battery, telemetry, status, device_estop{latched,at}, queue}` | on every change and on telemetry, ≤ 2 Hz (a telemetry frame with `events` always); `estop` is Bot's panel latch, `device_estop` the device's last report (or `null`); `battery` is 0..1 (a Node 0..100 reading is divided by 100, and a missing reading is `null`) |
+| `robot_state` | `state{robot_id, online, latency_ms, battery, telemetry, status, queue}` | on every change and on telemetry, ≤ 2 Hz (a telemetry frame with `events` always); `battery` is 0..1 (a Node 0..100 reading is divided by 100, and a missing reading is `null`) |
 | `operators_state` | `operators{sole, members[{subject, role, enabled}], viewers, activity{subject{last{kind,channel,at},drive_at,head_at,lights_at}}, now}` | the Operators card's live view: an accepted authority change at once, and activity at most twice a second. `channel` is drive, head, lights (non-motion), button, say, display or ptz |
-| `operators_result` | `id?, action, ok, code?, reason?` | the answer to an `operators` frame or a panel `estop`/`estop_clear`; a refusal is never a silent drop |
+| `operators_result` | `id?, action, ok, code?, reason?` | the answer to an `operators` frame; a refusal is never a silent drop |
 | `command_result` | `id, result, code?, reason?, latency_ms?, cached?` | `result` is `ack`, `nack`, `refused` or `expired`; a repeated `id` is answered `cached: true` |
 | `error` | `code, detail` | a frame or join the server refused |
 
@@ -471,8 +456,7 @@ resumes it at once.
 
 ```json
 { "v": 1, "seq": 1, "ts": 1738065600001, "type": "joined",
-  "robot": { "id": "rob_01J8Z4M2Q0R7T9YV3K6N8P1W2X", "name": "Rover", "access_policy": "private",
-             "estop": { "latched": false, "by": null, "at": null } },
+  "robot": { "id": "rob_01J8Z4M2Q0R7T9YV3K6N8P1W2X", "name": "Rover", "access_policy": "private" },
   "role": "operator", "profile": { "id": "adeept.adr036" },
   "allowed_commands": ["drive", "actuator", "halt"],
   "state": { "robot_id": "rob_01J8Z4M2Q0R7T9YV3K6N8P1W2X", "online": true, "latency_ms": 63, "battery": 0.72, "queue": null } }
@@ -496,25 +480,20 @@ resumes it at once.
 ```json
 { "v": 1, "seq": 3, "ts": 1738065600800, "type": "robot_state",
   "state": { "robot_id": "rob_01J8Z4M2Q0R7T9YV3K6N8P1W2X", "online": true,
-             "estop": { "latched": false, "by": null, "at": null }, "latency_ms": 63, "battery": 0.71,
-             "telemetry": { "battery": 0.71, "voltage": 7.4 }, "status": null, "device_estop": null,
+             "latency_ms": 63, "battery": 0.71,
+             "telemetry": { "battery": 0.71, "voltage": 7.4 }, "status": null,
              "queue": { "active": false, "position": 3, "turn_ends_at": null, "budget": 50, "used": 0 } } }
 ```
 
-```json
-{ "v": 1, "seq": 4, "ts": 1738065601000, "type": "estop" }
-{ "v": 1, "seq": 4, "ts": 1738065601001, "type": "error", "code": "bot.forbidden", "detail": "only the owner or a Mod clears the panel e-stop" }
-```
-
 Refusal codes (the gate, in order): `bot.robot_not_found`, `bot.unknown_command`, `bot.command_not_allowed`
-(the profile takes no such kind), `bot.estop_latched`, `bot.not_an_operator`, `bot.sign_in`,
+(the profile takes no such kind), `bot.not_an_operator`, `bot.sign_in`,
 `bot.read_only`, `bot.operator_off`, `bot.sole_control`, `bot.command_not_allowed` (the role's allowlist),
 `bot.device_offline`, `bot.cooldown`,
 `bot.not_your_turn`, `bot.owner_control` (the owner or an operator has taken the turn over), `bot.turn_budget`,
 `bot.unknown_actuator`, `bot.invalid_input`, `bot.text_too_long`.
 A `command` whose `id` is still in flight (the first one has not been acked) is answered `refused`
 `bot.command_pending` rather than a second device command or a silent wait.
-`halt` is never refused for the e-stop, the allowlist, a cooldown or the turn budget; it still needs a
+`halt` is never refused for the allowlist, a cooldown or the turn budget; it still needs a
 role that may drive (a queue robot's turn holder, not someone waiting) and an online device.
 
 ### 2.1 `/watch` and the embeddable panel (plan T15 R9)
@@ -531,7 +510,7 @@ owner's panel leads with **On your stream**: one button (`POST /robots/:id/on-st
 same-origin) turns `embed_public` on and sends them to their Live channel's bind prompt
 (`<LIVE_URL>/@<username>?bind_robot=<id>`), and a **Who may drive** select (`POST /robots/:id/access`,
 `private`/`invite`/`queue`) sits beside it.
-An unknown robot is `404`. The e-stop state is always shown; the E-stop button only to an owner or operator.
+An unknown robot is `404`. The panel shows only the controls and the optional Stop a role may use.
 Its response carries `Content-Security-Policy: default-src 'self'; frame-ancestors 'self' <BOT_EMBED_ORIGINS>;
 object-src 'none'; base-uri 'self'` and `Cache-Control: no-store`; every other page keeps
 `frame-ancestors 'self'`. Framing takes both sides and the two lists are independent: `BOT_EMBED_ORIGINS` lets
@@ -545,12 +524,12 @@ The watcher's panel joins on `wss://openvibe.bot/watch`: no credential, never a 
 |---|---|---|
 | `join` | `robot_id` | `joined { role: "watcher", profile, allowed_commands: [], state }` for an `embed_public` robot; otherwise (or an unknown robot) `error` `bot.not_an_operator` |
 | `leave` | — | unsubscribe |
-| anything else (`command`, `estop`, `estop_clear`, …) | — | `error` `bot.read_only`; never reaches a device or the audit |
+| anything else (`command`, `stop`, `halt`, …) | — | `error` `bot.read_only`; never reaches a device or the audit |
 
 A joined watcher then gets `robot_state { state }` on every change, as a `/control` subscriber does, but always
-the **public state**: `{ robot_id, online, estop{latched}, latency_ms, battery, telemetry }`, where
+the **public state**: `{ robot_id, online, latency_ms, battery, telemetry }`, where
 `telemetry` is `null` or `{ sensors: { … } }` holding only the keys the profile's `telemetry` widgets read
-(`sensor.ultrasonic` → `ultrasonic`). Never the queue, a subject, who latched the e-stop, the device's ids,
+(`sensor.ultrasonic` → `ultrasonic`). Never the queue, a subject, the device's ids,
 its `status` or the rest of its telemetry.
 
 Frames over 4 KiB close the socket (1009). Over `BOT_WATCH_MAX_PER_IP` open sockets from one client address
@@ -560,7 +539,7 @@ owner turning `embed_public` off closes the robot's watchers with 4003 too.
 ```json
 { "v": 1, "seq": 1, "ts": 1738065600001, "type": "joined", "role": "watcher", "profile": { "id": "adeept.adr036" },
   "allowed_commands": [],
-  "state": { "robot_id": "rob_01J8Z4M2Q0R7T9YV3K6N8P1W2X", "online": true, "estop": { "latched": false },
+  "state": { "robot_id": "rob_01J8Z4M2Q0R7T9YV3K6N8P1W2X", "online": true,
              "latency_ms": 63, "battery": 0.72, "telemetry": { "sensors": { "ultrasonic": 41.5 } } } }
 ```
 
@@ -576,8 +555,7 @@ never ignored, on both `GET /robots` and `POST /robots` (a service's `?owner=` o
 the subject it acts for). Without a token, every route but `GET /profiles`, `GET /profiles/:id`, `POST /pair`
 and `POST /devices/bind` answers `401 bot.sign_in`: `GET /me`, `GET|POST /robots`, `GET|PATCH|DELETE /robots/:id`,
 `POST /robots/:id/pairing-code`, `GET|POST /robots/:id/operators`, `DELETE /robots/:id/operators/:subject`,
-`GET /robots/:id/devices`, `POST /devices/:id/rotate|revoke`, `POST /robots/:id/estop`,
-`POST /robots/:id/estop/clear`, `POST /robots/:id/commands`, `GET /robots/:id/audit` and `GET|POST /robots/:id/streaming`. A node token gets `403 bot.forbidden` on the same
+`GET /robots/:id/devices`, `POST /devices/:id/rotate|revoke`, `POST /robots/:id/commands`, `GET /robots/:id/audit` and `GET|POST /robots/:id/streaming`. A node token gets `403 bot.forbidden` on the same
 routes. Both come before any lookup, so a real robot or device id answers exactly as a made-up one. The three
 jobs routes are service-only: the same `401 bot.sign_in` without a token, `403 bot.forbidden` for a person or a
 node token, and a service token is judged on `bot.job.dispatch` alone.
@@ -601,12 +579,10 @@ node token, and a service token is judged on `bot.job.dispatch` alone.
 | `POST /devices/:id/rotate` | the robot's owner, `bot.device.connect` | `{ device, credential, publish_key, whip_url }` (once; `video: "not_configured"` instead of the key without OpenRestream); for a Network-paired machine `{ device, sent }` — the machine is sent `rotate`, no credential is answered |
 | `POST /devices/:id/revoke` | the robot's owner, `bot.device.connect` | `{ device }`; the socket closes at once. A Network-paired machine's principal is revoked on Network too (`503 bot.network_unavailable` if Network did not answer: revoked here, retry) and never binds again. The OpenRestream key the device holds is revoked and its live session ended (`502`/`503 bot.openre_*` if OpenRestream did not: revoked here, retry) |
 | `POST /devices/bind` | a Network node token (audience `openvibe.bot`), no body | `201 { device_id, publish_key, whip_url, robot_id, profile }` — `POST /pair`'s answer without `credential`; again → the same device and a new publish key (the old one stops working); without OpenRestream `video: "not_configured"` instead of the key. Refused: `401 bot.link_token_required`, `403 bot.link_not_bound` |
-| `POST /robots/:id/estop` | owner/operator, `bot.robot.control` | `{ robot }` |
-| `POST /robots/:id/estop/clear` | **owner only**, `bot.robot.control` | `{ robot }` |
-| `POST /robots/:id/commands` | owner/operator, `bot.robot.control` | `{ robot_id, id, result, code?, reason?, latency_ms?, cached? }` — one command through the same gate, audit and per-subject `id` idempotency key as `/control` (a bound channel's chat forwards here instead of a hardware socket). `result` is `ack`, `nack` or `expired` (a repeated `id` answers `cached: true`); a gate refusal is its code as an RFC 9457 problem: `403 bot.not_an_operator` / `bot.read_only` / `bot.not_your_turn`, `404 bot.robot_not_found`, `409 bot.device_offline` / `bot.estop_latched` / `bot.command_pending` (the same `id` is still in flight), `422` the command-shape codes, `429 bot.cooldown` / `bot.turn_budget`. A service acting for a subject is rate-limited as that person (`user:<subject>`) and also, as a service, at 1200 a minute and 12000 an hour on its own token (`bot.control.service`), so naming a fresh well-formed subject on every request never lifts every ceiling |
+| `POST /robots/:id/commands` | owner/operator, `bot.robot.control` | `{ robot_id, id, result, code?, reason?, latency_ms?, cached? }` — one command through the same gate, audit and per-subject `id` idempotency key as `/control` (a bound channel's chat forwards here instead of a hardware socket). `result` is `ack`, `nack` or `expired` (a repeated `id` answers `cached: true`); a gate refusal is its code as an RFC 9457 problem: `403 bot.not_an_operator` / `bot.read_only` / `bot.not_your_turn`, `404 bot.robot_not_found`, `409 bot.device_offline` / `bot.command_pending` (the same `id` is still in flight), `422` the command-shape codes, `429 bot.cooldown` / `bot.turn_budget`. A service acting for a subject is rate-limited as that person (`user:<subject>`) and also, as a service, at 1200 a minute and 12000 an hour on its own token (`bot.control.service`), so naming a fresh well-formed subject on every request never lifts every ceiling |
 | `POST /robots/:id/control-ticket` | `bot.robot.control` acting for a person (`X-OV-Subject`) who is a member, or anyone on a `queue` robot | `{ ticket, robot_id, role, expires_in }`, `Cache-Control: no-store`: a Drive ticket for that person (§2), for the page that frames the panel. `403 bot.not_an_operator`; `422` without a subject |
-| `GET /robots/:id/steps` | the owner, or `svc:actor` with `bot.robot.read` acting for the owner of a robot with `agent_control` on | `{ robot_id, name, profile_id, online, estop, battery, sensors, steps[], max_steps, max_seconds }`: the robot's state and one example line per step word it takes (server/routines.js `stepHelp`) |
-| `POST /robots/:id/steps` | the owner, or `svc:actor` with `bot.robot.control` acting for the owner of a robot with `agent_control` on | body `{ steps: "forward 1\nsay Hi" }` (routine step lines, at most 20 steps and 30 seconds, waits included) → `{ robot_id, result, steps }` once they end; `result` is `done` or `stopped: <why>` (the e-stop, the device going offline, a cooldown). Each step passes the gate as the owner and is audited as the caller. `403 bot.agent_not_allowed` while the owner's switch is off or for anyone but the owner, `403 bot.forbidden` for any other service, `409 bot.routine_busy` while a routine runs, `422 bot.invalid_routine` naming the wrong line. `POST /robots/:id/commands` holds `svc:actor` to the same switch and owner |
+| `GET /robots/:id/steps` | the owner, or `svc:actor` with `bot.robot.read` acting for the owner of a robot with `agent_control` on | `{ robot_id, name, profile_id, online, battery, sensors, steps[], max_steps, max_seconds }`: the robot's state and one example line per step word it takes (server/routines.js `stepHelp`) |
+| `POST /robots/:id/steps` | the owner, or `svc:actor` with `bot.robot.control` acting for the owner of a robot with `agent_control` on | body `{ steps: "forward 1\nsay Hi" }` (routine step lines, at most 20 steps and 30 seconds, waits included) → `{ robot_id, result, steps }` once they end; `result` is `done` or `stopped: <why>` (the device going offline, a cooldown). Each step passes the gate as the owner and is audited as the caller. `403 bot.agent_not_allowed` while the owner's switch is off or for anyone but the owner, `403 bot.forbidden` for any other service, `409 bot.routine_busy` while a routine runs, `422 bot.invalid_routine` naming the wrong line. `POST /robots/:id/commands` holds `svc:actor` to the same switch and owner |
 | `GET /robots/:id/audit?limit=&before=` | owner, or `bot.robot.read` | `{ audit[], next_before }` (newest first) |
 | `GET /robots/:id/streaming` | a member, or `bot.robot.read` | `{ available, media{on}, live{on,effective}, stream_id }` (plus `reason` when unavailable), read from the robot's OpenRestream stream; `available:false` is `not_configured` (OpenRestream unset), `not_paired` (no stream yet) or `stream_missing` (OpenRestream answered 404) |
 | `POST /robots/:id/streaming` | **the owner only**, or `bot.robot.manage` | body `{ to: "media"\|"live", on: bool }` → the new state (as `GET`). `media` sets the stream's `recording_mode` `vod`/`none` (record to OpenVibe.Media); `live` sets `mirror_to_live` (show on the owner's OpenVibe.Live channel). One audit row per real change (`streaming.media`/`streaming.live`); an idempotent repeat answers the state and writes none. `422 bot.invalid_streaming`; `409 bot.not_paired` / `bot.openre_not_configured` |
@@ -662,7 +638,7 @@ POST /api/v1/robots/rob_…/commission
 With it, `PATCH /robots/:id` may set `max_speed` and `max_turn` above the profile default and up to the
 ceiling; without it they are clamped to the default exactly as before. `max_command_ms` is never raised (it
 bounds how long a command may run). Uncommissioning returns to the defaults at once and the device is sent
-the new config. The e-stop, roles, cooldowns and turn budget are unchanged, and operators and agents can
+the new config. Roles, cooldowns and the turn budget are unchanged, and operators and agents can
 never commission or raise a limit: the route answers `403 bot.forbidden` for anyone but the owner's own
 person token.
 
@@ -678,5 +654,5 @@ queue command refused because its turn ended while the gate decided is a `refuse
 (`kind` `streaming.media` or `streaming.live`, `value` `{ on }`, role `owner`, result `ack`); an
 idempotent repeat writes none. Commissioning writes `robot.commission` and uncommissioning
 `robot.uncommission`, both as the owner. The outbox publishes `bot.robot.online`, `bot.robot.offline`,
-`bot.estop.set`, `bot.estop.cleared` and `bot.command.refused` — small payloads of ids, kinds and
+`bot.command.refused` — small payloads of ids, kinds and
 results, never a credential, a pairing code, a publish key or a WHIP URL.

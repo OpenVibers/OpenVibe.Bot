@@ -51,14 +51,14 @@ const { HOME_CSP: SITE_CSP } = require('../server/web/home');
         // The lifecycle.
         for (const step of ['hello', 'describe', 'ready', 'heartbeat']) assert.ok(html.includes(step), `no ${step} in the lifecycle`);
         // Every message type, each with a JSON example.
-        for (const op of ['hello', 'command', 'heartbeat', 'stop', 'estop', 'resume', 'describe', 'ready', 'fault', 'ack', 'nack', 'telemetry', 'event', 'video']) {
+        for (const op of ['hello', 'command', 'heartbeat', 'stop', 'describe', 'ready', 'fault', 'ack', 'nack', 'telemetry', 'event', 'video']) {
             assert.ok(html.includes(`&quot;op&quot;: &quot;${op}&quot;`), `no ${op} JSON example`);
         }
         // The safety rules.
         assert.match(html, /must stop every actuator/);
         assert.match(html, /deadline/);
         assert.match(html, /no_heartbeat/);
-        assert.match(html, /e-stop/);
+        assert.match(html, /local Stop/);
         // Links out to the full protocol and the contributor path.
         assert.match(html, /OpenVibe\.Link\/blob\/main\/docs\/plugins\.md/);
         assert.match(html, /OpenVibe\.Link\/blob\/main\/docs\/protocol\.md/);
@@ -84,7 +84,7 @@ const { HOME_CSP: SITE_CSP } = require('../server/web/home');
         assert.strictEqual(r.headers.get('content-security-policy'), SITE_CSP);
         const html = await r.text();
         assert.match(html, /<h1>Routines, webhooks and your agent<\/h1>/);
-        for (const word of ['forward 2', 'every N minutes', 'bot.estop.set', 'whsec_', 'X-OpenVibe-Signature-V2', 'verifyDeliveryV2', 'Let my OpenVibe.Actor agent drive this robot', '/api/v1/robots/rob_…/steps', 'bot.agent_not_allowed']) {
+        for (const word of ['forward 2', 'every N minutes', 'bot.command.refused', 'whsec_', 'X-OpenVibe-Signature-V2', 'verifyDeliveryV2', 'Let my OpenVibe.Actor agent drive this robot', '/api/v1/robots/rob_…/steps', 'bot.agent_not_allowed']) {
             assert.ok(html.includes(word), word);
         }
         assert.ok(html.includes('href="/docs/automation" aria-current="page"'), 'in the build nav');

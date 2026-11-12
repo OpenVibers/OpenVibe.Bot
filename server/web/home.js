@@ -28,7 +28,7 @@ const { pickBlock, foldBlock } = require('./short');
 const SITE_NAME = 'OpenVibe.Bot';
 const NETWORK_URL = 'https://openvibe.network';
 const DESCRIPTION = 'An open control panel for robots: pair a robot with one pasted command and drive it from any browser, '
-    + 'with roles, limits and an emergency stop on every command.';
+    + 'with roles and limits on every command.';
 const esc = showcase.esc;
 
 /** The panel's own pages keep `default-src 'self'`; the front page also runs the OpenVibe Frame. */
@@ -82,7 +82,7 @@ function hero({ signedIn, config }) {
         eyebrow: 'OpenVibe.Bot · alpha',
         title: 'Drive your robot', accent: 'from any browser.',
         lede: 'An open control panel for robots. Pair a robot with one pasted command, then drive it with a touch joystick, '
-            + 'the keyboard or a gamepad. Every command passes one gate, with roles, limits and an emergency stop that only you clear.',
+            + 'the keyboard or a gamepad. Every command passes one gate, with roles and limits that you set.',
         // Two, so they sit side by side on a phone; how it works is the steps a scroll below.
         actions: signedIn
             ? [{ label: 'Your robots', href: '/robots', primary: true }, { label: 'Try the panel', href: '/try' }]
@@ -135,7 +135,7 @@ function connectSection({ models }) {
         label: g.label,
         html: kit.list([kit.row({ href: g.ms.length === 1 ? `/models/${g.ms[0].id}` : `/models#k-${g.k}`, title: g.label, sub: g.text, meta: plural(g.ms.length, 'model', 'models') })]),
     }));
-    return sec('connect', `${n} ${groups.length === 1 ? 'way' : 'ways'} to connect, one panel`, 'However a robot reaches OpenVibe, it gets the same panel, the same gate and the same emergency stop.',
+    return sec('connect', `${n} ${groups.length === 1 ? 'way' : 'ways'} to connect, one panel`, 'However a robot reaches OpenVibe, it gets the same panel and the same gate.',
         pickBlock({ key: 'connect', label: 'The ways to connect', head: `${n} ${groups.length === 1 ? 'way' : 'ways'} to connect, one panel`, panes }));
 }
 
@@ -162,14 +162,14 @@ function moreSection({ config, kit: k, models }) {
     const base = config.baseUrl;
     const panel = rows([
         ['/try', 'Real controls', 'A touch joystick, the keyboard or a gamepad, plus buttons and sliders, laid out from the robot\'s profile, with a latency meter.'],
-        ['/docs/profiles', 'Safe by default', 'Per-robot limits, cooldowns and a turn budget on every command; a latched emergency stop that the owner or a Mod clears (the panel latch only); a halt always gets through.'],
+        ['/docs/profiles', 'Safe by default', 'Per-robot limits, cooldowns and a turn budget on every command; a Stop button that sends the robot its own stop; a halt always gets through.'],
         ['/robots', 'Every command on the record', 'Allowed or refused, each command is audited and kept for 30 days.'],
         ['/robots', 'Share control', 'Add people by @username as operators or viewers, or open a queue where visitors take turns.'],
         ['https://openvibe.live/', 'Show it on your channel', 'Bind the robot to your OpenVibe.Live channel: its panel shows under your stream, and anyone allowed takes the controls there.'],
     ]);
     const automate = rows([
         ['/docs/automation', 'Routines', 'Plain step lines such as forward 2, wait 1, say Hello, on demand, on a schedule, or each time the robot comes online.'],
-        ['/docs/automation', 'Signed webhooks', 'Online, offline, e-stop and refused commands sent to your own https address, signed like OpenVibe.Events deliveries.'],
+        ['/docs/automation', 'Signed webhooks', 'Online, offline and refused commands sent to your own https address, signed like OpenVibe.Events deliveries.'],
         ['https://openvibe.actor/', 'Your agent drives', 'Turn on Your agent and your OpenVibe.Actor agent can run steps on that robot, as you and nobody else.'],
     ]);
     const computers = rows([
@@ -178,7 +178,7 @@ function moreSection({ config, kit: k, models }) {
         ['/docs/computers', 'A desk live on your channel', 'When you choose, an agent\'s desk shows on your OpenVibe Live channel for up to 30 minutes, so people can watch it work.'],
     ]);
     const api = showcase.code({
-        id: 'api', title: '', lede: 'A REST API and the openvibe-sdk client, held to the same roles, limits and emergency stop as the panel. Profiles and kits are public reads.',
+        id: 'api', title: '', lede: 'A REST API and the openvibe-sdk client, held to the same roles and limits as the panel. Profiles and kits are public reads.',
         samples: [
             { label: 'JavaScript (openvibe-sdk)', lang: 'js', code: "import { createClient } from 'openvibe-sdk/core';\nimport { createBotClient } from 'openvibe-sdk/bot';\n\nconst bot = createBotClient(createClient({ credentials: 'include' }));\nconst { robots } = await bot.robots.list();\n\n// Half speed ahead for 300 ms, same gate as the joystick\nawait bot.robots.command(robots[0].id, {\n    kind: 'drive', value: { throttle: 0.5, steer: 0 }, ms: 300,\n});" },
             { label: 'Public reads (curl)', lang: 'sh', code: `# Every robot model and its controls\ncurl ${base}/api/v1/profiles\n\n# The kits, with their parts lists\ncurl ${base}/api/v1/kits` },
@@ -200,7 +200,7 @@ function moreSection({ config, kit: k, models }) {
         head: `<h2 id="more-h" class="ovk-titled hm-h">${sectionIcon('grid')}More on OpenVibe.Bot</h2>`,
         html: `<section class="sc-sec hm-sec hm-more-sec" id="more" aria-labelledby="more-h"><h2 class="ovk-titled hm-h">${sectionIcon('grid')}More on OpenVibe.Bot</h2>
 ${kit.fold({ id: 'panel', title: 'What the panel does', meta: 'controls, safety, sharing', body: panel })}
-${kit.fold({ id: 'automate', title: 'Let it run without you', meta: 'routines, webhooks, your agent', body: `<p class="hm-fold-lede">They all go through the gate a person does: the same limits, the same e-stop, the same audit.</p>${automate}` })}
+${kit.fold({ id: 'automate', title: 'Let it run without you', meta: 'routines, webhooks, your agent', body: `<p class="hm-fold-lede">They all go through the gate a person does: the same limits, the same audit.</p>${automate}` })}
 ${kit.fold({ id: 'computers', title: 'Your computers, for your agents and your AI', meta: 'the same Link', body: `<p class="hm-fold-lede">The same OpenVibe Link runs on your own computers. It connects out, nobody else's work reaches them, and the limits you set on each computer always win.</p>${computers}` })}
 ${kit.fold({ id: 'code', title: 'The same robot from your own code', meta: 'REST and the SDK', body: api })}
 ${kitBody ? kit.fold({ id: 'kit', title: `The first kit: ${k.name}`, meta: plural(k.parts.length, 'part', 'parts'), body: kitBody }) : ''}
@@ -225,7 +225,7 @@ function faqItems({ models }) {
         { q: 'Do I need to open ports on my router?', a: 'No. The robot\'s computer connects out to OpenVibe, so it works behind an ordinary home or mobile connection. The Adeept kit\'s own control server, with its fixed password, is never run.' },
         { q: 'Can I try it without a robot?', a: 'Yes. The simulated rover at openvibe.bot/try runs in your browser with no account and no hardware, through the same panel a paired robot gets.' },
         list ? { q: 'Which robots work today?', a: `${list}. Each has a profile the panel draws its controls from, and anything a local script can switch works through the relay robot.` } : null,
-        { q: 'How does it keep the robot safe?', a: 'Every command passes one gate with roles, per-robot limits, cooldowns and a turn budget. The emergency stop is latched until the owner or a Mod clears the panel latch, a stop pressed on the robot holds until it is released there, and the device stops its motors by itself when commands stop arriving.' },
+        { q: 'How does it keep the robot safe?', a: 'Every command passes one gate with roles, per-robot limits, cooldowns and a turn budget. A Stop is one optional button that sends the robot its own stop; a stop pressed on the robot holds until it is released there, and the device stops its motors by itself when commands stop arriving.' },
         { q: 'Can other people drive my robot?', a: 'Only if you say so. Add people by @username as operators or viewers, or open a queue where signed-in visitors take timed turns. Listing a robot in the directory lets anyone watch it.' },
         { q: 'Can I show it on my stream?', a: 'Yes. Bind the robot to your OpenVibe.Live channel and its panel shows under your stream, where anyone you allow can take the controls.' },
         { q: 'Can my AI agent drive it?', a: 'Only when you turn on Your agent for that robot. Then your OpenVibe.Actor agent can read its state and run steps as you, through the same gate, and for nobody else.' },

@@ -1,6 +1,6 @@
 'use strict';
 // The control gate (ADR-043 decisions 6 and 8): roles, the access policy, owner limits that clamp an
-// operator, cooldowns, the latched e-stop (owner-cleared only), the turn queue and a service acting for
+// operator, cooldowns, the turn queue and a service acting for
 // a viewer. Every decision is audited.
 const assert = require('assert');
 const { ids } = require('openvibe-contracts');
@@ -73,40 +73,13 @@ const plugins = require('./helpers/plugins');
         b.close();
     });
 
-    await check('the e-stop latches, refuses commands, and only the owner clears it', async () => {
-        const { robot, pairing } = await t.robot(alex);
-        await invite(robot.id, bob.subject, 'operator');
-        const dev = await deviceFor(robot.id, pairing.code);
-        const b = await op(bob);
-        await joinResult(b, robot.id);
-        b.send({ type: 'estop' });
-        assert.ok(await poll(() => t.domain.robots.get(robot.id).then((r) => !!r.estop_latched)), 'the e-stop latched');
-        cmd(b, { id: 'e1', kind: 'drive', value: { throttle: 0.2 } });
-        const refused = await result(b, 'e1');
-        assert.strictEqual(refused.code, 'bot.estop_latched');
-        b.send({ type: 'estop_clear' });
-        const denied = await b.waitFor((m) => m.type === 'error' && /forbidden/.test(m.code));
-        assert.strictEqual(denied.code, 'bot.forbidden');
-        const a = await op(alex);
-        await joinResult(a, robot.id);
-        a.send({ type: 'estop_clear' });
-        assert.ok(await poll(() => t.domain.robots.get(robot.id).then((r) => !r.estop_latched)), 'the owner cleared it');
-        cmd(b, { id: 'e2', kind: 'drive', value: { throttle: 0.2 } });
-        assert.ok(await dev.waitFor((m) => m.type === 'command' && m.ref === 'e2'), 'an operator may drive again');
-        a.close(); b.close();
-    });
-
-    await check('halt passes the gate while the e-stop is latched; every other kind is refused', async () => {
+    await check('halt passes the allowlist, cooldowns and the budget', async () => {
         const { robot, pairing } = await t.robot(alex, { limits: { cooldown_ms: 60000, allow: { operator: ['drive'] } } });
         await invite(robot.id, bob.subject, 'operator');
         const dev = await deviceFor(robot.id, pairing.code);
         const b = await op(bob);
         const j = await joinResult(b, robot.id);
         assert.deepStrictEqual(j.allowed_commands, ['drive', 'halt'], 'no allowlist removes halt');
-        b.send({ type: 'estop' });
-        assert.ok(await poll(() => t.domain.robots.get(robot.id).then((r) => !!r.estop_latched)), 'the e-stop latched');
-        cmd(b, { id: 'h0', kind: 'drive', value: { throttle: 0.2 } });
-        assert.strictEqual((await result(b, 'h0')).code, 'bot.estop_latched');
         cmd(b, { id: 'h1', kind: 'halt' });
         const h1 = await dev.waitFor((m) => m.type === 'command' && m.ref === 'h1');
         assert.strictEqual(h1.kind, 'halt');
@@ -520,8 +493,7 @@ const plugins = require('./helpers/plugins');
         assert.strictEqual(anon.json.code, 'bot.sign_in');
     });
 
-    await check('a latched e-stop and an offline device answer 409 over the HTTP route', async () => {
-        // A device-less robot of its own: offline first, then latched (the e-stop is checked before liveness).
+    await check('an offline device answers 409 over the HTTP route', async () => {
         const setup = await t.domain.robots.create({ owner: alex.subject, name: 'No device', profile_id: 'sim.rover' });
         const robot = setup.robot;
         await t.domain.members.add(robot.id, bob.subject, 'operator', alex.subject);
@@ -529,10 +501,6 @@ const plugins = require('./helpers/plugins');
         const offline = await send('off-1');
         assert.strictEqual(offline.status, 409, offline.text);
         assert.strictEqual(offline.json.code, 'bot.device_offline');
-        await t.domain.estop.set(robot.id, { latched: true, by: alex.subject, principalKind: 'user' });
-        const latched = await send('estop-1');
-        assert.strictEqual(latched.status, 409, latched.text);
-        assert.strictEqual(latched.json.code, 'bot.estop_latched');
     });
 
     await check('a different subject reusing an id is never served another subject\'s cached result', async () => {

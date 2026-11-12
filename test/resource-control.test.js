@@ -1,7 +1,7 @@
 'use strict';
-// ADR-048 amendment 2026-10-15: OpenVibe.Services stops and resumes a person's robot through Bot's control API
-// (bot.resource.control, common.owned-resource-control-request@1). Only the owner Bot holds may be named; a repeat
-// answers the first result; an agent's resume waits for the owner's confirmation; first-party only.
+// ADR-048 amendment 2026-10-15: OpenVibe.Services stops a person's robot through Bot's control API
+// (bot.resource.control, common.owned-resource-control-request@1). Stop sends the robot's own halt; resume answers
+// that nothing was latched. Only the owner Bot holds may be named; a repeat answers the first result; first-party only.
 const assert = require('assert');
 const contracts = require('openvibe-contracts');
 const { boot, check, done } = require('./helpers/app');
@@ -18,45 +18,37 @@ const { boot, check, done } = require('./helpers/app');
         action, owned: { kind: 'bot.robot', id: robot.id }, owner: { type: 'user', id: alice.subject },
         on_behalf_of: { type: 'user', id: alice.subject }, idempotency_key: `idem_robot_${++n}_${Date.now()}`, ...over,
     });
-    const latched = async () => (await t.db.query('SELECT estop_latched FROM robots WHERE id = $1', [robot.id])).rows[0].estop_latched;
     const valid = (body) => assert.ok(contracts.resources.checkControlResult(body).valid, JSON.stringify(contracts.resources.checkControlResult(body).errors));
 
-    await check('stop latches the e-stop; a repeat answers the first result; stop again changes nothing', async () => {
+    await check('stop sends a Stop and answers the first result for a repeated key; nothing is latched', async () => {
         const first = req('stop');
         let r = await send(first);
         assert.strictEqual(r.status, 200, r.text);
         valid(r.json);
-        assert.deepStrictEqual([r.json.state, r.json.result, r.json.resource], ['done', { estop: true, changed: true }, undefined]);
-        assert.strictEqual(await latched(), true);
+        assert.deepStrictEqual([r.json.state, r.json.result.stop, r.json.resource], ['done', true, undefined]);
+        assert.strictEqual(r.json.result.changed, false, 'no device is online to take the Stop');
         const again = await send(first);
         assert.deepStrictEqual(again.json, r.json, 'the same key answers the first result');
         r = await send({ ...first, dry_run: true });
         assert.deepStrictEqual([r.status, r.json.code], [409, 'control.idempotency_conflict'], 'the key reused with another request');
-        r = await send(req('stop'));
-        assert.deepStrictEqual(r.json.result, { estop: true, changed: false });
-        const events = (await t.db.query("SELECT envelope FROM bot_event_outbox WHERE envelope->>'event_type' = 'bot.estop.set' AND envelope->'subject'->>'id' = $1", [robot.id])).rows;
-        assert.strictEqual(events.length, 1, 'bot.estop.set is announced once');
+        r = await send(req('stop', { dry_run: true }));
+        assert.deepStrictEqual([r.json.state, r.json.result.would], ['done', 'send the robot a Stop']);
+        const events = (await t.db.query("SELECT envelope FROM bot_event_outbox WHERE envelope->>'event_type' LIKE 'bot.estop.%' AND envelope->'subject'->>'id' = $1", [robot.id])).rows;
+        assert.strictEqual(events.length, 0, 'no latch event is announced');
     });
 
-    await check('resume clears it (dry run first); an agent\'s resume needs the owner\'s confirmation', async () => {
+    await check('resume has nothing to clear; an agent may stop too', async () => {
         let r = await send(req('resume', { dry_run: true }));
-        assert.deepStrictEqual([r.json.state, r.json.result.dry_run], ['done', true]);
-        assert.strictEqual(await latched(), true, 'a dry run applies nothing');
+        assert.deepStrictEqual([r.json.state, r.json.result.stop], ['done', false]);
         r = await send(req('resume', { on_behalf_of: { type: 'agent', id: 'agt_01J8ZQ4Y7N3M2K1H0G9F8E7D6C' } }));
-        assert.deepStrictEqual([r.json.state, r.json.problem.code], ['refused', 'control.confirmation_needed']);
-        assert.strictEqual(await latched(), true);
-        r = await send(req('resume'));
-        assert.deepStrictEqual([r.json.state, r.json.result], ['done', { estop: false, changed: true }]);
-        assert.strictEqual(await latched(), false);
+        assert.deepStrictEqual([r.json.state, r.json.result], ['done', { stop: false, changed: false }], 'a resume is a calm no-op');
         r = await send(req('stop', { on_behalf_of: { type: 'agent', id: 'agt_01J8ZQ4Y7N3M2K1H0G9F8E7D6C' } }));
-        assert.deepStrictEqual(r.json.result, { estop: true, changed: true }, 'an agent may always stop it');
-        await send(req('resume'));
+        assert.deepStrictEqual(r.json.result.stop, true, 'an agent may always stop it');
     });
 
     await check('only the owner Bot holds; unknown kinds and actions are refused', async () => {
         let r = await send(req('stop', { owner: { type: 'user', id: bob.subject }, on_behalf_of: { type: 'user', id: bob.subject } }));
         assert.deepStrictEqual([r.json.state, r.json.problem.code], ['refused', 'resources.unknown_resource'], 'another person\'s robot is not confirmed to exist');
-        assert.strictEqual(await latched(), false);
         r = await send(req('stop', { on_behalf_of: { type: 'user', id: bob.subject } }));
         assert.deepStrictEqual([r.status, r.json.code], [400, 'control.bad_request'], 'a person acts only on what they own');
         r = await send(req('delete'));
@@ -74,7 +66,6 @@ const { boot, check, done } = require('./helpers/app');
         assert.strictEqual(r.status, 403, 'a person\'s own token is not a first-party service');
         r = await send(req('stop'), { token: null });
         assert.strictEqual(r.status, 401);
-        assert.strictEqual(await latched(), false);
     });
 
     await done(t);
