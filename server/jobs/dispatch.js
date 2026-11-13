@@ -37,7 +37,27 @@ function advertisedClasses(capabilities) {
     return worker && Array.isArray(worker.runtime_classes) ? worker.runtime_classes.filter((c) => typeof c === 'string') : [];
 }
 const canonical = (v) => JSON.stringify(v, (k, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((key) => [key, x[key]])) : x));
-const liveDevice = (db, id) => db.maybe('SELECT id, capabilities, robot_ids, owner_subject FROM devices WHERE id = $1 AND revoked_at IS NULL', [id]);
+const liveDevice = (db, id) => db.maybe('SELECT id, capabilities, robot_ids, owner_subject, agent_version FROM devices WHERE id = $1 AND revoked_at IS NULL', [id]);
+// A skill job runs code the person (or a model) wrote, inside the job's own directory: the skill can read every
+// file there. OpenVibe.Link v0.56.0 is the first Link whose job sandbox keeps the owner's sign-in files out of
+// that directory, so an older Link cannot run a skill job: its plan logins would sit where the skill can read
+// them. Link has no auto-update, so the refusal has to happen here, where the machine's Link version is known.
+const SKILL_RUNNER_ARTIFACT = 'openvibe-skill-runner';
+const MIN_SKILL_LINK = '0.56.0';
+const UPDATE_LINK = 'Update Link to run skills';
+/** "0.56.0" or "v0.56.0" -> [0, 56, 0]; anything else (a dev build, a phone) -> null. */
+function versionOf(value) {
+    const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(String(value == null ? '' : value).trim());
+    return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+/** Does this Link carry the guarantee? A version that cannot be read proves nothing, so it does not. */
+function linkCarriesGuarantee(value, min = MIN_SKILL_LINK) {
+    const a = versionOf(value);
+    const b = versionOf(min);
+    if (!a || !b) return false;
+    for (let i = 0; i < 3; i += 1) { if (a[i] !== b[i]) return a[i] > b[i]; }
+    return true;
+}
 /** Whose machine it is: a worker machine's owner, else its robot's owner (every device here is a person's own). */
 async function ownerOfDevice(db, device) {
     if (device.owner_subject) return device.owner_subject;
@@ -66,6 +86,11 @@ async function dispatch(db, nodeId, job, { link, project = null, subject = null,
     const owner = await ownerOfDevice(db, device);
     const person = typeof subject === 'string' && /^user:usr_/.test(subject) ? subject.slice('user:'.length) : null;
     if (!owner || person !== owner) fail(403, 'bot.not_owner', "a person's machine runs only that person's own jobs");
+    // A skill job needs the Link's isolated job sandbox (v0.56.0 and later). An older Link, or one whose version
+    // was never read, cannot have it: the job is refused here, with the words the person needs.
+    if (String(job.artifact && job.artifact.name) === SKILL_RUNNER_ARTIFACT && !linkCarriesGuarantee(device.agent_version)) {
+        fail(409, 'bot.link_too_old', UPDATE_LINK);
+    }
     const { row, created } = await store.put(db, { job, nodeId, project, subject, provider, at: now() });
     if (!created && (row.node_id !== nodeId || canonical(row.job) !== canonical(job)
         || row.project_id !== project || row.subject !== subject || row.provider !== provider)) {
@@ -226,4 +251,4 @@ function createJobFrames({ db: getDb, usage = null, log = console, now = () => D
     return { onAck, onConnect, onFrame, stdout };
 }
 
-module.exports = { dispatch, cancel, createJobFrames, advertisedClasses };
+module.exports = { dispatch, cancel, createJobFrames, advertisedClasses, linkCarriesGuarantee, versionOf, MIN_SKILL_LINK, SKILL_RUNNER_ARTIFACT, UPDATE_LINK };
