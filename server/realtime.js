@@ -109,6 +109,21 @@ function computerSummary(kind, value) {
     return { max_width: value.max_width || null, ...where };
 }
 
+/**
+ * What metering keeps of an `ai` command before its answer: the requested model (without the router's community/
+ * prefix), whether this was a community request, and the caller's task when it named one. The server that runs it
+ * (Ollama, LM Studio, llama.cpp) is only known from the answer, so it is filled in when the ack arrives.
+ */
+function aiMeterMeta(value) {
+    const wanted = typeof value.model === 'string' ? value.model : '';
+    const community = wanted.startsWith('community/');
+    return {
+        model: (community ? wanted.slice('community/'.length) : wanted) || 'unknown',
+        community,
+        ...(typeof value.task === 'string' && value.task ? { task: value.task.slice(0, 200) } : {}),
+    };
+}
+
 function parseCookies(header) {
     const out = {};
     for (const part of String(header || '').split(';')) {
@@ -147,7 +162,7 @@ function simView(sim) {
 /** How long a restart waits for every client's close in reply to its 1012 before it drops the rest (11-12). */
 const CLOSE_HANDSHAKE_MS = 600;
 
-function createRealtime({ config, keys, userAuth, log = console, now = () => Date.now(), networkSend = null }) {
+function createRealtime({ config, keys, userAuth, log = console, now = () => Date.now(), networkSend = null, meter = null }) {
     let domain = null;
     const tickets = createControlTickets({ now });   // the embedded panel's Drive (server/control-tickets.js)
     const deviceConns = new Map();     // device_id → conn
@@ -715,6 +730,42 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         for (const robotId of deviceRobotIds(conn.device)) broadcast(robotId);
     }
 
+    /**
+     * One ai command's answer is one call that did not go through OpenVibe.AI: a local model on the person's machine.
+     * It goes to AI's meter after the answer is in hand (never awaited, never fatal), with the plugin's usage, model
+     * and server. A nack is the call failing with its fault as the error class.
+     */
+    function meterAiCommand(p, result, msg) {
+        if (!meter || !meter.enabled || !p.ai) return;
+        // OpenVibe.AI sends most ai commands (a person's own machine as their model, the community offers): those are
+        // AI's runs, and AI records each one itself. Only a call nobody else records (a person's own, an agent's) is Bot's.
+        const caller = p.conn && p.conn.principal;
+        if (caller && caller.kind === 'service' && caller.sub === 'svc:ai') return;
+        try {
+            const data = result === 'ack' && msg.data && typeof msg.data === 'object' && !Array.isArray(msg.data) ? msg.data : {};
+            const usage = data.usage && typeof data.usage === 'object' ? data.usage : null;
+            const server = typeof data.server === 'string' && data.server.trim() ? data.server.trim().slice(0, 120) : null;
+            // Ollama's native usage already names its server; an ack that carries neither is a local model with none.
+            const provider = server || (usage && usage.eval_count != null ? 'ollama' : 'local');
+            const started = p.at;
+            let first = true;
+            const call = meter.startCall({
+                system: 'node', run_id: p.opId, provider, model: String(data.model || p.ai.model || 'unknown').slice(0, 200),
+                operation: 'chat', place: p.ai.community ? 'community' : 'machine',
+                ...(p.ai.task ? { task: p.ai.task } : {}),
+                // startCall's clock begins when the command left Bot, so latency is the machine's whole answer.
+                now: () => { if (first) { first = false; return started; } return now(); },
+            });
+            meter.record(call.end({
+                usage,
+                outcome: result === 'ack' ? 'succeeded' : 'failed',
+                ...(result === 'nack' && msg.fault_code ? { error_class: String(msg.fault_code) } : {}),
+            }));
+        } catch (e) {
+            log.warn(`[Bot] ai meter: ${e.message}`);
+        }
+    }
+
     async function onAck(conn, msg) {
         const id = String(msg.id || '');
         if (id.startsWith('job_')) return jobs.frames.onAck(jobLink(conn), msg);   // a job's ack/nack, never a command's
@@ -735,6 +786,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         cacheResult(p.key, { result, reason: msg.fault_code || null, ...(p.kind === 'headlight' && data ? { data } : {}) });
         await domain.audit.record({ robotId: p.robotId, deviceId: p.deviceId, subject: p.subject, operatorKind: p.operatorKind, role: p.role, kind: p.kind, value: p.value, result, reason: msg.fault_code || null, latencyMs: latency });
         const message = (p.computer || p.kind === 'headlight') && result === 'nack' && typeof msg.message === 'string' ? msg.message.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 300) : null;
+        meterAiCommand(p, result, msg);
         sendFrame(p.conn, 'command_result', { id: p.opId, result, reason: message || msg.fault_code || null, latency_ms: latency, ...(data ? { data } : {}) });
     }
 
@@ -1094,7 +1146,8 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             const deadlineMs = now() + windowMs;
             const frame = { v: 1, type: 'command', seq: nextSeq(device), ts: now(), id: deviceCmdId, ref: id, kind, value, deadline_ms: deadlineMs, operator: { subject, role: 'owner' } };
             if (!send(device.ws, frame)) return refuse('bot.device_offline', 'the machine is offline', summary);
-            const p = { id: deviceCmdId, opId: id, key, deviceId, conn, robotId: deviceId, subject, operatorKind: conn.principal.kind, role: 'owner', kind, value: summary, at: now(), timer: null, computer: true };
+            const ai = kind === 'ai' ? aiMeterMeta(value) : null;
+            const p = { id: deviceCmdId, opId: id, key, deviceId, conn, robotId: deviceId, subject, operatorKind: conn.principal.kind, role: 'owner', kind, value: summary, at: now(), timer: null, computer: true, ...(ai ? { ai } : {}) };
             pendingCmds.set(deviceCmdId, p);
             inflight.set(key, deviceCmdId);
             p.timer = setTimeout(() => expireCommand(deviceCmdId), windowMs + 1500);

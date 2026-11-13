@@ -29,6 +29,7 @@ const { createOfferPublisher } = require('./jobs/offers');
 const { createOpenRe } = require('./openre/client');
 const { createBotOutbox } = require('./events/outbox');
 const { createUsageRelay } = require('./jobs/metering');
+const { createAiMeter } = require('./ai-meter');
 const { createDomain } = require('./domain');
 const accountDataLib = require('./account-data');
 const { createNetworkSender } = require('openvibe-sdk/account-data');
@@ -70,7 +71,9 @@ function createApp(opts = {}) {
     const networkSend = opts.networkSend || (config.oauth.clientSecret
         ? createNetworkSender({ networkInternalUrl: config.network.internalUrl, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret, fetch: fetchImpl })
         : null);
-    const hub = opts.hub || createRealtime({ config, keys, userAuth, log, now, networkSend });
+    // The models on people's machines, into OpenVibe.AI's meter (server/ai-meter.js): off without OV_AI_INTERNAL_URL.
+    const meter = opts.meter !== undefined ? opts.meter : createAiMeter({ config, fetchImpl, log });
+    const hub = opts.hub || createRealtime({ config, keys, userAuth, log, now, networkSend, meter });
     const nodes = opts.nodes || createNodePrincipals(config, { fetchImpl });
     const identity = opts.identity || createIdentity(config, { fetchImpl });
     const openre = opts.openre !== undefined ? opts.openre : createOpenRe(config, { fetchImpl });
@@ -274,7 +277,7 @@ function createApp(opts = {}) {
         return res.status(500).type('text/plain').send('Something went wrong\n');
     });
 
-    Object.assign(app.locals, { config, db, valkey, domain, keys, outbox, usage, hub, jobs, offers, sim, onvif, userAuth, metrics, submissions, routines, webhooks, claims, setupKeys });
+    Object.assign(app.locals, { config, db, valkey, domain, keys, outbox, usage, meter, hub, jobs, offers, sim, onvif, userAuth, metrics, submissions, routines, webhooks, claims, setupKeys });
     return app;
 }
 

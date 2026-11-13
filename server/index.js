@@ -34,7 +34,7 @@ async function main() {
     const valkey = createValkey({ url: config.valkey.url, prefix: config.valkey.prefix });
 
     const app = createApp({ config, db, valkey, registry });
-    const { domain, keys, outbox, usage, hub, offers, sim, onvif, routines, webhooks, claims, setupKeys } = app.locals;
+    const { domain, keys, outbox, usage, meter, hub, offers, sim, onvif, routines, webhooks, claims, setupKeys } = app.locals;
     keys.start().catch(() => { /* logged by the JWKS client */ });
 
     const timers = [];
@@ -59,7 +59,7 @@ async function main() {
     const socketActivated = process.env.LISTEN_FDS === '1' && Number(process.env.LISTEN_PID) === process.pid;
     const server = app.listen(...(socketActivated ? [{ fd: 3 }] : [config.port, config.host]), () => {
         console.log(`[Bot] ${config.nodeEnv} on http://${config.host}:${config.port} → ${config.baseUrl} (store ${db.store}; valkey ${valkey ? 'on' : 'off: per process'})`);
-        console.log(`[Bot] profiles from server/profiles; events relay ${outbox.enabled ? `→ ${config.events.url}` : 'off (outbox accumulates)'}; usage relay ${usage.enabled ? `→ ${config.billing.url}` : 'off (readings wait)'}; heartbeat ${config.device.heartbeatMs} ms, offline after ${config.device.heartbeatMs * config.device.offlineMisses + config.device.offlineGraceMs} ms`);
+        console.log(`[Bot] profiles from server/profiles; events relay ${outbox.enabled ? `→ ${config.events.url}` : 'off (outbox accumulates)'}; usage relay ${usage.enabled ? `→ ${config.billing.url}` : 'off (readings wait)'}; ai meter ${meter.enabled ? `→ ${config.ai.internalUrl}` : 'off'}; heartbeat ${config.device.heartbeatMs} ms, offline after ${config.device.heartbeatMs * config.device.offlineMisses + config.device.offlineGraceMs} ms`);
     });
     server.keepAliveTimeout = 65_000;
     // Request telemetry (openvibe-sdk/service, plan T1): one aggregated sample per route template, method and status
@@ -105,6 +105,7 @@ async function main() {
             () => hub.close().catch(() => {}),
             () => outbox.stop(),
             () => usage.stop(),
+            () => meter.close().catch(() => {}),
             () => { if (subscriptions) subscriptions.stop(); },
         ],
         close: [
