@@ -112,12 +112,12 @@ ${kit.pageHead({ title: `Write a driver`, icon: 'code', back: { href: '/', label
 
 <section class="card"><h2>Messages</h2>
 <p>Every message is one JSON object on one line with an <code>op</code> field. Command <code>value</code> has already been validated and clamped to the owner's limits by the core, and <code>deadline_ms</code> is relative to receipt and already capped.</p>
-<h3>Core → driver</h3>
+<h3>Core to driver</h3>
 ${message('hello', 'start-up: the driver answers describe; then sets up unless probe', '{ "op": "hello", "config": { "backend": "real" }, "probe": false }')}
 ${message('command', 'act, then answer ack or nack with the same id', '{ "op": "command", "id": "cmd_01J8Z4M2Q0R7T9YV3K6N8P1W2X", "kind": "drive", "value": { "throttle": 0.5, "steer": 0 }, "deadline_ms": 300 }')}
 ${message('heartbeat', 'the core clock; note the time for the deadman', '{ "op": "heartbeat", "t": 1728384000000 }')}
 ${message('stop', 'stop every actuator (idempotent, safe at any time)', '{ "op": "stop" }')}
-<h3>Driver → core</h3>
+<h3>Driver to core</h3>
 ${message('describe', 'the driver names itself and its capabilities, before hardware', '{ "op": "describe", "driver": "my_arm", "version": "0.1.0", "protocol": 1, "capabilities": { "actuator": { "names": ["shoulder", "gripper"] } }, "motion_kinds": ["drive", "actuator"] }')}
 ${message('ready', 'setup finished, every actuator stopped', '{ "op": "ready" }')}
 ${message('fault', 'the driver runs but cannot drive; commands get this code as nack', '{ "op": "fault", "fault_code": "hardware", "message": "gripper not responding" }')}
@@ -185,7 +185,7 @@ def stop():
 def watchdog():
     while True:
         time.sleep(0.1)
-        if time.monotonic() - last > 1.0:   # the deadman: no heartbeat for 1 s → stop
+        if time.monotonic() - last > 1.0:   # the deadman: no heartbeat for 1 s stops it
             stop()
 
 threading.Thread(target=watchdog, daemon=True).start()
@@ -294,11 +294,11 @@ app.post('/robot-events', express.text({ type: 'application/json' }), (req, res)
 
 const ACCOUNT_CALL = `curl https://openvibe.bot/api/v1/me \\
   -H "Authorization: Bearer $OPENVIBE_TOKEN"
-# → {"subject": "usr_…", "username": "alex", "display_name": "Alex"}`;
+# Response: {"subject": "usr_…", "username": "alex", "display_name": "Alex"}`;
 const COMMISSION_CALL = `curl -X POST https://openvibe.bot/api/v1/robots/rob_…/commission \\
   -H "Authorization: Bearer $OPENVIBE_TOKEN" -H "Content-Type: application/json" \\
   -d '{"confirm": true}'
-# → {"robot": {"id": "rob_…", "commissioned": {"at": "…", "by": "usr_…"}, …}}
+# Response: {"robot": {"id": "rob_…", "commissioned": {"at": "…", "by": "usr_…"}, …}}
 # Undo it, back to the profile's defaults at once:
 curl -X POST https://openvibe.bot/api/v1/robots/rob_…/uncommission \\
   -H "Authorization: Bearer $OPENVIBE_TOKEN"`;
@@ -306,7 +306,7 @@ curl -X POST https://openvibe.bot/api/v1/robots/rob_…/uncommission \\
 const STEPS_CALL = `curl -X POST https://openvibe.bot/api/v1/robots/rob_…/steps \\
   -H "Authorization: Bearer $OPENVIBE_TOKEN" -H "Content-Type: application/json" \\
   -d '{"steps": "forward 1\\nleft 0.5\\nheadlights #00ff00\\nstop"}'
-# → {"robot_id": "rob_…", "result": "done", "steps": 4}`;
+# Response: {"robot_id": "rob_…", "result": "done", "steps": 4}`;
 
 function renderAutomationPage({ config }) {
     const content = `
@@ -370,7 +370,7 @@ openvibe-link tray               # the same in your notification area (Linux, Wi
 const COMPUTER_CALL = `curl -X POST https://openvibe.bot/api/v1/machines/dev_…/commands \\
   -H "Authorization: Bearer $OPENVIBE_TOKEN" -H "Content-Type: application/json" \\
   -d '{"kind": "exec", "value": {"argv": ["git", "status", "--short"], "cwd": "/home/you/site"}}'
-# → {"machine_id": "dev_…", "result": "ack", "data": {"exit_code": 0, "stdout": " M index.html\\n", …}}`;
+# Response: {"machine_id": "dev_…", "result": "ack", "data": {"exit_code": 0, "stdout": " M index.html\\n", …}}`;
 
 function renderComputersPage({ config }) {
     const content = `
@@ -444,9 +444,9 @@ ${code(COMPUTER_APPROVE)}
 <p>Your own token reaches your own computers. The answer comes back in <code>data</code>:</p>
 ${code(COMPUTER_CALL)}
 <ul>
-<li><code>exec</code>: <code>argv</code>, <code>cwd</code>, <code>timeout_s</code>, <code>stdin</code> → <code>exit_code</code>, <code>stdout</code>, <code>stderr</code>, <code>truncated</code>, <code>timed_out</code>.</li>
+<li><code>exec</code>: <code>argv</code>, <code>cwd</code>, <code>timeout_s</code>, <code>stdin</code>, and returns <code>exit_code</code>, <code>stdout</code>, <code>stderr</code>, <code>truncated</code>, <code>timed_out</code>.</li>
 <li><code>fs</code>: <code>op</code> list, stat, read (<code>offset</code>, <code>length</code>), write (<code>content_b64</code>, <code>mode</code> create, overwrite or append) or mkdir, and an absolute <code>path</code>.</li>
-<li><code>screen</code>: <code>max_width</code> → a JPEG in <code>content_b64</code>.</li>
+<li><code>screen</code>: <code>max_width</code>, and returns a JPEG in <code>content_b64</code>.</li>
 <li><code>browser</code>: <code>action</code>, which is one of:
 <ul>
 <li><code>open</code> a <code>url</code>;</li>
@@ -458,8 +458,8 @@ ${code(COMPUTER_CALL)}
 The page answers with its URL, title, text and links. The browser is the agent's own, in a profile of its own on your computer; it never sees your browser's sessions. Reading, screenshots and closing run at every level; the rest are approved one by one at ask. Below full, <code>open</code> refuses an address on your own network. The audit keeps the host, the selector, the key and the number of characters filled, never the text.</li>
 <li><code>input</code>: <code>action</code> (<code>move</code>, <code>click</code>, <code>double_click</code>, <code>right_click</code> at <code>x</code>, <code>y</code>; <code>scroll</code> by <code>dy</code>; <code>type</code> a <code>text</code>; <code>key</code> one key or chord such as <code>ctrl+s</code>), with <code>width</code> and <code>height</code> of the screenshot the coordinates come from; the computer scales them to its real screen. It acts, so your level decides: never at observe, approved one by one at ask. xdotool on Linux (X11), cliclick on macOS. The audit keeps the action and the number of characters typed, never the text.</li>
 <li><code>desk</code>: <code>action</code> <code>start</code> (with <code>desk</code> <code>desk-&lt;name&gt;</code>, <code>kind</code> <code>browser</code> or <code>desktop</code>, and a kept <code>profile</code>), <code>stop</code>, <code>status</code> or <code>list</code>. <code>screen</code>, <code>input</code>, <code>browser</code> and <code>exec</code> then take the same <code>desk</code> to act there, never on your own screen; <code>exec</code> also takes <code>detach</code> to leave a program running on a whole desk until the desk stops.</li>
-<li><code>ai</code>: <code>model</code> (one of its models), <code>messages</code> (<code>role</code> and <code>content</code>), <code>max_tokens</code>, <code>temperature</code> → <code>message</code>, <code>usage</code> and <code>ms</code>, from the computer's own model server. <code>POST /api/v1/machines/:id/ai-models</code> with <code>on</code> is the switch above; OpenVibe's own AI uses the models only while it is on.</li>
-<li><code>probe</code>: <code>target</code> (<code>http(s)://…</code> or <code>tcp://host:port</code> on the computer's own network) → the status and body of one GET, or whether the port is open. It is read-only and runs at every level.</li>
+<li><code>ai</code>: <code>model</code> (one of its models), <code>messages</code> (<code>role</code> and <code>content</code>), <code>max_tokens</code>, <code>temperature</code>, and returns <code>message</code>, <code>usage</code> and <code>ms</code>, from the computer's own model server. <code>POST /api/v1/machines/:id/ai-models</code> with <code>on</code> is the switch above; OpenVibe's own AI uses the models only while it is on.</li>
+<li><code>probe</code>: <code>target</code> (<code>http(s)://…</code> or <code>tcp://host:port</code> on the computer's own network), and returns the status and body of one GET, or whether the port is open. It is read-only and runs at every level.</li>
 </ul>
 <p class="muted"><code>GET /api/v1/machines</code> lists your machines with their level, its <code>node_id</code> on Network (<code>lnk_…</code>) and, for a machine running OpenVibe.Codes agents, the <code>fleet</code> its Link last reported (<code>fleet_at</code> says when): each agent's id, whether it is installed and signed in, and each limit window's label, used and limit and when it frees — labels, numbers and times only, never a key, a token or an account name. A machine whose plugin is off answers <code>409 bot.computer_off</code>; a refusal on the computer answers <code>result: "nack"</code> with the reason. The audit keeps the program name or the file and path, never its content.</p></section>
 `;

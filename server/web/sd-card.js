@@ -69,7 +69,7 @@ ${form}
 <li class="sd-step"><h2>Write Raspberry Pi OS to the card</h2>
 <ol class="sd-sub">
 <li>Install ${link('https://www.raspberrypi.com/software/', 'Raspberry Pi Imager')} on your computer (version 2.0 or newer) and put the card in.</li>
-<li><b>Device</b>: your Pi (e.g. Raspberry Pi 4). <b>Operating system</b>: Raspberry Pi OS (other) → <b>Raspberry Pi OS Lite (64-bit)</b>. <b>Storage</b>: your microSD card.</li>
+<li><b>Device</b>: your Pi (e.g. Raspberry Pi 4). <b>Operating system</b>: Raspberry Pi OS (other), then <b>Raspberry Pi OS Lite (64-bit)</b>. <b>Storage</b>: your microSD card.</li>
 <li>When Imager offers to customise the OS, <b>skip it</b> (choose No): your two files do that.</li>
 <li>Write, and wait until Imager says it is done and verified.</li></ol></li>
 <li class="sd-step"><h2>Add your two files to the card</h2>
