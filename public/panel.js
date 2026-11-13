@@ -1062,6 +1062,9 @@
     const hlChoices = headlightEl && $('[data-headlight-choices]', headlightEl);
     const hlUnconfirmed = headlightEl && $('[data-headlight-unconfirmed]', headlightEl);
     const hlBadge = $('[data-headlight-note]');
+    // Over a stream the control is drawn hidden (the embed starts as a watcher); the socket's `joined` frame says whether
+    // this person may use it, and it shows or hides with that.
+    const hlBox = headlightEl && (headlightEl.closest('[data-headlight-wrap]') || headlightEl);
     function hlNotice(text) {
         if (!hlBadge) return;
         hlBadge.textContent = text || '';
@@ -1576,6 +1579,7 @@
         if (m.type === 'joined') {
             joined = true; retry = 0;
             allowed = m.allowed_commands || [];
+            if (hlBox) hlBox.hidden = !allowed.includes('headlight');
             if (m.ticket) ticket = m.ticket;
             const label = $('[data-role-label]');
             myRole = m.role || myRole;
