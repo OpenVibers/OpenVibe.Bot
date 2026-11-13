@@ -138,11 +138,6 @@ Sitemap entries use the release commit time for these code-backed pages.
     `POST /api/v1/machines/:id/ai-models`). OpenVibe.AI sends kind `ai` only, and lists only machines with the switch
     on (for a credential with `machine: "any"`).
   - **The audit** keeps the model and the counts, never the text.
-  - **Metering:** every `ai` answer is one `ai.call-report@1` to OpenVibe.AI (`POST /api/v1/usage/calls`, capability
-    `ai.usage.report`): the plugin's usage (Ollama's counts and decode time, or an OpenAI-compatible server's tokens),
-    its model and server, the place (`machine`, or `community` for the router's `community/` models) and the whole
-    answer's latency. A nack is a failed call with its fault as the error class. Off without `OV_AI_INTERNAL_URL`, and
-    never in the answer's path.
   - **The card** shows the models, their speed and "Use these models in OpenVibe.Chat", which prefills Chat's "Your AI
     key", with `machine=any` when several machines offer models.
 - **The resource index** (`server/api/resource-index.js`) lists a person's robots (`bot.robot`) and then their machines
@@ -160,8 +155,7 @@ Sitemap entries use the release commit time for these code-backed pages.
 - OpenVibe.Network: user and service tokens, node tokens, pairing when the authority is `network`, and identity resolution (a `@username` to a subject, and subjects to names, for the panel's People card).
 - OpenRestream: the WHIP ingest base (`BOT_WHIP_BASE`) devices publish to.
 - OpenVibe.Billing: job usage readings go to `billing.usage.record` (`BOT_BILLING_URL`; Bot mints its own Network service token for audience `openvibe.billing` with `billing.usage.record`, and `BOT_BILLING_TOKEN` overrides it); unset, they wait in `run_usage_outbox`.
-- OpenVibe.AI: the models on people's machines are metered as `ai.call-report@1` (`OV_AI_INTERNAL_URL`; Bot mints its own Network service token for audience `openvibe.ai` with `ai.usage.report`); unset, metering is off.
-- `openvibe-contracts` v0.421.0, `openvibe-sdk` v0.164.0 and `openvibe-shared` v4.229.0 (package.json).
+- `openvibe-contracts` v0.419.0, `openvibe-sdk` v0.161.0 and `openvibe-shared` v4.233.0 (package.json).
 - Account export and deletion (ADR-033): Network grants `events.subscription.manage` (openvibe.events) for the two
   subscriptions created at boot, then, last and once the release is live, `network.account.export.contribute` and
   `network.account.deletion.confirm` (openvibe.network).
@@ -253,5 +247,5 @@ OpenVibe.Sites no longer generates `deploy/nginx/openvibe.bot.conf` (sites.json 
 <!-- versions:start -->
 - openvibe-contracts: v0.421.0
 - openvibe-sdk: v0.164.0
-- openvibe-shared: v4.229.0
+- openvibe-shared: v4.233.0
 <!-- versions:end -->
