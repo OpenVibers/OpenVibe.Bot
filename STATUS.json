@@ -7,11 +7,11 @@
   "domain": "openvibe.bot (www -> apex; /device and /control WebSockets; /install)",
   "contracts": "openvibe-contracts v0.421.0",
   "sdk": "openvibe-sdk v0.164.0",
-  "shared": "openvibe-shared v4.233.0",
+  "shared": "openvibe-shared v4.234.0",
   "packages": [
     "openvibe-contracts v0.421.0",
     "openvibe-sdk v0.164.0",
-    "openvibe-shared v4.233.0"
+    "openvibe-shared v4.234.0"
   ],
   "capabilities": [
     "bot.robot.read",
