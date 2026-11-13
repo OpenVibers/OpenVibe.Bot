@@ -115,6 +115,20 @@ async function startAi() {
             assert.deepStrictEqual([call.input, call.output], [0, 0], 'no usage: zero tokens, never null');
         });
 
+        await check('a command OpenVibe.AI sends is AI\'s run: AI records it, Bot never reports it again', async () => {
+            const on = await t.call('POST', `/api/v1/machines/${gpu.deviceId}/ai-models`, { user: alex, body: { on: true } });
+            assert.strictEqual(on.status, 200, on.text);
+            gpu.setAnswer((m, c, send) => c.send(send('ack', {
+                id: m.id, data: { model: 'llama3.1:8b', server: 'ollama', message: { role: 'assistant', content: 'hi' }, usage: { prompt_eval_count: 3, eval_count: 2, eval_duration: 1e9 } },
+            })));
+            const before = ai.requests.length;
+            const asAi = { token: t.network.signService({ sub: 'svc:ai', cap: ['bot.machine.ai'] }), headers: { 'X-OV-Subject': alex.subject } };
+            const r = await t.call('POST', `/api/v1/machines/${gpu.deviceId}/commands`, { ...asAi, body: { id: 'cmd_from_ai_1', kind: 'ai', value: { model: 'llama3.1:8b', messages: [{ role: 'user', content: 'hi' }] } } });
+            assert.strictEqual(r.json.result, 'ack', r.text);
+            await t.app.locals.meter.flush();
+            assert.strictEqual(ai.requests.length, before, 'no report: AI publishes its own ai.call.recorded@1 for this run');
+        });
+
         gpu.c.close();
         await t.close();
         t = null;

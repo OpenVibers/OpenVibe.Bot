@@ -737,6 +737,10 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
      */
     function meterAiCommand(p, result, msg) {
         if (!meter || !meter.enabled || !p.ai) return;
+        // OpenVibe.AI sends most ai commands (a person's own machine as their model, the community offers): those are
+        // AI's runs, and AI records each one itself. Only a call nobody else records (a person's own, an agent's) is Bot's.
+        const caller = p.conn && p.conn.principal;
+        if (caller && caller.kind === 'service' && caller.sub === 'svc:ai') return;
         try {
             const data = result === 'ack' && msg.data && typeof msg.data === 'object' && !Array.isArray(msg.data) ? msg.data : {};
             const usage = data.usage && typeof data.usage === 'object' ? data.usage : null;
