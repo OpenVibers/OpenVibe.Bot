@@ -7,11 +7,11 @@
   "domain": "openvibe.bot (www -> apex; /device and /control WebSockets; /install)",
   "contracts": "openvibe-contracts v0.419.0",
   "sdk": "openvibe-sdk v0.161.0",
-  "shared": "openvibe-shared v4.231.0",
+  "shared": "openvibe-shared v4.232.0",
   "packages": [
     "openvibe-contracts v0.419.0",
     "openvibe-sdk v0.161.0",
-    "openvibe-shared v4.231.0"
+    "openvibe-shared v4.232.0"
   ],
   "capabilities": [
     "bot.robot.read",
@@ -66,5 +66,5 @@
     "watch links to a desk (plan L55): POST /api/v1/machines/:id/watch-links gives the owner's agent (svc:actor, bot.machine.watch_link) a link that shows the desk the agent works on, live, inside a chat (https://openvibe.bot/screen/<token>, no sign-in, framable on openvibe.chat and openvibe.actor); the machine is the one the named person owns, the link lives 5 to 240 minutes, and it carries the mouse and keyboard only when asked for",
     "make your own controls (stage 2): the panel's bot.controls and the overlay's bot.overlay are ui.surface@1 catalogs built from the robot's profile, each person's ui.layout@1 comes from OpenVibe.Network and is drawn server-side before first paint, Arrange (openvibe-shared/ov-arrange.js, loaded only on press) moves, resizes, styles and hides parts with live openvibe-sdk/ui-layout validation, Undo/Reset/Save/Share and an Ask OpenVibe suggestion previewed before it is kept; Stop is one optional part (off by default) and robot commands are untouched"
   ],
-  "updated": "2026-11-12"
+  "updated": "2026-11-13"
 }
