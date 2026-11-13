@@ -140,6 +140,7 @@ function controlsCatalog(profile) {
 
 /** The overlay's catalog: the stick, the slider, the more button, the pill and an optional Stop (plus Drive for a watcher). */
 function overlayCatalog(profile, { slider = null, hasStick = false, canDrive = false } = {}) {
+    const hasLights = !!(profile && profile.mapping && Array.isArray(profile.mapping.actions) && profile.mapping.actions.includes('headlight'));
     const parts = [
         basePart('pill', 'The robot', 'readout', { pressed: false, min: { w: 1, h: 1 }, styles: { tints: ['surface'], shapes: ['pill'], opacity: { min: 0.4, max: 1 }, label: true }, bindings: { keys: [], gamepad: [] } }),
         basePart('more', 'More', 'button', { pressed: true, min: { w: 1, h: 1 }, styles: { tints: ['surface'], shapes: ['round'], opacity: { min: 0.4, max: 1 }, label: false }, bindings: { keys: [], gamepad: [] } }),
@@ -158,6 +159,12 @@ function overlayCatalog(profile, { slider = null, hasStick = false, canDrive = f
         pressed: true, min: { w: 2, h: 1 }, never_covers: ['stop'],
         styles: { tints: ['surface', 'accent'], shapes: ['pill'], opacity: { min: 0.4, max: 1 }, label: true },
         bindings: { keys: [], gamepad: [] },
+    }));
+    // The headlights over the stream (LOOI's custom action), a round button the owner and Operators see after Drive.
+    if (hasLights) parts.push(basePart('headlight', 'Headlights', 'button', {
+        pressed: true, min: { w: 1, h: 1, px: 44 }, never_covers: ['stop', 'pill'],
+        styles: { tints: ['surface', 'accent'], shapes: ['round'], opacity: { min: 0.4, max: 1 }, label: false },
+        bindings: { keys: ['KeyL'], gamepad: ['north'] },
     }));
     if (canDrive) parts.push(basePart('drive', 'Drive', 'button', { pressed: true, min: { w: 2, h: 1 }, styles: { tints: ['accent'], shapes: ['pill'], opacity: { min: 0.4, max: 1 }, label: true }, bindings: { keys: [], gamepad: [] } }));
     return {
@@ -240,6 +247,7 @@ function overlayDefaultLayout(catalog, device = 'computer') {
         dockedOf('stick', 'left', 1, 2, 2),
         dockedOf('slider', 'bottom', 0, 2, 1),
         dockedOf('more', 'right', 0, 1, 1),
+        dockedOf('headlight', 'right', 1, 1, 1),
         dockedOf('drive', 'right', 0, 2, 1),
     ].filter(Boolean);
     return { surface: catalog.id, surface_version: catalog.version, device, name: 'Default', author: { name: 'OpenVibe' }, sharing: 'private', parts };

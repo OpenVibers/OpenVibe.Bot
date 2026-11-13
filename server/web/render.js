@@ -180,8 +180,8 @@ const headlightAction = (profile) => profileActions(profile).includes('headlight
  * unconfirmed note, and the two explicit choices when the commanded state is unknown. public/panel.js sends
  * {"kind":"headlight","value":{"on":true|false}}; this markup carries no state from the browser.
  */
-function headlightControl() {
-    return `<div class="control headlight" data-headlight>`
+function headlightControl(hidden = false) {
+    return `<div class="control headlight" data-headlight${hidden ? ' hidden' : ''}>`
         + `<button type="button" class="headlight-toggle" data-headlight-toggle aria-expanded="false">${icon('sun')}<span class="control-name">Headlights</span> <span class="headlight-state" data-headlight-state>Unknown</span></button>`
         + `<span class="headlight-unconfirmed" data-headlight-unconfirmed>Not confirmed on the robot</span>`
         + `<span class="headlight-choices" data-headlight-choices hidden><button type="button" data-headlight-on>Turn on</button> <button type="button" data-headlight-off>Turn off</button></span>`
@@ -266,7 +266,7 @@ function cameraTiles(w, profile, signaling_url = null, pointEnabled = false) {
     }).join('');
 }
 
-function renderWidget(w, { profile = {}, allowed_commands = [], signaling_url = null, part = null, partAttrs = {}, flatten = false } = {}) {
+function renderWidget(w, { profile = {}, allowed_commands = [], signaling_url = null, part = null, partAttrs = {}, flatten = false, embed = false } = {}) {
     const commands = profile.commands || {};
     const kind = w.command ? w.command.kind : null;
     const enabled = !!kind && allowed_commands.includes(kind);
@@ -300,7 +300,12 @@ function renderWidget(w, { profile = {}, allowed_commands = [], signaling_url = 
             const parts = (w.command && w.command.names ? w.command.names : []).filter((n) => names[n]).map((n) => actuatorControl(n, names[n], enabled, profile.id));
             // A profile may declare a custom side action in its open mapping (LOOI's headlight). It sits beside the
             // head slider, only for someone the gate allows; with no permission it is not drawn at all, not disabled.
+            // The embed under a stream starts as an anonymous watcher and becomes the owner's or an Operator's controls
+            // once a Drive ticket joins it (Maticus, 2026-11-13: "headlights work but the controls don't show up anywhere
+            // but in the main .bot panel"), so there it is drawn hidden and public/panel.js shows it when the socket's
+            // `joined` frame allows it.
             if (w.type === 'head' && headlightAction(profile) && allowed_commands.includes('headlight')) parts.push(headlightControl());
+            else if (w.type === 'head' && headlightAction(profile) && embed) parts.push(headlightControl(true));
             inner = `<div class="controls">${parts.join('')}</div>`;
             break;
         }
@@ -803,10 +808,15 @@ function renderBotSurface({ robot, profile, role, allowed_commands = [], holdRes
         ? `<div class="bot-slider bot-control" data-bot-hit data-ov-part="slider" ${attrs('slider')}><section class="widget bot-widget" data-command="${data(slider.widget.command)}"><label class="control bot-range-label"><span class="sr-only">${sliderLabel}</span>${numberRange(slider.name, slider.actuator, slider.enabled, profile.id)}</label></section></div>`
         : '';
     const stickMarkup = stick ? `<div class="bot-stick bot-control" data-bot-hit data-ov-part="stick" ${attrs('stick')}>${stick}</div>` : '';
+    // The headlights over the stream: a round sun beside the controls, hidden until the socket allows them (owner and
+    // Operators, after Drive). The same markup and behaviour as the full panel's (public/panel.js).
+    const lightMarkup = headlightAction(profile)
+        ? `<div class="bot-headlight bot-control" data-headlight-wrap data-bot-hit data-ov-part="headlight" ${attrs('headlight')}${allowed_commands.includes('headlight') ? '' : ' hidden'}>${headlightControl()}</div>`
+        : '';
     const surfaceAttrs = arrange ? surface.overlaySurfaceAttrs(arrange.catalog, arrange.layout, arrange.device, arrangeApply && view !== 'compact') : '';
     const body = view === 'compact'
-        ? `<div class="bot-compact" data-bot-compact${slider ? '' : ' data-no-slider'} ${surfaceAttrs}>${botPill(robot, attrs('pill'))}${stickMarkup}${sliderMarkup}${stop}${botMore(attrs('more'))}${botNotice}</div>`
-        : `<div class="bot-overlay" data-bot-overlay ${surfaceAttrs}>${botPill(robot, attrs('pill'))}${stickMarkup}${sliderMarkup}${stop}${botMore(attrs('more'))}${botNotice}</div>`;
+        ? `<div class="bot-compact" data-bot-compact${slider ? '' : ' data-no-slider'} ${surfaceAttrs}>${botPill(robot, attrs('pill'))}${stickMarkup}${sliderMarkup}${lightMarkup}${stop}${botMore(attrs('more'))}${botNotice}</div>`
+        : `<div class="bot-overlay" data-bot-overlay ${surfaceAttrs}>${botPill(robot, attrs('pill'))}${stickMarkup}${sliderMarkup}${lightMarkup}${stop}${botMore(attrs('more'))}${botNotice}</div>`;
     const dataScript = arrange ? `<script type="application/json" id="ov-arrange-data">${JSON.stringify({ catalog: arrange.catalog, layout: arrange.layout, device: arrange.device, surface: arrange.catalog.id, signedIn: arrange.signedIn, layoutSource: arrange.layoutSource || 'default', save: arrange.save || null, suggest: arrange.suggest || null, share: arrange.share || null, reset: arrange.reset || null, author: arrange.author || null, defaultLayout: arrange.defaultLayout || null }).replace(/</g, '\\u003c')}</script>` : '';
     return `<main id="panel" class="bot-surface" tabindex="0" data-robot-id="${esc(robot.id)}" data-role="${esc(role)}" data-hold-ms="${esc(holdResendMs)}" data-allowed="${data(allowed_commands)}" data-bot-view="${esc(view)}"${parentOrigins.length ? ` data-parent-origins="${esc(parentOrigins.join(' '))}"` : ''}>${body}${dataScript}</main>`;
 }
@@ -839,7 +849,7 @@ function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs
     const widgetParts = (i) => byWidget.get(i) || [];
     const arrangeApply = !!(arrange && arrange.layoutSource === 'account');
     const attrsOf = (ids) => Object.fromEntries(ids.map((id) => [id, arrange ? require('./surface').attrsFor(arrange.catalog, arrange.layout, arrange.device, id, { apply: arrangeApply }) : '']));
-    const widgets = widgetOrder.map(({ w, i }) => renderWidget(w, { profile, allowed_commands, signaling_url, part: widgetParts(i)[0] || null, partAttrs: attrsOf(widgetParts(i)), flatten: arrangeApply }));
+    const widgets = widgetOrder.map(({ w, i }) => renderWidget(w, { profile, allowed_commands, signaling_url, embed, part: widgetParts(i)[0] || null, partAttrs: attrsOf(widgetParts(i)), flatten: arrangeApply }));
     // Stop is one ordinary part of bot.controls, off by default: it appears only when a layout adds it.
     if (arrange && require('./surface').partOf(arrange.catalog, 'stop')) {
         // The default layout places Stop hidden (off), so apply its attributes even when the page keeps its own look.

@@ -133,8 +133,14 @@ require('../server/realtime');
         assert.strictEqual(vr.code, 'bot.read_only');
         const viewerHtml = await (await get(`/panel/${robot.id}`, carol)).text();
         assert.ok(!viewerHtml.includes('data-headlight'));
+        // The embed under a stream starts as a watcher and may become the owner's controls after Drive (a ticket), so
+        // it carries the control drawn hidden, and only the socket's `joined` frame shows it (public/panel.js).
         const anon = await (await get(`/panel/${robot.id}/embed`)).text();
-        assert.ok(anon.includes('data-role="watcher"') && !anon.includes('data-headlight'));
+        assert.ok(anon.includes('data-role="watcher"') && anon.includes('data-headlight hidden'), 'the embed panel: drawn hidden');
+        const over = await (await get(`/panel/${robot.id}/embed?mode=overlay`)).text();
+        assert.ok(/data-headlight-wrap[^>]*hidden/.test(over) && over.includes('data-ov-part="headlight"'), 'over the stream: the sun, hidden until allowed');
+        const js = require('fs').readFileSync(require('path').join(__dirname, '../public/panel.js'), 'utf8');
+        assert.ok(/hlBox\.hidden = !allowed\.includes\('headlight'\)/.test(js), 'the joined frame shows or hides it');
         // An anonymous caller has no subject: the command route refuses before any command reaches the gate.
         const anonCmd = await t.call('POST', `/api/v1/robots/${robot.id}/commands`, { token: null, body: { id: 'a-hl', kind: 'headlight', value: { on: true } } });
         assert.strictEqual(anonCmd.status, 401);

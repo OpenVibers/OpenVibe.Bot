@@ -24,7 +24,8 @@ assert.ok(ids(roverCat).includes('telemetry.2'), 'a second widget of one type ge
 assert.deepEqual(validate(roverCat, surface.defaultLayout(roverCat, 'phone')), { ok: true, reasons: [] });
 
 const overlay = surface.overlayCatalog(looi, { slider: { name: 'head' }, hasStick: true, canDrive: true });
-assert.deepEqual(ids(overlay), ['pill', 'more', 'stop', 'stick', 'slider', 'drive']);
+// LOOI declares headlights (its open mapping's actions): over a stream they are a part of their own (2026-11-13).
+assert.deepEqual(ids(overlay), ['pill', 'more', 'stop', 'stick', 'slider', 'headlight', 'drive']);
 assert.equal(overlay.parts.find((p) => p.id === 'stop').required, false, 'the overlay Stop is optional');
 assert.deepEqual(validate(overlay, surface.overlayDefaultLayout(overlay, 'phone')), { ok: true, reasons: [] }, 'the overlay default is valid');
 
