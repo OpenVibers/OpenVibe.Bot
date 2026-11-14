@@ -915,3 +915,54 @@ html[data-ov-motion="off"] .bot-surface .bot-headlight .headlight[data-state="pe
 .bot-surface .bot-headlight .headlight-choices [data-headlight-on] { color: #1a1300; background: var(--warn, #f59e0b); }
 .bot-surface .bot-headlight .headlight-note:not([hidden]) { position: absolute; right: 0; bottom: calc(100% + 6px); max-width: 220px; margin: 0; padding: 6px 10px; border-radius: 10px;
   font-size: 12.5px; line-height: 1.3; color: #fff; background: color-mix(in srgb, #0b0f19 82%, transparent); }
+
+
+/* ── The panel, remade (plan §AB.50, 2026-11-14; the owner: "more icon buttons, better design, layout and organization …
+   minimalist effects and animations … you're supposed to remake that"). The default layout only: a person's own
+   arrangement (.widgets[data-ov-arranged]) keeps its grid.
+   A phone: the camera on top (it pins under the bar, as before), a slim status line, then the controller.
+   A computer: the camera large on the left and the controls docked beside it; with no camera the controls sit
+   together as one controller in the middle, never spread across three columns with holes between them. ── */
+#panel:not(.bot-surface) .widgets:not([data-ov-arranged]) .status-row { gap: 0.5rem; }
+#panel:not(.bot-surface) .widgets:not([data-ov-arranged]) .status-row .widget { display: flex; align-items: center; gap: 0.6rem; padding: 0.55rem 0.8rem; border-radius: 999px; }
+#panel:not(.bot-surface) .widgets:not([data-ov-arranged]) .status-row .widget h2, #panel:not(.bot-surface) .widgets:not([data-ov-arranged]) .status-row .widget .label { margin: 0; font-size: 0.72rem; letter-spacing: 0.06em; }
+#panel:not(.bot-surface) .widgets:not([data-ov-arranged]) .status-row .readout { font-size: 1.05rem; min-width: 0; text-align: left; font-weight: 750; }
+#panel:not(.bot-surface) .widgets:not([data-ov-arranged]) .status-row .battery { display: flex; flex-wrap: nowrap; flex-direction: row; align-items: center; gap: 0.6rem; width: 100%; }
+#panel:not(.bot-surface) .widgets:not([data-ov-arranged]) .status-row meter { flex: 1 1 2.5rem; min-width: 2.5rem; height: 0.4rem; }
+#panel:not(.bot-surface) .widgets:not([data-ov-arranged]) .status-row .battery-head { display: flex; align-items: baseline; gap: 0.4rem; flex: none; }
+#panel:not(.bot-surface) .widgets:not([data-ov-arranged]) .status-row .battery-note:empty, #panel:not(.bot-surface) .widgets:not([data-ov-arranged]) .status-row .stat-label { display: none; }
+#panel:not(.bot-surface) .widgets:not([data-ov-arranged]) .status-row .stat { display: flex; align-items: baseline; gap: 0.4rem; }
+#panel:not(.bot-surface) .widgets:not([data-ov-arranged]) .status-row .battery-freshness { flex-basis: 100%; font-size: 0.75rem; color: var(--muted); }
+#panel:not(.bot-surface) .widgets:not([data-ov-arranged]) .status-row h2 { flex: none; color: var(--muted); text-transform: uppercase; font-weight: 700; }
+.widgets:not([data-ov-arranged]) > .widget { transition: border-color .2s ease, box-shadow .2s ease; }
+.widgets:not([data-ov-arranged]) > .widget:focus-within { border-color: color-mix(in srgb, var(--accent, #3b82f6) 45%, var(--line)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #3b82f6) 14%, transparent); }
+html[data-ov-motion="off"] .widgets:not([data-ov-arranged]) > .widget { transition: none; }
+
+@media (min-width: 44rem) and (min-height: 32.01rem), (min-width: 44rem) and (orientation: portrait) {
+  /* No camera: one controller, the drive beside the head and lights, centred. */
+  .widgets:not([data-ov-arranged]):not(:has(.widget-camera, .widget-video_click)) { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 56rem; margin-inline: auto; }
+  .widgets:not([data-ov-arranged]):not(:has(.widget-camera, .widget-video_click)) .widget-drive { grid-row: span 2; }
+}
+@media (min-width: 64rem) and (min-height: 32.01rem) {
+  /* With a camera: the stage on the left, the controls docked on the right in one column. */
+  .widgets:not([data-ov-arranged]):has(.widget-camera, .widget-video_click) { grid-template-columns: minmax(0, 1fr) minmax(20rem, 26rem); align-items: start; }
+  .widgets:not([data-ov-arranged]):has(.widget-camera, .widget-video_click) > .widget-camera,
+  .widgets:not([data-ov-arranged]):has(.widget-camera, .widget-video_click) > .widget-video_click { grid-column: 1; grid-row: 1 / span 8; position: sticky; top: calc(var(--top-h, 4rem) + 0.75rem); }
+  .widgets:not([data-ov-arranged]):has(.widget-camera, .widget-video_click) > :not(.widget-camera):not(.widget-video_click) { grid-column: 2; }
+  .widgets:not([data-ov-arranged]):has(.widget-camera, .widget-video_click) > .widget-drive { grid-column: 2; }
+  /* No camera on a wide screen: the controller stays in the middle, two columns. */
+  .widgets:not([data-ov-arranged]):not(:has(.widget-camera, .widget-video_click)) { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 56rem; margin-inline: auto; }
+  .widgets:not([data-ov-arranged]):not(:has(.widget-camera, .widget-video_click)) > .widget-drive { grid-column: auto; }
+  .widgets:not([data-ov-arranged]):not(:has(.widget-camera, .widget-video_click)) > .status-row { grid-column: 1 / -1; }
+}
+/* The page head: the name once, smaller, with its state beside it. */
+#panel:not(.bot-surface) .panel-head .meta { gap: 0.35rem; }
+@media (min-width: 64rem) { #panel:not(.bot-surface) .panel-head { max-width: 56rem; margin-inline: auto; } #panel:not(.bot-surface):has(.widget-camera) .panel-head { max-width: none; } }
+#panel:not(.bot-surface) .panel-head h1 { font-size: clamp(1.35rem, 4.6vw, 2rem); }
+@media (max-width: 43.99rem) { #panel:not(.bot-surface) .widgets:not([data-ov-arranged]) .status-row .widget { padding: 0.45rem 0.7rem; } #panel:not(.bot-surface) .widgets:not([data-ov-arranged]) .status-row h2 { font-size: 0.66rem; } }
+#panel:not(.bot-surface) .panel-head .ovk-heading-icon { display: none; }
+#panel:not(.bot-surface) .panel-head .ovk-page-head { display: flex; align-items: center; gap: 0.5rem; margin: 0; }
+#panel:not(.bot-surface) .panel-head .ovk-page-back { position: relative; flex: none; display: inline-grid; place-items: center; width: 44px; height: 44px; padding: 0; margin: 0; }
+#panel:not(.bot-surface) .panel-head .ovk-page-back span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+#panel:not(.bot-surface) .panel-head .ovk-page-head-row { margin: 0; min-width: 0; }
+#panel:not(.bot-surface) .panel-head .ovk-page-head-row h1 { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
