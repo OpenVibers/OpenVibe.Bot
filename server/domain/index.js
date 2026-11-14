@@ -1105,6 +1105,10 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         return { device, ...videoKey(issued), profile: profile ? profile.profile : null };
     }
     /** Persist what a Network-paired device declares (kind, drivers, capabilities, agent_version): only the given fields. */
+    /** What the machine is (Link v0.66), already bounded by server/machine-specs.js. */
+    async function setSpecs(id, specs) {
+        return db.maybe('UPDATE devices SET specs = $2::jsonb, specs_at = $3 WHERE id = $1 AND revoked_at IS NULL RETURNING *', [id, JSON.stringify(specs), iso(now())]);
+    }
     async function updateDeclared(id, { kind, drivers, capabilities, agent_version: agentVersion }) {
         if (capabilities) changed();
         return db.maybe(
@@ -1676,7 +1680,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         operators: { stateOf: operatorStateOf, policy: operatorPolicy, list: listRoster, act: actOperator,
             audit: auditOperator, auditList: listOperatorAudit, setSole, roles: OPERATOR_ROLES },
         pairing: { create: createPairingCode, redeem, prune: prunePairingCodes, installerCommand, driverForProfile, whipUrl, onPaired },
-        devices: { byCredential, bindNode, issuePublishKey, revokeVideo, updateDeclared, setFleet, revokeNode, ensureServerDevice, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, revokeByNode, touchSeen, setOnline, ownerOf, onChange,
+        devices: { byCredential, bindNode, issuePublishKey, revokeVideo, updateDeclared, setSpecs, setFleet, revokeNode, ensureServerDevice, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, revokeByNode, touchSeen, setOnline, ownerOf, onChange,
             recordFirstRun, firstRunOf, firstRunFunnel },
         machines: { mint: mintMachine, list: listMachines, workerRef, setAgentComputer, setAiModels, setWatchProbe, setVoice, setSharedDesks, setSharedDesktops, setSharedJobs, listSharedDesks,
             setRoles: setMachineRoles, rename: renameMachine, runningJobs, reportStatus: reportMachineStatus,
