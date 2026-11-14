@@ -83,6 +83,16 @@ const AGENT_SERVICES = new Set(['svc:actor']);
  * Services that use a person's machine, each only for the kinds it is allowed and only where the owner turned on its
  * switch on openvibe.link/machines: the agent (any computer kind) and Watch's node source (read-only probes).
  */
+/** The job worker a machine's Link last reported (status.capabilities.worker), as the card needs it, or null. */
+function workerOut(capabilities) {
+    let caps = capabilities;
+    if (typeof caps === 'string') { try { caps = JSON.parse(caps); } catch { caps = null; } }
+    const w = caps && typeof caps === 'object' && caps.worker && typeof caps.worker === 'object' ? caps.worker : null;
+    if (!w) return null;
+    const classes = Array.isArray(w.runtime_classes) ? w.runtime_classes.filter((c) => typeof c === 'string' && /^[a-z]{1,16}$/.test(c)).slice(0, 8) : [];
+    return { classes, serve_others: w.serve_others === true, egress: typeof w.egress === 'string' ? w.egress.slice(0, 32) : null };
+}
+
 const MACHINE_SERVICES = {
     'svc:actor': { kinds: null, flag: 'agent_computer', off: 'the owner has not let their agent use this computer' },
     'svc:watch': { kinds: new Set(['probe']), flag: 'watch_probe', off: 'the owner has not let their watches check things from this computer' },
@@ -551,6 +561,11 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         return {
             id: device.id, name: device.name || null, online: !!st.online, agent_computer: !!device.agent_computer, ai_models: !!device.ai_models, watch_probe: !!device.watch_probe,
             shared_desks: !!device.shared_desks,
+            // 2026-11-14 (Link v0.65.0): whole desktops lent to other people's agents, and other people's jobs.
+            shared_desktops: !!device.shared_desktops,
+            shared_jobs: !!device.shared_jobs,
+            // The job worker as the Link last reported it: its classes, whether it serves other people and its egress.
+            worker: workerOut(device.capabilities),
             // What the machine does for the network (plan L34): the roles the owner gave it. The catalogue is
             // server/machine-roles.js; the Link reads them on its next check-in.
             roles: json(device.roles, []),
@@ -737,6 +752,37 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
             }
         }
         const updated = await domain.machines.setSharedDesks(device.id, req.body.on);
+        res.json({ machine: machineOut(updated) });
+    }));
+    // The owner lends this machine's whole desktops to other people's agents, or stops (2026-11-14). Only where its
+    // Link lends desktops, each one a display, a window manager, a browser and a terminal inside its own sandbox
+    // (OpenVibe.Link v0.65.0, installed with --desk-host --shared --desktops). Desk leases check it again per session.
+    r.post('/machines/:id/shared-desktops', manage, wrap(async (req, res) => {
+        const { device } = req.principal.kind === 'user' ? await computerMachine(req, { agentNeedsOptIn: false }) : await hubMachine(req);
+        if (typeof req.body?.on !== 'boolean') fail(422, 'bot.invalid_input', 'on is true or false');
+        if (req.body.on) {
+            const offered = hub.computerOf(device.id) || computerCaps(device.capabilities);
+            const desk = offered && offered.desk;
+            if (!(desk && desk.isolation === 'sandbox' && Array.isArray(desk.kinds) && desk.kinds.includes('desktop'))) {
+                fail(409, 'bot.desktops_not_lent', 'this computer does not lend desktops: set it up again as a shared desk host that lends them (openvibe-link install --desk-host --shared --desktops, OpenVibe Link v0.65 or later)');
+            }
+        }
+        const updated = await domain.machines.setSharedDesktops(device.id, req.body.on);
+        res.json({ machine: machineOut(updated) });
+    }));
+    // The owner lets other people's jobs run here, coding tasks and agents, or stops (2026-11-14). Only where the
+    // machine's job worker serves other people (worker.serve_others, OpenVibe.Link v0.65.0: the same sandbox, never the
+    // owner's sign-ins). The dispatcher checks both again for every job (jobs/dispatch.js).
+    r.post('/machines/:id/shared-jobs', manage, wrap(async (req, res) => {
+        const { device } = req.principal.kind === 'user' ? await computerMachine(req, { agentNeedsOptIn: false }) : await hubMachine(req);
+        if (typeof req.body?.on !== 'boolean') fail(422, 'bot.invalid_input', 'on is true or false');
+        if (req.body.on) {
+            const w = workerOut(device.capabilities);
+            if (!(w && w.serve_others && w.classes.length)) {
+                fail(409, 'bot.worker_not_shared', 'this computer\'s job worker does not serve other people: set it up again with openvibe-link install --worker --serve-others (OpenVibe Link v0.65 or later)');
+            }
+        }
+        const updated = await domain.machines.setSharedJobs(device.id, req.body.on);
         res.json({ machine: machineOut(updated) });
     }));
     // The owner turns their agent's use of the machine on or off (never the agent itself). The network's hub does
