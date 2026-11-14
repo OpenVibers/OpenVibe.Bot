@@ -966,3 +966,5 @@ html[data-ov-motion="off"] .widgets:not([data-ov-arranged]) > .widget { transiti
 #panel:not(.bot-surface) .panel-head .ovk-page-back span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 #panel:not(.bot-surface) .panel-head .ovk-page-head-row { margin: 0; min-width: 0; }
 #panel:not(.bot-surface) .panel-head .ovk-page-head-row h1 { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Make your own controls: beside Arrange, the same quiet pill, a link to Codes. */
+#panel:not(.bot-surface) .panel-head .make-btn { text-decoration: none; }
