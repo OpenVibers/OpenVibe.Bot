@@ -139,3 +139,5 @@
   .hm-fold-block > summary h2 { margin: 0 0 6px; font-size: 1.15rem; border-bottom: 1px solid var(--border, color-mix(in srgb, var(--text-primary, #fff) 8%, transparent)); padding-bottom: .2em; }
   .hm-fold-block > summary span { display: none; }
 }
+/* Design rule 201: the intro is one line on a computer, at most two on a phone. */
+@media (max-width: 640px) { .hm-fold-lede { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; } }
