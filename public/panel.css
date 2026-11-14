@@ -968,3 +968,26 @@ html[data-ov-motion="off"] .widgets:not([data-ov-arranged]) > .widget { transiti
 #panel:not(.bot-surface) .panel-head .ovk-page-head-row h1 { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Make your own controls: beside Arrange, the same quiet pill, a link to Codes. */
 #panel:not(.bot-surface) .panel-head .make-btn { text-decoration: none; }
+
+/* ── A phone holds it like a controller (plan §AB.50, 2026-11-14): with a drive and a head, the stick on the left and the
+   head's tilt as a vertical slider on the right, side by side, so both thumbs work at once; the headlight is a round
+   icon toggle under the tilt. The default layout only; an arranged panel keeps its own. ── */
+@media (max-width: 43.99rem) and (orientation: portrait) {
+  #panel:not(.bot-surface) .widgets:not([data-ov-arranged]):has(> .widget-drive):has(> .widget-head) { grid-template-columns: minmax(0, 1fr) 6.5rem; align-items: stretch; }
+  #panel:not(.bot-surface) .widgets:not([data-ov-arranged]):has(> .widget-drive):has(> .widget-head) > :not(.widget-drive):not(.widget-head) { grid-column: 1 / -1; }
+  #panel:not(.bot-surface) .widgets:not([data-ov-arranged]):has(> .widget-drive):has(> .widget-head) > .widget-drive { grid-column: 1; order: 0; display: flex; flex-direction: column; }
+  #panel:not(.bot-surface) .widgets:not([data-ov-arranged]):has(> .widget-drive):has(> .widget-head) > .widget-head { grid-column: 2; order: 0; padding: 0.6rem 0.35rem; display: flex; flex-direction: column; align-items: center; }
+  #panel:not(.bot-surface) .widgets:not([data-ov-arranged]) > .widget-drive .pad { width: 100%; justify-items: center; margin-block: auto; }
+  #panel:not(.bot-surface) .widgets:not([data-ov-arranged]) > .widget-drive .stick { width: 13rem !important; max-width: 100%; height: auto; aspect-ratio: 1; margin-inline: auto; }
+  #panel:not(.bot-surface) .widgets:not([data-ov-arranged]) > .widget-head h2 { font-size: 0.68rem; text-align: center; margin: 0 0 0.4rem; }
+  #panel:not(.bot-surface) .widgets:not([data-ov-arranged]) > .widget-head .slider-head { display: flex; justify-content: center; gap: 0.3rem; }
+  #panel:not(.bot-surface) .widgets:not([data-ov-arranged]) > .widget-head .slider-head .control-name, #panel:not(.bot-surface) .widgets:not([data-ov-arranged]) > .widget-head .slider-note { display: none; }
+  #panel:not(.bot-surface) .widgets:not([data-ov-arranged]) > .widget-head .slider-row { display: flex; flex-direction: column-reverse; align-items: center; gap: 0.45rem; }
+  #panel:not(.bot-surface) .widgets:not([data-ov-arranged]) > .widget-head input[type="range"] { writing-mode: vertical-lr; direction: rtl; inline-size: 10.5rem !important; block-size: 2.6rem !important; width: 2.6rem !important; height: 10.5rem !important; flex: none; margin: 0; }
+  #panel:not(.bot-surface) .widgets:not([data-ov-arranged]) > .widget-head .headlight { margin-top: 0.6rem; justify-items: center; }
+  #panel:not(.bot-surface) .widgets:not([data-ov-arranged]) > .widget-head .headlight-toggle { width: 3.2rem; height: 3.2rem; min-height: 0; padding: 0; justify-content: center; border-radius: 50%; }
+  #panel:not(.bot-surface) .widgets:not([data-ov-arranged]) > .widget-head .headlight-toggle .control-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  #panel:not(.bot-surface) .widgets:not([data-ov-arranged]) > .widget-head .headlight-state { display: none; }
+  #panel:not(.bot-surface) .widgets:not([data-ov-arranged]) > .widget-head .headlight-unconfirmed { font-size: 0.7rem; text-align: center; }
+  #panel:not(.bot-surface) .widgets:not([data-ov-arranged]) > .widget-head .headlight-choices { display: grid; gap: 0.3rem; }
+}
