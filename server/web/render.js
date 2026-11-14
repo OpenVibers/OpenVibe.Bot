@@ -874,6 +874,14 @@ function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs
     if (operatorsHtml) widgets.push(operatorsHtml);
     const arrangeButton = arrange && arrange.src && role === 'owner'
         ? `<button type="button" class="arrange-btn" data-arrange data-arrange-src="${esc(arrange.src || '')}" title="Arrange the controls">${icon('sliders')}<span>Arrange</span></button>` : '';
+    // Make your own controls (plan §AB.50, make-your-own-controls; the owner: "these can be AI vibe coded … interconnected
+    // with openvibe.codes"): the robot's model and its parts as the brief, in Codes' box, never sent by itself.
+    const partsLine = (profile.widgets || []).map((w) => String(w.title || w.type || '').trim()).filter(Boolean).slice(0, 16).join(', ');
+    const makeBrief = `Make my own controls for my robot "${robot.name}" (${profile.name || robot.profile_id}, profile ${profile.id || robot.profile_id} on openvibe.bot). `
+        + `Its panel today: ${partsLine || 'drive'}. Build a layout of its parts (bot.controls, ui.surface@1) that I can install as this robot's panel on openvibe.bot: `
+        + 'bigger touch targets, icon buttons, the camera large. Keep Stop reachable.';
+    const makeButton = role === 'owner' && !embed
+        ? `<a class="arrange-btn make-btn" href="https://openvibe.codes/?prompt=${encodeURIComponent(makeBrief.slice(0, 1800))}" target="_blank" rel="noopener" title="Make your own controls with Codes">${glyphIcon('spark')}<span>Make your own</span></a>` : '';
     const body = `<header class="panel-top">
 ${embed ? '' : tryIt ? topbar('<span class="crumb">Try the panel</span>', '/') : topbar(`<span class="crumb">${esc(robot.name)}</span>`)}
 </header>
@@ -882,7 +890,7 @@ ${embed ? '' : tryIt ? topbar('<span class="crumb">Try the panel</span>', '/') :
 ${kit.pageHead({ title: `${robot.name}`, back: embed ? null : { href: '/', label: 'Home' } })}
 <p class="meta"><span class="pill online" data-online-pill data-state="connecting"><span class="dot"></span><span data-online-label>Connecting…</span></span>${(profile.name || robot.profile_id) && String(profile.name || robot.profile_id).trim().toLowerCase() !== String(robot.name || '').trim().toLowerCase() ? ` <span class="pill">${esc(profile.name || robot.profile_id)}</span>` : ''} <span class="pill role" data-role-label>${esc(ROLE_LABEL[role] || role)}</span></p>
 ${turnStrip(robot, role)}
-${arrangeButton}
+${arrangeButton}${makeButton}
 ${embed && role === 'watcher' && !signedIn ? `<p class="embed-sign-in"><button type="button" class="button primary" data-drive data-drive-bar>${icon('gamepad')}<span>Drive</span></button> <a class="button embed-open" href="/panel/${esc(robot.id)}" target="_blank" rel="noopener" title="Open on openvibe.bot">${icon('external')}<span>Open on openvibe.bot</span></a></p>` : ''}
 </div>
 ${tryIt ? tryIntro() : ''}
