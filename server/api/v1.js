@@ -566,6 +566,10 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
             shared_jobs: !!device.shared_jobs,
             // The job worker as the Link last reported it: its classes, whether it serves other people and its egress.
             worker: workerOut(device.capabilities),
+            // What the machine is (Link v0.66): its OS, CPU, memory, GPUs, disk and virtualization, and one line of it.
+            specs: json(device.specs, null),
+            specs_words: require('../machine-specs').words(json(device.specs, null)),
+            specs_at: device.specs_at ? new Date(device.specs_at).toISOString() : null,
             // What the machine does for the network (plan L34): the roles the owner gave it. The catalogue is
             // server/machine-roles.js; the Link reads them on its next check-in.
             roles: json(device.roles, []),

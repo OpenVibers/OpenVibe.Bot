@@ -105,7 +105,9 @@ function router({ domain, apiAuth, hub, config = {}, limit = (req, res, next) =>
             const online = !!(hub.isOnline && hub.isOnline(d.id));
             const rm = await room(d, u.offered);
             // free counts desks of the kind asked: a desktop takes two halves.
-            hosts.push({ machine_id: d.id, trust: u.trust, shared: u.shared, online, region: null, kinds: u.kinds, max_browser_desks: rm.max, used: rm.used,
+            // What the machine is, in the few facts placement weighs (Link v0.66): memory, threads, GPU, virtualization.
+            const specs = require('../machine-specs').summary(typeof d.specs === 'string' ? JSON.parse(d.specs) : d.specs);
+            hosts.push({ machine_id: d.id, trust: u.trust, shared: u.shared, online, region: null, kinds: u.kinds, max_browser_desks: rm.max, used: rm.used, ...(specs ? { specs } : {}),
                 free: online ? Math.floor(rm.free / COST[want]) : 0,
                 ...(u.shared ? { limits: u.offered.desk.limits || null } : { name: d.name || null }) });
         }

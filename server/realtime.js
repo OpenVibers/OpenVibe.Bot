@@ -336,12 +336,23 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             || (has('agent_version') && !(typeof msg.agent_version === 'string' && msg.agent_version.length <= MAX_AGENT_VERSION))) {
             return sendError(conn, 'bot.bad_frame', `device_kind must be one of ${[...DEVICE_KINDS].join('|')}, drivers an array of names or { name } objects, capabilities an object, agent_version a string of at most ${MAX_AGENT_VERSION}`);
         }
-        const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+        // jsonb reorders an object's keys: compare with sorted keys, or every status rewrote the row (and republished
+        // the offers) though nothing changed.
+        const same = require('./machine-specs').same;
         const change = {};
         if (has('device_kind') && msg.device_kind !== d.kind) change.kind = msg.device_kind;
         if (has('drivers') && !same(msg.drivers, json(d.drivers, []))) change.drivers = msg.drivers;
         if (has('capabilities') && !same(msg.capabilities, json(d.capabilities, {}))) change.capabilities = msg.capabilities;
         if (has('agent_version') && msg.agent_version !== (d.agent_version ?? null)) change.agent_version = msg.agent_version;
+        // What the machine is (Link v0.66, server/machine-specs.js): kept bounded, written only when it changed.
+        if (has('machine')) {
+            const ms = require('./machine-specs');
+            const specs = ms.clean(msg.machine);
+            if (specs && !ms.same(specs, json(d.specs, null))) {
+                const saved = await domain.devices.setSpecs(d.id, specs);
+                if (saved) conn.device = saved;
+            }
+        }
         if (!Object.keys(change).length) return undefined;
         const updated = await domain.devices.updateDeclared(d.id, change);
         if (updated) conn.device = updated;
