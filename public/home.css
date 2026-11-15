@@ -129,7 +129,7 @@
 .hm-fold-block > summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 48px; padding: 0 16px; cursor: pointer; color: var(--text-primary, #e6edf7); font-weight: 700; list-style: none; border: 1px solid var(--border, rgba(255, 255, 255, .08)); border-radius: 14px; background: var(--bg-secondary, #101828); }
 .hm-fold-block > summary::-webkit-details-marker { display: none; }
 .hm-fold-block > summary h2 { margin: 0; padding: 0; border: 0; font-size: 1.05rem; }
-.hm-fold-block > summary span { color: var(--text-secondary, #96a7c2); font-weight: 600; font-size: .86rem; text-align: right; }
+.hm-fold-block > summary > span { color: var(--text-secondary, #96a7c2); font-weight: 600; font-size: .86rem; text-align: right; }
 .hm-fold-block > summary:focus-visible { outline: 2px solid var(--accent, #3b82f6); outline-offset: -2px; border-radius: 14px; }
 .hm-fold-block .sc-sec { margin: 0; }
 .hm-fold-block .sc-sec > h2, .hm-fold-block .sc-sec .hm-h { display: none; }
@@ -137,5 +137,5 @@
   .hm-fold-block { border: 0; background: none; margin-top: 40px; }
   .hm-fold-block > summary { display: block; min-height: 0; padding: 0; border: 0; background: none; }
   .hm-fold-block > summary h2 { margin: 0 0 6px; font-size: 1.15rem; border-bottom: 1px solid var(--border, color-mix(in srgb, var(--text-primary, #fff) 8%, transparent)); padding-bottom: .2em; }
-  .hm-fold-block > summary span { display: none; }
+  .hm-fold-block > summary > span { display: none; }
 }
