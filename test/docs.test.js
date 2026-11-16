@@ -52,7 +52,8 @@ const REQUIRED = [
 
     await check('STATUS.json names the openvibe-contracts tag package.json pins', () => {
         const spec = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) }['openvibe-contracts'];
-        const m = /refs\/tags\/(v\d+\.\d+\.\d+)/.exec(spec) || /^\^?~?(\d+\.\d+\.\d+)$/.exec(spec);
+        // GitHub's tag tarball (refs/tags/vX.Y.Z) or our forge's (archive/vX.Y.Z.tar.gz, the pin bot's default since Shared 4.284.0).
+        const m = /refs\/tags\/(v\d+\.\d+\.\d+)/.exec(spec) || /\/archive\/(v\d+\.\d+\.\d+)\.tar\.gz$/.exec(spec) || /^\^?~?(\d+\.\d+\.\d+)$/.exec(spec);
         assert.ok(m, `package.json does not pin a tag for openvibe-contracts: ${spec}`);
         assert.ok(String(status.contracts).includes(m[1]), `STATUS.json: contracts "${status.contracts}", package.json pins ${m[1]}`);
     });

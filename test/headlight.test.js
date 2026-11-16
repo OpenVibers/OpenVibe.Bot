@@ -55,11 +55,14 @@ require('../server/realtime');
         const before = Date.now() + t.clock.offset;
         cmd(a, { id: 'hl-1', kind: 'headlight', value: { on: true } });
         const c = await dev.waitFor((m) => m.type === 'command' && m.ref === 'hl-1');
+        const after = Date.now() + t.clock.offset;
         assert.strictEqual(c.kind, 'headlight', 'actuator would renew the motion deadline');
         assert.deepStrictEqual(c.value, { on: true });
         assert.strictEqual(c.operator.role, 'owner');
         assert.strictEqual(c.operator.subject, alex.subject);
-        assert.ok(c.deadline_ms > before && c.deadline_ms <= before + 250 + 20, `deadline ${c.deadline_ms - before} ms`);
+        // 250 ms from the moment Bot stamped it, which falls between the send and the arrival: a fixed 20 ms of slack
+        // failed on a slow CI runner (11-16: 271 ms after the send).
+        assert.ok(c.deadline_ms >= before + 250 && c.deadline_ms <= after + 250, `deadline ${c.deadline_ms - before} ms after the send, ${after - before} ms round trip`);
         assert.strictEqual(c.provenance.expires_at_ms - c.provenance.issued_at_ms, 300);
         assert.strictEqual(c.provenance.issued_at_ms, c.ts, 'issued_at_ms is the frame ts');
         assert.strictEqual(c.provenance.seq, c.seq, 'provenance seq is the envelope seq');
