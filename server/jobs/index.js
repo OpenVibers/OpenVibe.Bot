@@ -16,7 +16,7 @@
  * `db` is a getter (the domain's handle is bound after the hub exists); `hub` is the realtime hub, the link a
  * job and its cancel go out on. `job` in the answers is presentJob's view of the run_jobs row.
  */
-const { dispatch, cancel, createJobFrames } = require('./dispatch');
+const { dispatch, cancel, stdin, createJobFrames } = require('./dispatch');
 const store = require('./store');
 const { json } = require('../util');
 
@@ -28,6 +28,7 @@ function createJobs({ db: getDb, hub, usage = null, log = console, now = () => D
         stdout: (jobId) => frames.stdout(jobId),
         dispatch: async (nodeId, job, opts = {}) => present(await dispatch(getDb(), nodeId, job, { link: hub, now, ...opts })),
         cancel: async (jobId, opts = {}) => present(await cancel(getDb(), jobId, { link: hub, now, ...opts })),
+        stdin: async (jobId, input = {}) => present(await stdin(getDb(), jobId, input, { link: hub })),
         async state(jobId) {
             const row = await store.get(getDb(), jobId);
             return row ? { job: presentJob(row), stdout: frames.stdout(row.id) } : null;
