@@ -32,7 +32,7 @@
  * | GET    /robots/:id/audit                        | bot.robot.read         | owner (paged)                       |
  * | GET    /robots/:id/streaming                    | bot.robot.read         | a member                            |
  * | POST   /robots/:id/streaming                    | bot.robot.manage       | the owner                           |
- * | POST   /jobs, /jobs/:id/cancel, GET /jobs/:id   | bot.job.dispatch       | — (services only)                   |
+ * | POST   /jobs, /jobs/:id/cancel, /jobs/:id/stdin, GET /jobs/:id | bot.job.dispatch | — (services only)         |
  * | POST   /pair                                    | — (one-time code)      | the agent (code is the credential)  |
  * | POST   /claims                                  | — (anyone)             | a device asking to be added: a code |
  * | POST   /machines/:id/watch-links               | bot.machine.watch_link | the owner, or their agent for them |
@@ -1038,6 +1038,12 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
     r.post('/jobs/:id/cancel', jobs, wrap(async (req, res) => {
         requireJobDispatch(req);
         res.json(await jobService.cancel(req.params.id));
+    }));
+    // What the job's person typed (contracts 0.442.0 job_stdin): an agent's own sign-in reads the code its page shows.
+    r.post('/jobs/:id/stdin', jobs, wrap(async (req, res) => {
+        requireJobDispatch(req);
+        const b = req.body || {};
+        res.json(await jobService.stdin(req.params.id, { data: typeof b.data === 'string' ? b.data : '', eof: b.eof === true, subject: b.subject ?? null }));
     }));
     r.get('/jobs/:id', wrap(async (req, res) => {
         requireJobDispatch(req);

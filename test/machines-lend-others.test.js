@@ -8,6 +8,8 @@
 const assert = require('assert');
 const { ids } = require('openvibe-contracts');
 const { boot, check, done } = require('./helpers/app');
+// The key another person's sandbox id is made with (server/jobs/dispatch.js sandboxOf): this process's, read on first use.
+process.env.BOT_SANDBOX_KEY = process.env.BOT_SANDBOX_KEY || 'a-test-sandbox-key';
 
 (async () => {
     const t = await boot({ env: { BOT_ROUTINE_TICK_MS: '0', BOT_WEBHOOK_TICK_MS: '0', BOT_OFFLINE_GRACE_MS: '30000' } });
@@ -76,6 +78,36 @@ const { boot, check, done } = require('./helpers/app');
         const own = await dispatch(t.db, worker.deviceId, job(), { link: t.hub, project, subject: `user:${alex.subject}` });
         const g = await worker.c.waitFor((m) => m.type === 'job' && m.job.id === own.job.id);
         assert.ok(!('for' in g), 'the owner\'s own job');
+        // 2026-11-16: another person's job names their own sandbox on this machine (contracts 0.442.0, Link v0.72.0): the
+        // same for every job of theirs here, never the owner's, never a stored part of the job.
+        assert.match(f.job.sandbox || '', /^sbx_[0-9a-f]{32}$/, JSON.stringify(f.job));
+        assert.ok(!('sandbox' in g.job), 'the owner\'s own job names none: its sandbox is the owner\'s');
+        const next = await dispatch(t.db, worker.deviceId, job(), { link: t.hub, project, subject: `user:${bob.subject}` });
+        const h = await worker.c.waitFor((m) => m.type === 'job' && m.job.id === next.job.id);
+        assert.strictEqual(h.job.sandbox, f.job.sandbox, 'the same person on the same machine: the same sandbox');
+        const { sandboxOf } = require('../server/jobs/dispatch');
+        assert.notStrictEqual(sandboxOf('dev_other_machine', bob.subject), f.job.sandbox, 'another machine: another id');
+        assert.notStrictEqual(sandboxOf(worker.deviceId, alex.subject), f.job.sandbox, 'another person: another id');
+        assert.ok(!('sandbox' in (await t.db.maybe('SELECT job FROM run_jobs WHERE id = $1', [theirs.job.id])).job), 'the stored job is the caller\'s');
+
+        // What the person typed reaches their running job (job_stdin); the wrong person, or a job that ended, is refused.
+        const call = (p, body) => t.call('POST', p, { cap: ['bot.job.dispatch'], body });
+        const early = await call(`/api/v1/jobs/${next.job.id}/stdin`, { data: 'x' });
+        assert.deepStrictEqual([early.status, early.json.code], [409, 'bot.job_not_running'], 'sent but not started yet: the Link would drop it');
+        worker.c.send(frame('ack', { id: next.job.id }));
+        worker.c.send(frame('job_started', { id: next.job.id, started_ms: Date.now() }));
+        await poll(async () => (await t.db.maybe('SELECT state FROM run_jobs WHERE id = $1', [next.job.id])).state === 'running');
+        const typed = await call(`/api/v1/jobs/${next.job.id}/stdin`, { data: 'the-code\n', subject: `user:${bob.subject}` });
+        assert.strictEqual(typed.status, 200, typed.text);
+        assert.strictEqual(typed.json.sent, true);
+        const sin = await worker.c.waitFor((m) => m.type === 'job_stdin' && m.id === next.job.id);
+        assert.deepStrictEqual([sin.data, 'eof' in sin], ['the-code\n', false]);
+        const wrong = await call(`/api/v1/jobs/${next.job.id}/stdin`, { data: 'x', subject: `user:${alex.subject}` });
+        assert.deepStrictEqual([wrong.status, wrong.json.code], [403, 'bot.not_owner']);
+        const big = await call(`/api/v1/jobs/${next.job.id}/stdin`, { data: 'x'.repeat(4097) });
+        assert.deepStrictEqual([big.status, big.json.code], [422, 'bot.invalid_input']);
+        const person = await t.call('POST', `/api/v1/jobs/${next.job.id}/stdin`, { user: bob, body: { data: 'x' } });
+        assert.strictEqual(person.status, 403, 'services only: a person types through Run, which checks it is their job');
         await assert.rejects(dispatch(t.db, worker.deviceId, job(), { link: t.hub, project, subject: 'service:watch' }),
             (e) => e.status === 403 && e.code === 'bot.not_owner', 'never a service\'s job on a person\'s machine');
         const built = await offers.build();
