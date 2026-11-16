@@ -27,6 +27,13 @@ async function testDb({ store = process.env.BOT_TEST_STORE || 'pglite', max = 4 
     const pw = crypto.randomBytes(16).toString('hex');
     const su = createDb({ url: process.env.OV_TEST_PG_DIRECT_URL, service: 'bot-test-admin', max: 1, log: quiet });
     const database = await su.value('SELECT current_database()');
+    // Test files run side by side: two GRANT CONNECT ON DATABASE at once update the same pg_database row, and one fails
+    // with "tuple concurrently updated" (XX000; Bot #485's test-pg, 11-16). Setup retries it as teardown does.
+    const setup = async (stmt) => {
+        for (let i = 0; ; i++) {
+            try { return await su.query(stmt); } catch (err) { if (err.code !== 'XX000' || i >= 5) throw err; await new Promise((ok) => setTimeout(ok, 100 * (i + 1))); }
+        }
+    };
     for (const stmt of [
         `CREATE ROLE ${owner} LOGIN PASSWORD '${pw}'`,
         `CREATE ROLE ${name} LOGIN PASSWORD '${pw}'`,
@@ -39,7 +46,7 @@ async function testDb({ store = process.env.BOT_TEST_STORE || 'pglite', max = 4 
         `GRANT USAGE ON SCHEMA ${name} TO ${name}`,
         `ALTER DEFAULT PRIVILEGES FOR ROLE ${owner} IN SCHEMA ${name} GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${name}`,
         `ALTER DEFAULT PRIVILEGES FOR ROLE ${owner} IN SCHEMA ${name} GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO ${name}`,
-    ]) await su.query(stmt);
+    ]) await setup(stmt);
     const as = (url, user) => { const u = new URL(url); u.username = user; u.password = pw; return u.toString(); };
     async function drop() {
         try {
