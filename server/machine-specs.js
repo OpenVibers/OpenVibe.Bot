@@ -3,7 +3,9 @@
  * What a machine is (OpenVibe Link v0.66 sends it with its status as `machine`; the owner, 2026-11-14: every operating
  * system supported and "aware of specs"). Bot keeps only these fields, typed and bounded, in devices.specs: the
  * operating system and its version, the CPU, memory, GPUs, the disk of the Link's state directory, the virtualization the
- * machine offers and its display. Nothing else the frame carries is stored, and a value of the wrong shape is dropped.
+ * machine offers, its display and its addresses on its own networks (`lan`, Link v0.73: plan §AD.15, so Computer knows
+ * where a machine is; only private, overlay and unique-local addresses, re-checked here). Nothing else the frame carries
+ * is stored, and a value of the wrong shape is dropped. Machines are listed only to their owner and the owner's services.
  *
  *   clean(frameMachine)   → the stored reading, or null when there is nothing usable
  *   summary(specs)        → the few facts placement needs: { memory_mb, threads, gpu_vram_mb, gpu, kvm, apple_vz, hyperv }
@@ -13,6 +15,20 @@ const str = (v, n) => (typeof v === 'string' && v.trim() ? v.replace(/[\u0000-\u
 const int = (v, max) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Math.min(max, Math.round(Number(v))) : null);
 const num = (v, max) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Math.min(max, Math.round(Number(v) * 10) / 10) : null);
 const DISPLAYS = new Set(['x11', 'wayland', 'quartz', 'windows', 'none']);
+const net = require('net');
+// A machine's own networks: private IPv4, the overlay range (100.64/10, Tailscale among them) and IPv6 unique-local.
+const LAN = new net.BlockList();
+LAN.addSubnet('10.0.0.0', 8, 'ipv4');
+LAN.addSubnet('172.16.0.0', 12, 'ipv4');
+LAN.addSubnet('192.168.0.0', 16, 'ipv4');
+LAN.addSubnet('100.64.0.0', 10, 'ipv4');
+LAN.addSubnet('fc00::', 7, 'ipv6');
+/** One LAN address as the Link sent it, or null for anything else (a public address, a name, a malformed one). */
+function lanAddr(v) {
+    if (typeof v !== 'string' || v.length > 45) return null;
+    const fam = net.isIP(v);
+    return fam && LAN.check(v, fam === 4 ? 'ipv4' : 'ipv6') ? v : null;
+}
 
 function clean(m) {
     if (!m || typeof m !== 'object' || Array.isArray(m)) return null;
@@ -27,6 +43,7 @@ function clean(m) {
         disk_total_gb: num(m.disk_total_gb, 1e6), disk_free_gb: num(m.disk_free_gb, 1e6),
         virtualization: { kvm: v.kvm === true, apple_vz: v.apple_vz === true, hyperv: v.hyperv === true, wsl: v.wsl === true, guest: v.guest === true, container: v.container === true },
         display: DISPLAYS.has(m.display) ? m.display : null,
+        lan: [...new Set((Array.isArray(m.lan) ? m.lan : []).slice(0, 8).map(lanAddr).filter(Boolean))],
     };
     if (!out.os_name && !out.cpu.threads && !out.memory_mb) return null;
     return out;
