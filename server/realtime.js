@@ -94,6 +94,9 @@ function computerSummary(kind, value) {
     if (kind === 'exec') return { program: String(value.argv[0]).slice(0, 120), args: value.argv.length - 1, ...where, ...(value.detach === true ? { detach: true } : {}) };
     // A model's prompt is the person's own words: the audit keeps the model, how many messages and how long, never the text.
     // With tools (contracts 0.277.0): how many were offered, never their names' arguments or the results sent back.
+    // An embedding (contracts 0.448.0: { model, input }; 11-18, it crashed here reading messages): how many texts and how
+    // long, never the texts.
+    if (kind === 'ai' && Array.isArray(value.input)) return { model: String(value.model).slice(0, 120), embed: true, inputs: value.input.length, chars: value.input.reduce((n, x) => n + String(x || '').length, 0) };
     if (kind === 'ai') return { model: String(value.model).slice(0, 120), messages: value.messages.length, chars: value.messages.reduce((n, m) => n + String(m.content || '').length, 0), ...(Array.isArray(value.tools) ? { tools: value.tools.length } : {}) };
     if (kind === 'fs') return { op: value.op, path: String(value.path).slice(0, 300), ...(typeof value.content_b64 === 'string' ? { bytes: Math.floor((value.content_b64.length * 3) / 4) } : {}) };
     if (kind === 'probe') { try { const u = new URL(value.target); return { scheme: u.protocol.replace(':', ''), host: u.host }; } catch { return { scheme: null }; } }
@@ -120,6 +123,7 @@ function aiMeterMeta(value) {
     return {
         model: (community ? wanted.slice('community/'.length) : wanted) || 'unknown',
         community,
+        operation: Array.isArray(value.input) ? 'embedding' : 'chat',
         ...(typeof value.task === 'string' && value.task ? { task: value.task.slice(0, 200) } : {}),
     };
 }
@@ -762,7 +766,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             let first = true;
             const call = meter.startCall({
                 system: 'node', run_id: p.opId, provider, model: String(data.model || p.ai.model || 'unknown').slice(0, 200),
-                operation: 'chat', place: p.ai.community ? 'community' : 'machine',
+                operation: p.ai.operation || 'chat', place: p.ai.community ? 'community' : 'machine',
                 ...(p.ai.task ? { task: p.ai.task } : {}),
                 // startCall's clock begins when the command left Bot, so latency is the machine's whole answer.
                 now: () => { if (first) { first = false; return started; } return now(); },
