@@ -110,15 +110,15 @@ function stats({ models, robots }) {
 
 /** The simulated rover anyone can drive, then the robots people list (online first), as one rail. */
 function onlineNow({ robots }) {
-    const sim = kit.card({ href: '/try', title: 'Simulated rover', type: 'game', ratio: '16/9', badge: 'Online', sub: 'Camera, range finder, line sensors, lights, horn', who: 'Anyone, no account', share: false });
-    const cards = robots.slice(0, 8).map((r) => kit.card({ href: `/r/${r.id}`, title: r.name, type: 'game', ratio: '16/9', badge: r.online ? 'Online' : 'Offline', sub: `${r.model_name}${r.owner && r.owner.username ? ` · @${r.owner.username}` : ''}`, who: POLICY_WORDS[r.access_policy] || '', share: false }));
+    const sim = kit.card({ href: '/try', title: 'Simulated rover', type: 'game', ratio: '16/9', image: '/models/sim.rover/art.svg', alt: 'The simulated rover, drawn', badge: 'Online', sub: 'Camera, range finder, line sensors, lights, horn', who: 'Anyone, no account', share: false });
+    const cards = robots.slice(0, 8).map((r) => kit.card({ href: `/r/${r.id}`, title: r.name, type: 'game', ratio: '16/9', ...((r.profile_id || r.model_id) ? { image: `/models/${encodeURIComponent(r.profile_id || r.model_id)}/art.svg`, alt: '' } : {}), badge: r.online ? 'Online' : 'Offline', sub: `${r.model_name}${r.owner && r.owner.username ? ` · @${r.owner.username}` : ''}`, who: POLICY_WORDS[r.access_policy] || '', share: false }));
     return `<section class="sc-sec hm-sec" id="now">${kit.rail({ id: 'now-rail', title: 'Drive one now', icon: 'game', more: { href: '/robots', label: robots.length ? 'The directory' : 'Browse robots' }, items: [sim].concat(cards), wrap: true })}</section>`;
 }
 
 function modelsSection({ models }) {
     if (!models.length) return '';
     const kindOf = (m) => (KINDS.find((k) => k[0] === m.connect) || [, m.connect])[1];
-    const cards = models.map((m) => kit.card({ href: `/models/${m.id}`, title: m.name, type: 'game', ratio: '16/9', badge: kindOf(m), sub: m.capabilities.slice(0, 3).map(capWord).join(' · '), peek: short(m.description), share: false }));
+    const cards = models.map((m) => kit.card({ href: `/models/${m.id}`, title: m.name, type: 'game', ratio: '16/9', image: `/models/${encodeURIComponent(m.id)}/art.svg`, alt: `${m.name}, drawn from its profile`, badge: kindOf(m), sub: m.capabilities.slice(0, 3).map(capWord).join(' · '), peek: short(m.description), share: false }));
     return `<section class="sc-sec hm-sec" id="models">${kit.rail({ id: 'models-rail', title: 'Robots it drives today', icon: 'gear', more: { href: '/models', label: `All ${models.length} models` }, items: cards, wrap: true })}
 <p class="hm-under">Each has a profile the panel draws its controls from: a joystick for a base that drives, sliders for a pan-tilt head, buttons for lights and a horn.</p></section>`;
 }

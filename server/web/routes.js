@@ -406,6 +406,15 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         res.setHeader('Cache-Control', 'public, max-age=300');
         res.type('html').send(renderModels({ config, models: await catalogue() }));
     }));
+    // 11-18: each model's picture, drawn from its profile (web/robot-art.js), for the cards that showed a gamepad.
+    r.get('/models/:id/art.svg', async (req, res, next) => {
+        try {
+            const model = (await catalogue()).find((m) => m.id === req.params.id);
+            if (!model) return res.status(404).end();
+            res.set({ 'Content-Type': 'image/svg+xml; charset=utf-8', 'Cache-Control': 'public, max-age=86400', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'", 'X-Content-Type-Options': 'nosniff' });
+            return res.send(require('./robot-art').artFor(model));
+        } catch (err) { return next(err); }
+    });
     r.get('/models/:id', frameCsp, page(async (req, res) => {
         const model = (await catalogue()).find((m) => m.id === req.params.id);
         if (!model) throw new BotError(404, 'bot.profile_not_found', 'no such model');
