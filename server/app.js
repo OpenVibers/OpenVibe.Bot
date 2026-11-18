@@ -220,6 +220,10 @@ function createApp(opts = {}) {
     const limits = createActorLimits({ config, valkey, now: opts.limitsNow || now, registry: metrics.registry, log });
     // A computer command may carry a file to write (≤ 256 KB, base64): its route alone takes a larger body.
     app.use(/^\/api\/v1\/machines\/[^/]+\/commands$/, express.json({ limit: '400kb' }));
+    // Run's hand-off of a job (POST /api/v1/jobs): Run takes args up to 512 KB and the job frame may be 1 MiB (the
+    // Link's frame limit), so this route takes a body up to that (11-18: a 10 s speech segment for the shared node's
+    // Parakeet was refused 413 at 64 KB).
+    app.use(/^\/api\/v1\/jobs$/, express.json({ limit: '1mb' }));
     app.use('/api/v1', express.json({ limit: '64kb' }), (req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); }, apiAuth.middleware, v1Router({ domain, apiAuth, limits, hub, jobs, config, submissions, routines, webhooks, claims }));
     app.use('/auth', createSessionRoutes(config, userAuth, { fetchImpl, log }));
     // ── The legal pages: Terms, Privacy and DMCA on openvibe.bot itself (openvibe-shared/legal). ──
