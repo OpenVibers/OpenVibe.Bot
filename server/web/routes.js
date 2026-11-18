@@ -785,7 +785,9 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         if (!robot) throw new BotError(404, 'bot.robot_not_found', 'no such robot');
         if (robot.owner_subject !== me.subject) throw new BotError(403, 'bot.forbidden', 'only the owner may choose who drives');
         const policy = String((req.body && req.body.access_policy) || '');
-        if (!['private', 'invite', 'queue'].includes(policy)) throw new BotError(422, 'bot.invalid_policy', 'choose who may drive');
+        // Crowd control is set through the API for now (render.js policiesFor): the form may keep it, never choose it.
+        const allowed = robot.access_policy === 'crowd' ? ['private', 'invite', 'queue', 'crowd'] : ['private', 'invite', 'queue'];
+        if (!allowed.includes(policy)) throw new BotError(422, 'bot.invalid_policy', 'choose who may drive');
         await domain.robots.update(robot.id, { access_policy: policy });
         if (hub) hub.broadcast(robot.id);
         res.redirect(303, `/panel/${robot.id}#on-stream`);

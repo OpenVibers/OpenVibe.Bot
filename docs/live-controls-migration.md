@@ -45,7 +45,7 @@ lines) let viewers drive a streamer's hardware from the channel page:
 | Hold keys | The same `button` command with `hold: true` (pressed → `{kind:'button', name, state:'down'}`, released → `up`), under the device-side deadman like every hold control |
 | Video click | A `point` command (new kind): `{ kind: 'point', x, y }` with `x, y ∈ [0, 1]`, rendered as a click layer on the camera tile, with its own cooldown |
 | ONVIF movement | Bot's server-side ONVIF camera (`camera.onvif`, `BOT_ONVIF_CAMERAS`), already built |
-| Controls on/off, login required | The robot's access policy (`private` / `invite` / `queue`); controls are never anonymous |
+| Controls on/off, login required | The robot's access policy (`private` / `invite` / `queue` / `crowd`); controls are never anonymous |
 | Whitelist | Operators added by @username (built) |
 | Per-viewer rate limit, cooldowns | The command gate's per-robot limits and cooldowns (built), plus the per-button `cooldown_ms` |
 | The hardware client and its stream-key socket | The OpenVibe **Link** paired to the robot, running a **relay** plugin (below); the stream key stops being a robot credential |
