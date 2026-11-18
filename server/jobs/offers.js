@@ -81,24 +81,52 @@ function createOfferPublisher({ db, hub, reporter = null, aiReporter = null, log
         // Desk hosts that serve other people (contracts 0.223.0, Desks plan D6): a browser desk per session for anyone,
         // each in its own sandbox there, placed by OpenVibe.Run and leased through Bot (api/desk-leases.js). Community,
         // or first-party for the owners configured as OpenVibe's own (BOT_FIRST_PARTY_DESK_OWNERS).
+        // Whole desktops too where the owner lends them (shared_desktops, Link v0.65.0): worker:desktop.
         const shared = await db.many(
-            `SELECT d.id, d.capabilities, d.owner_subject, r.owner_subject AS robot_owner
+            `SELECT d.id, d.capabilities, d.owner_subject, d.shared_desks, d.shared_desktops, r.owner_subject AS robot_owner
              FROM devices d LEFT JOIN robots r ON r.id = d.robot_ids ->> 0
-             WHERE d.revoked_at IS NULL AND d.shared_desks = true ORDER BY d.id`);
+             WHERE d.revoked_at IS NULL AND (d.shared_desks = true OR d.shared_desktops = true) ORDER BY d.id`);
         for (const row of shared) {
             const desk = ((json(row.capabilities, {}).computer || {}).desk) || {};
-            if (desk.isolation !== 'sandbox' || !Array.isArray(desk.kinds) || !desk.kinds.includes('browser')) continue;
+            if (desk.isolation !== 'sandbox' || !Array.isArray(desk.kinds)) continue;
+            const lent = [...(row.shared_desks && desk.kinds.includes('browser') ? ['worker:browser'] : []),
+                ...(row.shared_desktops && desk.kinds.includes('desktop') ? ['worker:desktop'] : [])];
+            if (!lent.length) continue;
             const owner = row.owner_subject || row.robot_owner;
             const offer = {
                 offer_id: `desk:${row.id}`, kind: 'node', node_id: row.id, provider: 'self', region: 'home',
                 trust: firstParty.has(owner) ? 'first-party' : 'community',
-                capabilities: ['worker:browser'],
+                capabilities: lent,
                 health: { status: hub && hub.isOnline(row.id) ? 'up' : 'down', checked_at: at },
                 pricing: { model: 'per-second', marginal_usd_per_unit: 0, unit: 'desk-second' },
                 updated_at: at,
             };
             const v = validate(CONTRACT, offer);
             if (!v.valid) { log.warn(`[Bot] offers: desk host ${row.id} does not match ${CONTRACT}, left out`); continue; }
+            offers.push(offer);
+        }
+        // Machines that run other people's jobs (shared_jobs, the Link's worker.serve_others, v0.65.0): one community (or
+        // first-party) offer per machine, `jobs:<device>`, advertising its worker classes. The dispatcher sends such a
+        // job marked for another person, and the Link runs it without the owner's sign-ins.
+        const lending = await db.many(
+            `SELECT d.id, d.capabilities, d.owner_subject, r.owner_subject AS robot_owner
+             FROM devices d LEFT JOIN robots r ON r.id = d.robot_ids ->> 0
+             WHERE d.revoked_at IS NULL AND d.shared_jobs = true ORDER BY d.id`);
+        for (const row of lending) {
+            const worker = json(row.capabilities, {}).worker || {};
+            const classes = (Array.isArray(worker.runtime_classes) ? worker.runtime_classes : []).filter((c) => CLASSES.has(c));
+            const owner = row.owner_subject || row.robot_owner;
+            if (worker.serve_others !== true || !classes.length || !owner) continue;
+            const offer = {
+                offer_id: `jobs:${row.id}`, kind: 'node', node_id: row.id, provider: 'self', region: 'home',
+                trust: firstParty.has(owner) ? 'first-party' : 'community',
+                capabilities: classes.map((c) => `worker:${c}`),
+                health: { status: hub && hub.isOnline(row.id) ? 'up' : 'down', checked_at: at },
+                pricing: { model: 'free-allowance', marginal_usd_per_unit: 0 },
+                updated_at: at,
+            };
+            const v = validate(CONTRACT, offer);
+            if (!v.valid) { log.warn(`[Bot] offers: ${row.id}'s shared worker does not match ${CONTRACT}, left out`); continue; }
             offers.push(offer);
         }
         return offers;

@@ -984,9 +984,17 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     async function setSharedDesks(deviceId, value) {
         return db.maybe('UPDATE devices SET shared_desks = $2, updated_at = $3 WHERE id = $1 AND revoked_at IS NULL RETURNING *', [deviceId, !!value, iso(now())]);
     }
-    /** Every live machine whose owner offers its desks to other people (Run's placement; the live checks are the caller's). */
+    /** Lend this machine's whole desktops to other people's agents, or stop (Link v0.65.0; the checks are the caller's). */
+    async function setSharedDesktops(deviceId, value) {
+        return db.maybe('UPDATE devices SET shared_desktops = $2, updated_at = $3 WHERE id = $1 AND revoked_at IS NULL RETURNING *', [deviceId, !!value, iso(now())]);
+    }
+    /** Run other people's jobs on this machine, or stop (Link v0.65.0 worker.serve_others; the checks are the caller's). */
+    async function setSharedJobs(deviceId, value) {
+        return db.maybe('UPDATE devices SET shared_jobs = $2, updated_at = $3 WHERE id = $1 AND revoked_at IS NULL RETURNING *', [deviceId, !!value, iso(now())]);
+    }
+    /** Every live machine whose owner lends its browser desks or desktops to other people (Run's placement; the live checks are the caller's). */
     async function listSharedDesks() {
-        return db.many('SELECT * FROM devices WHERE revoked_at IS NULL AND shared_desks = true ORDER BY created_at');
+        return db.many('SELECT * FROM devices WHERE revoked_at IS NULL AND (shared_desks = true OR shared_desktops = true) ORDER BY created_at');
     }
     /**
      * The roles a machine has for the network (plan L34, step M4): the owner's choice, checked against the
@@ -1045,13 +1053,17 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
             return row && row.task_origins != null ? (typeof row.task_origins === 'string' ? JSON.parse(row.task_origins) : row.task_origins) : null;
         },
         async count(deviceId) { return Number((await db.one('SELECT count(*)::int AS n FROM desk_leases WHERE device_id = $1', [deviceId])).n); },
+        /** The room the leases take, in half desks: a browser desk 1, a whole desktop 2 (the Link's own count). */
+        async cost(deviceId) {
+            return Number((await db.one("SELECT COALESCE(sum(CASE WHEN kind = 'desktop' THEN 2 ELSE 1 END), 0)::int AS n FROM desk_leases WHERE device_id = $1", [deviceId])).n);
+        },
         async list(deviceId) { return (await db.many('SELECT * FROM desk_leases WHERE device_id = $1 ORDER BY created_at', [deviceId])).map(leaseOut); },
         /** The lease, or null when the desk is someone else's already (the caller answers 409). */
-        async create({ deviceId, desk, session, owner, width, height, shared, origins = null }) {
+        async create({ deviceId, desk, session, owner, width, height, shared, origins = null, kind = 'browser' }) {
             const r = await db.maybe(
                 `INSERT INTO desk_leases (device_id, desk, session_id, owner_subject, kind, width, height, shared, task_origins, created_at)
-                 VALUES ($1, $2, $3, $4, 'browser', $5, $6, $7, $8, $9) ON CONFLICT DO NOTHING RETURNING *`,
-                [deviceId, desk, session, owner, width, height, !!shared, origins === null ? null : JSON.stringify(origins), iso(now())]);
+                 VALUES ($1, $2, $3, $4, $10, $5, $6, $7, $8, $9) ON CONFLICT DO NOTHING RETURNING *`,
+                [deviceId, desk, session, owner, width, height, !!shared, origins === null ? null : JSON.stringify(origins), iso(now()), kind === 'desktop' ? 'desktop' : 'browser']);
             return leaseOut(r);
         },
         async remove(deviceId, desk) { return leaseOut(await db.maybe('DELETE FROM desk_leases WHERE device_id = $1 AND desk = $2 RETURNING *', [deviceId, desk])); },
@@ -1093,6 +1105,10 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         return { device, ...videoKey(issued), profile: profile ? profile.profile : null };
     }
     /** Persist what a Network-paired device declares (kind, drivers, capabilities, agent_version): only the given fields. */
+    /** What the machine is (Link v0.66), already bounded by server/machine-specs.js. */
+    async function setSpecs(id, specs) {
+        return db.maybe('UPDATE devices SET specs = $2::jsonb, specs_at = $3 WHERE id = $1 AND revoked_at IS NULL RETURNING *', [id, JSON.stringify(specs), iso(now())]);
+    }
     async function updateDeclared(id, { kind, drivers, capabilities, agent_version: agentVersion }) {
         if (capabilities) changed();
         return db.maybe(
@@ -1664,9 +1680,9 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         operators: { stateOf: operatorStateOf, policy: operatorPolicy, list: listRoster, act: actOperator,
             audit: auditOperator, auditList: listOperatorAudit, setSole, roles: OPERATOR_ROLES },
         pairing: { create: createPairingCode, redeem, prune: prunePairingCodes, installerCommand, driverForProfile, whipUrl, onPaired },
-        devices: { byCredential, bindNode, issuePublishKey, revokeVideo, updateDeclared, setFleet, revokeNode, ensureServerDevice, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, revokeByNode, touchSeen, setOnline, ownerOf, onChange,
+        devices: { byCredential, bindNode, issuePublishKey, revokeVideo, updateDeclared, setSpecs, setFleet, revokeNode, ensureServerDevice, get: getDevice, listForRobot: listDevicesForRobot, rotate: rotateDevice, revoke: revokeDevice, revokeByNode, touchSeen, setOnline, ownerOf, onChange,
             recordFirstRun, firstRunOf, firstRunFunnel },
-        machines: { mint: mintMachine, list: listMachines, workerRef, setAgentComputer, setAiModels, setWatchProbe, setVoice, setSharedDesks, listSharedDesks,
+        machines: { mint: mintMachine, list: listMachines, workerRef, setAgentComputer, setAiModels, setWatchProbe, setVoice, setSharedDesks, setSharedDesktops, setSharedJobs, listSharedDesks,
             setRoles: setMachineRoles, rename: renameMachine, runningJobs, reportStatus: reportMachineStatus,
             screen: { key: screenKey, liveKey: liveScreenKey, live: screenLive, end: screenEnd, archive: screenArchive } },
         phone: { mint: mintPhone, ref: phoneRef },

@@ -129,7 +129,7 @@
 .hm-fold-block > summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 48px; padding: 0 16px; cursor: pointer; color: var(--text-primary, #e6edf7); font-weight: 700; list-style: none; border: 1px solid var(--border, rgba(255, 255, 255, .08)); border-radius: 14px; background: var(--bg-secondary, #101828); }
 .hm-fold-block > summary::-webkit-details-marker { display: none; }
 .hm-fold-block > summary h2 { margin: 0; padding: 0; border: 0; font-size: 1.05rem; }
-.hm-fold-block > summary span { color: var(--text-secondary, #96a7c2); font-weight: 600; font-size: .86rem; text-align: right; }
+.hm-fold-block > summary > span { color: var(--text-secondary, #96a7c2); font-weight: 600; font-size: .86rem; text-align: right; }
 .hm-fold-block > summary:focus-visible { outline: 2px solid var(--accent, #3b82f6); outline-offset: -2px; border-radius: 14px; }
 .hm-fold-block .sc-sec { margin: 0; }
 .hm-fold-block .sc-sec > h2, .hm-fold-block .sc-sec .hm-h { display: none; }
@@ -137,7 +137,24 @@
   .hm-fold-block { border: 0; background: none; margin-top: 40px; }
   .hm-fold-block > summary { display: block; min-height: 0; padding: 0; border: 0; background: none; }
   .hm-fold-block > summary h2 { margin: 0 0 6px; font-size: 1.15rem; border-bottom: 1px solid var(--border, color-mix(in srgb, var(--text-primary, #fff) 8%, transparent)); padding-bottom: .2em; }
-  .hm-fold-block > summary span { display: none; }
+  .hm-fold-block > summary > span { display: none; }
 }
 /* Design rule 201: the intro is one line on a computer, at most two on a phone. */
 @media (max-width: 640px) { .hm-fold-lede { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; } }
+
+/* 11-18 (the owner's phone: the folded sections as separate cards with big gaps, no sign they open, and the jobs heading
+   twice once open, "improve"): on a phone the folds sit close as one list, each with a chevron that turns, and inside one
+   the list's own heading goes (its More link stays, at the end). */
+@media (max-width: 640px) {
+  .hm-fold-block { margin: 10px 0; }
+  .hm-fold-block + script + .hm-fold-block, .hm-fold-block + .hm-fold-block { margin-top: 8px; }
+  .hm-fold-block > summary { position: relative; padding-right: 44px; min-height: 56px; }
+  .hm-fold-block > summary::after { content: ""; position: absolute; right: 18px; top: 50%; width: 8px; height: 8px; margin-top: -6px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg); opacity: .55; transition: transform .2s ease; }
+  .hm-fold-block[open] > summary::after { transform: rotate(225deg); margin-top: -2px; }
+  .hm-fold-block[open] > summary { margin-bottom: 10px; }
+  .hm-fold-block .ovk-list-head h2 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .hm-fold-block .ovk-list-head { display: flex; justify-content: flex-end; order: 2; }
+  .hm-fold-block .sc-sec { display: flex; flex-direction: column; }
+  .hm-fold-block .ovk-list { order: 1; }
+}
+html[data-ov-motion="off"] .hm-fold-block > summary::after { transition: none; }

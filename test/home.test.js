@@ -48,7 +48,7 @@ const { boot, check, done } = require('./helpers/app');
         for (const t of ['WebSite', 'WebApplication', 'ItemList', 'FAQPage']) assert.ok(types.includes(t), `JSON-LD ${t}`);
         assert.strictEqual(ld.find((x) => x['@type'] === 'ItemList').numberOfItems, shipped.length);
         const faq = (/<section class="sc-sec hm-sec" id="faq">[\s\S]*?<\/section><\/section>/.exec(html) || [''])[0];
-        const questions = [...faq.matchAll(/<summary>([^<]+)<\/summary>/g)].map((m) => m[1].replace(/&#39;/g, "'"));
+        const questions = [...faq.matchAll(/<summary>(?:<span class="sc-q-ic"[^>]*>[\s\S]*?<\/span>)?(?:<span>)?([^<]+)(?:<\/span>)?<\/summary>/g)].map((m) => m[1].replace(/&#39;/g, "'"));
         assert.deepStrictEqual(ld.find((x) => x['@type'] === 'FAQPage').mainEntity.map((q) => q.name), questions, 'FAQPage holds exactly the questions shown');
         assert.ok(questions.length >= 6);
         // Your own computers: desks for your agents, desk hosts, your own models, a desk live (the Desks plan, AI on your

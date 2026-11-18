@@ -19,6 +19,7 @@
  * a job it already holds again, or answers with its job_exit, and never runs one twice). job_exit_ack goes out
  * once every reading of the job is committed to run_usage_outbox, from which the relay delivers it to Billing.
  */
+const crypto = require('crypto');
 const { validate } = require('openvibe-contracts');
 const store = require('./store');
 const metering = require('./metering');
@@ -37,7 +38,37 @@ function advertisedClasses(capabilities) {
     return worker && Array.isArray(worker.runtime_classes) ? worker.runtime_classes.filter((c) => typeof c === 'string') : [];
 }
 const canonical = (v) => JSON.stringify(v, (k, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((key) => [key, x[key]])) : x));
-const liveDevice = (db, id) => db.maybe('SELECT id, capabilities, robot_ids, owner_subject, agent_version FROM devices WHERE id = $1 AND revoked_at IS NULL', [id]);
+const liveDevice = (db, id) => db.maybe('SELECT id, capabilities, robot_ids, owner_subject, agent_version, shared_jobs FROM devices WHERE id = $1 AND revoked_at IS NULL', [id]);
+/** Whether a machine runs other people's jobs now: its owner's shared_jobs and its Link's worker.serve_others (v0.65.0). */
+const servesOthers = (device) => !!(device && device.shared_jobs && (json(device.capabilities, {}).worker || {}).serve_others === true);
+/** The person a job is for (`user:usr_…` → usr_…), or null for a service's or nobody's. */
+const personOf = (subject) => (typeof subject === 'string' && /^user:usr_/.test(subject) ? subject.slice('user:'.length) : null);
+
+// A person's own sandbox on a machine (contracts 0.442.0 platform.job@1 `sandbox`, Link v0.72.0; the owner, 11-16: "that
+// shit should install when the user goes to use openvibe.computer or openvibe.link … their sandbox"). Another person's
+// job names it, so the machine keeps that person's installed agents and sign-ins for their next job, without learning
+// who they are: a keyed hash of the machine and the person, the same every time, different on every machine. The key
+// is BOT_SANDBOX_KEY, else one derived from the service's own secret for this purpose only; with neither, no id is sent
+// and the job keeps nothing (as before). The machine owner's own job names none (its sandbox is the owner's).
+let sandboxKey = null;
+function sandboxKeyOf(env = process.env) {
+    if (sandboxKey !== null) return sandboxKey;
+    const own = String(env.BOT_SANDBOX_KEY || '').trim();
+    const base = String(env.OV_OAUTH_CLIENT_SECRET || '').trim();
+    sandboxKey = own ? Buffer.from(own) : base ? Buffer.from(crypto.hkdfSync('sha256', base, 'openvibe.bot', 'sandbox id v1', 32)) : Buffer.alloc(0);
+    return sandboxKey;
+}
+function sandboxOf(nodeId, person, env) {
+    const key = sandboxKeyOf(env);
+    if (!key.length || !person || !nodeId) return null;
+    return `sbx_${crypto.createHmac('sha256', key).update(`${nodeId}\n${person}`).digest('hex').slice(0, 32)}`;
+}
+/** The job frame for a device: another person's job marked and, when a key exists, naming their sandbox. */
+function jobFrame(job, nodeId, person, other) {
+    if (!other) return { type: 'job', job };
+    const sandbox = sandboxOf(nodeId, person);
+    return { type: 'job', job: sandbox ? { ...job, sandbox } : job, for: 'other' };
+}
 // A skill job runs code the person (or a model) wrote, inside the job's own directory: the skill can read every
 // file there. OpenVibe.Link v0.56.0 is the first Link whose job sandbox keeps the owner's sign-in files out of
 // that directory, so an older Link cannot run a skill job: its plan logins would sit where the skill can read
@@ -80,12 +111,13 @@ async function dispatch(db, nodeId, job, { link, project = null, subject = null,
     const device = await liveDevice(db, nodeId);
     if (!device) fail(404, 'bot.device_not_found', 'no such device, or it is revoked');
     if (!advertisedClasses(device.capabilities).includes(job.class)) fail(409, 'bot.class_unadvertised', `the device does not advertise the runtime class ${job.class}`);
-    // A person's machine runs only that person's own jobs (contracts 0.161.0, ADR-046): Run names the job's requester
-    // as `subject`, and anyone else's job, or a job for nobody, is refused here whatever the placer chose.
-    // `subject` is a subject reference (`user:usr_…`, how Run formats a person); a service's or nobody's job never runs.
+    // A person's machine runs that person's own jobs (contracts 0.161.0, ADR-046), and another person's only where its
+    // owner turned "Run other people's jobs" on (shared_jobs) and its Link serves other people (worker.serve_others,
+    // v0.65.0; 2026-11-14). Run names the job's requester as `subject` (`user:usr_…`); a service's or nobody's job
+    // never runs on a person's machine, whatever the placer chose.
     const owner = await ownerOfDevice(db, device);
-    const person = typeof subject === 'string' && /^user:usr_/.test(subject) ? subject.slice('user:'.length) : null;
-    if (!owner || person !== owner) fail(403, 'bot.not_owner', "a person's machine runs only that person's own jobs");
+    const person = personOf(subject);
+    if (!owner || !person || (person !== owner && !servesOthers(device))) fail(403, 'bot.not_owner', "a person's machine runs only that person's own jobs, unless its owner lends it");
     // A skill job needs the Link's isolated job sandbox (v0.56.0 and later). An older Link, or one whose version
     // was never read, cannot have it: the job is refused here, with the words the person needs.
     if (String(job.artifact && job.artifact.name) === SKILL_RUNNER_ARTIFACT && !linkCarriesGuarantee(device.agent_version)) {
@@ -98,10 +130,27 @@ async function dispatch(db, nodeId, job, { link, project = null, subject = null,
     }
     let sent = false;
     if (row.state === 'queued' && !row.cancel_requested) {
-        sent = !!(link && link.sendToDevice(nodeId, { type: 'job', job }));
+        // Another person's job is marked so: the Link runs it without the owner's sign-ins (Link v0.65.0).
+        sent = !!(link && link.sendToDevice(nodeId, jobFrame(job, nodeId, person, person !== owner)));
         if (sent) await store.markSent(db, job.id, now());
     }
     return { job: await store.get(db, job.id), sent };
+}
+
+/**
+ * What the person typed to their running interactive job (job_stdin, contracts 0.442.0): an agent's own sign-in reads the
+ * code its sign-in page shows. Only a running job takes it; `subject`, when the caller names it,
+ * must be the job's own. → { job, sent }
+ */
+async function stdin(db, jobId, { data = '', eof = false, subject = null } = {}, { link } = {}) {
+    if (typeof data !== 'string' || Buffer.byteLength(data) > 4096) fail(422, 'bot.invalid_input', 'data is text of at most 4096 bytes');
+    const row = await store.get(db, String(jobId));
+    if (!row) fail(404, 'bot.job_not_found', 'no such job');
+    if (subject != null && row.subject !== subject) fail(403, 'bot.not_owner', 'only the job\'s own person types to it');
+    // Only a job that started (its Link said job_started) and has not ended: input sent sooner would be dropped there.
+    if (row.state !== 'running' || row.exit_reason != null || row.finished_at != null) fail(409, 'bot.job_not_running', 'the job is not running');
+    const sent = !!(link && link.sendToDevice(row.node_id, { type: 'job_stdin', id: row.id, ...(data ? { data } : {}), ...(eof ? { eof: true } : {}) }));
+    return { job: row, sent };
 }
 
 /** Ask the device to stop the job. A job not yet started is cancelled at once; job_exit still settles it. → { job, sent } */
@@ -141,9 +190,15 @@ function createJobFrames({ db: getDb, usage = null, log = console, now = () => D
         const device = await liveDevice(db, link.deviceId);
         if (!device) return;
         const classes = advertisedClasses(device.capabilities);
+        const owner = await ownerOfDevice(db, device);
         for (const row of await store.unacked(db, link.deviceId)) {
             if (!classes.includes(row.class)) { await store.markRefused(db, row.id, 'bot.class_unadvertised', now()); continue; }
-            if (link.send('job', { job: json(row.job, {}) })) await store.markSent(db, row.id, now());
+            // Another person's job goes out marked, and only while the machine still lends itself.
+            const other = personOf(row.subject) !== owner;
+            if (other && !servesOthers(device)) { await store.markRefused(db, row.id, 'bot.not_owner', now()); continue; }
+            const f = jobFrame(json(row.job, {}), link.deviceId, personOf(row.subject), other);
+            const { type, ...fields } = f;
+            if (link.send(type, fields)) await store.markSent(db, row.id, now());
         }
         for (const { id } of await store.cancelPending(db, link.deviceId)) link.send('job_cancel', { id });
     }
@@ -251,4 +306,4 @@ function createJobFrames({ db: getDb, usage = null, log = console, now = () => D
     return { onAck, onConnect, onFrame, stdout };
 }
 
-module.exports = { dispatch, cancel, createJobFrames, advertisedClasses, linkCarriesGuarantee, versionOf, MIN_SKILL_LINK, SKILL_RUNNER_ARTIFACT, UPDATE_LINK };
+module.exports = { dispatch, cancel, stdin, sandboxOf, createJobFrames, advertisedClasses, linkCarriesGuarantee, versionOf, MIN_SKILL_LINK, SKILL_RUNNER_ARTIFACT, UPDATE_LINK };
