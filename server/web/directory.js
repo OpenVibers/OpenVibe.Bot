@@ -91,7 +91,7 @@ const CAPABILITY_WORDS = {
     'sensor.pickup': 'Pick-up sensor', battery: 'Battery', ptz: 'Pan, tilt, zoom', camera: 'Live camera', relay: 'Your own buttons',
     'lights.torch': 'Torch', 'sensor.tilt': 'Tilt sensor',
 };
-const POLICY_WORDS = { private: 'Only its owner and the people they add drive it.', invite: 'People the owner invites drive it.', queue: 'Anyone signed in can take a timed turn.' };
+const POLICY_WORDS = { private: 'Only its owner and the people they add drive it.', invite: 'People the owner invites drive it.', queue: 'Anyone signed in can take a timed turn.', crowd: 'Everyone in the panel steers it together.' };
 
 /** A catalogue profile as a model: its own fields plus MODELS. */
 /**

@@ -28,7 +28,13 @@ const DEFAULT_ALLOW = {
     mod: ['drive', 'actuator', 'ptz', 'say', 'display', 'button', 'point', 'headlight', 'halt'],
     operator: ['drive', 'actuator', 'ptz', 'say', 'display', 'button', 'point', 'headlight', 'halt'],
     queue: ['drive', 'button', 'point', 'halt'],
+    // Crowd control (plan §H2): what the crowd's one mixed command may be. A crowd member never sends a command of
+    // their own (realtime.js makes their drive an input for the mixer), and has no halt: stopping is the owner's,
+    // a Mod's or an Operator's.
+    crowd: ['drive'],
 };
+const POLICIES = ['private', 'invite', 'queue', 'crowd'];
+const CROWD_STYLES = ['tug', 'last', 'mixed'];
 const KINDS = new Set(['drive', 'actuator', 'ptz', 'say', 'display', 'button', 'point', 'headlight', 'halt']);
 const MOTION = new Set(['drive', 'actuator', 'ptz']);
 const CONTROL_ROLES = new Set(['owner', 'mod', 'operator', 'queue']);
@@ -276,7 +282,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         if (!profile) fail(422, 'bot.unknown_profile', `no profile ${profile_id}`);
         const cleanName = text(name, 'name', 80);
         if (!cleanName) fail(422, 'bot.invalid_input', 'name is required');
-        if (!['private', 'invite', 'queue'].includes(access_policy)) fail(422, 'bot.invalid_policy', 'access_policy must be private, invite or queue');
+        if (!POLICIES.includes(access_policy)) fail(422, 'bot.invalid_policy', 'access_policy must be private, invite, queue or crowd');
         const id = prefixedId('rob', now());
         const at = iso(now());
         // A Network-minted code comes first, so a Network that does not answer leaves no robot behind.
@@ -297,6 +303,14 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
             const n = Number(limits[k]);
             if (limits[k] != null && Number.isFinite(n) && n >= 0) out[k] = n;
         }
+        // Crowd control's settings: the style, the window and the viewer speed cap (a fraction of each axis's range).
+        if (limits.crowd && typeof limits.crowd === 'object') {
+            const c = limits.crowd; const o = {};
+            if (CROWD_STYLES.includes(c.style)) o.style = c.style;
+            const w = Number(c.window_ms); if (c.window_ms != null && Number.isFinite(w)) o.window_ms = Math.max(50, Math.min(2000, Math.round(w)));
+            const cap = Number(c.cap); if (c.cap != null && Number.isFinite(cap)) o.cap = Math.max(0, Math.min(1, cap));
+            out.crowd = o;
+        }
         if (limits.allow && typeof limits.allow === 'object') {
             out.allow = {};
             for (const role of ['owner', 'mod', 'operator', 'queue']) {
@@ -308,7 +322,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     async function updateRobot(id, { name, access_policy, limits }, actor = null) {
         const sets = []; const args = [id];
         if (name !== undefined) { const n = text(name, 'name', 80); if (!n) fail(422, 'bot.invalid_input', 'name cannot be empty'); args.push(n); sets.push(`name = $${args.length}`); }
-        if (access_policy !== undefined) { if (!['private', 'invite', 'queue'].includes(access_policy)) fail(422, 'bot.invalid_policy', 'bad access_policy'); args.push(access_policy); sets.push(`access_policy = $${args.length}`); }
+        if (access_policy !== undefined) { if (!POLICIES.includes(access_policy)) fail(422, 'bot.invalid_policy', 'bad access_policy'); args.push(access_policy); sets.push(`access_policy = $${args.length}`); }
         if (limits !== undefined) {
             // Raising a drive limit above the profile default is the owner's own act, never an operator's, an
             // agent's or an app token's — commissioning is only the first half. Lower values stay settable.
@@ -1448,6 +1462,13 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
      * What `role` may send to this robot: the owner's allowlist for the role (or the default), cut to the
      * kinds the profile takes. Every role that may drive also gets `halt`, which no allowlist removes.
      */
+    /** A crowd robot's mixer settings (server/crowd/mixers.js configOf): the profile's drive axes, the owner's style,
+     *  window and viewer cap (0.5 of each axis unless the owner set it). */
+    const crowdConfig = (robot, profile = null) => {
+        const c = (json(robot.limits, {}).crowd) || {};
+        const axes = (profile && profile.commands && profile.commands.drive && profile.commands.drive.axes) || {};
+        return { style: c.style || 'mixed', windowMs: c.window_ms || 250, cap: c.cap != null ? c.cap : 0.5, axes };
+    };
     const allowedFor = (robot, role, profile = null) => {
         const rl = json(robot.limits, {});
         const fromOwner = rl.allow && Array.isArray(rl.allow[role]) ? rl.allow[role] : null;
@@ -1580,9 +1601,13 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         if (!profileTakes(profile, kind)) return { ok: false, code: 'bot.command_not_allowed', reason: `this robot takes no ${kind} commands`, robot };
         const halt = kind === 'halt';
 
+        // The crowd's one mixed command (server/crowd/session.js): the `crowd` role, on a crowd robot only, whatever the
+        // principal's subject (the robot owner's, as the authority that turned crowd control on) would be as a member.
+        const crowdMix = !!(principal && principal.kind === 'crowd');
+        if (crowdMix && robot.access_policy !== 'crowd') return { ok: false, code: 'bot.not_crowd', reason: 'this robot is not driven by its crowd', robot };
         const subject = principal && principal.kind !== 'device' ? principal.subject : null;
-        const member = await operatorStateOf(robotId, subject);
-        let role = member ? member.role : null;
+        const member = crowdMix ? null : await operatorStateOf(robotId, subject);
+        let role = crowdMix ? 'crowd' : member ? member.role : null;
         if (!role && robot.access_policy === 'queue' && subject) {
             const turn = await currentTurn(robotId);
             if (turn && turn.subject === subject) role = 'queue';
@@ -1600,10 +1625,11 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
             return { ok: false, code: 'bot.operator_off', reason: 'You are switched off on this robot. The owner or a Mod can switch you back on.', robot, role };
         }
         // Sole control: one authenticated subject's commands are admitted; the owner always overrides and a safety
-        // command (halt) always passes. This is a gate rule, not a motion kind, so it never renews a drive lease.
-        if (!halt && role !== 'owner' && subject) {
+        // command (halt) always passes. This is a gate rule, not a motion kind, so it never renews a drive lease. The
+        // crowd's mix is never the sole subject: sole control given to anyone stops the crowd.
+        if (!halt && role !== 'owner' && (subject || crowdMix)) {
             const policy = await operatorPolicy(robotId);
-            if (policy.sole_subject && policy.sole_subject !== subject) {
+            if (policy.sole_subject && (crowdMix || policy.sole_subject !== subject)) {
                 return { ok: false, code: 'bot.sole_control', reason: 'Sole control is on: only the person it was given to can send commands right now. The owner or a Mod can switch back to Everyone.', robot, role };
             }
         }
@@ -1691,7 +1717,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         video: { live: liveVideo },
         queue: { join: joinQueue, leave: leaveQueue, state: queueState, currentTurn, consume: consumeTurn, sweep: sweepQueues, onHandoff, onResume, epoch: epochOf, giveBack, OWNER_IDLE_MS },
         audit: { record: auditCommand, list: listAudit, listPage: listAuditPage, prune: pruneAudit },
-        control: { prepare, allowedFor, effectiveLimits, deviceLimits, buildValue, DEFAULT_ALLOW, KINDS },
+        control: { prepare, allowedFor, effectiveLimits, deviceLimits, buildValue, DEFAULT_ALLOW, KINDS, crowdConfig },
     };
 }
 

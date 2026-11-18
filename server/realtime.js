@@ -24,6 +24,7 @@
 const { WebSocketServer } = require('ws');
 const jwt = require('jsonwebtoken');
 const { createControlTickets, ticketFromProtocols, PROTOCOL: TICKET_PROTOCOL } = require('./control-tickets');
+const { createCrowd } = require('./crowd/session');
 const { capabilities, ids, validate } = require('openvibe-contracts');
 const { json, iso, prefixedId } = require('./util');
 const { userPrincipal, verifyService, verifyLink, isLinkToken, PRINCIPAL_SUB, decodePayload } = require('./api/auth');
@@ -180,6 +181,45 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     const movementLeaseUntil = new Map();
     // The person always wins a screen (machines): `${device}|${main|private}` → until when a person's input holds it.
     const personTurns = new Map();
+    // Crowd control (plan §H2, server/crowd/): on a robot whose access_policy is `crowd`, a member's drive is an input;
+    // each tick the mixer's one command goes through the same gate and send as an operator's (sendOperatorCommand), as
+    // the `crowd` role under the owner's authority. Its results go to no socket; the audit keeps each one.
+    const crowdConns = new Map();   // robotId → the crowd's own sender (no socket)
+    // The crowd's command goes out four times a second; its audit keeps one row a second per robot and result.
+    const crowdAuditAt = new Map();
+    function recordAudit(row) {
+        if (row.role === 'crowd') {
+            const k = `${row.robotId}|${row.result}`;
+            const t = now();
+            if (t - (crowdAuditAt.get(k) || 0) < 1000) return Promise.resolve();
+            crowdAuditAt.set(k, t);
+        }
+        return domain.audit.record(row);
+    }
+    let crowdSeq = 0;
+    const crowd = createCrowd({
+        now, log,
+        configFor: async (robotId) => {
+            const robot = domain && await domain.robots.get(robotId);
+            if (!robot || robot.access_policy !== 'crowd') return { axes: {} };   // no axes: idle, nothing is sent
+            const row = await getProfile(domain.db, robot.profile_id, robot.profile_version);
+            return domain.control.crowdConfig(robot, row ? row.profile : null);
+        },
+        send: async (robotId, axes) => {
+            const robot = domain && await domain.robots.get(robotId);
+            if (!robot || robot.access_policy !== 'crowd') return;
+            let conn = crowdConns.get(robotId);
+            if (!conn || conn.subject !== robot.owner_subject) {
+                conn = { ws: { readyState: -1 }, seq: 0, robotId, role: 'crowd', subject: robot.owner_subject, principal: { kind: 'crowd', subject: robot.owner_subject } };
+                crowdConns.set(robotId, conn);
+            }
+            const id = `crowd-${++crowdSeq}`;
+            const key = `crowd|${robotId}|${id}`;
+            inflight.set(key, null);
+            try { await sendOperatorCommand(conn, { kind: 'drive', value: axes, ms: 300 }, id, key); }
+            finally { if (inflight.get(key) === null) inflight.delete(key); }
+        },
+    });
     const personLast = new Map();   // the same key → when a person last used that screen (ms), for desk turns
     const timers = [];
     let closed = false;
@@ -799,7 +839,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         // no data back), so 4096 cached results never hold 4096 screens. A headlight's tiny answer is kept so a
         // repeated id still says accepted/refused.
         cacheResult(p.key, { result, reason: msg.fault_code || null, ...(p.kind === 'headlight' && data ? { data } : {}) });
-        await domain.audit.record({ robotId: p.robotId, deviceId: p.deviceId, subject: p.subject, operatorKind: p.operatorKind, role: p.role, kind: p.kind, value: p.value, result, reason: msg.fault_code || null, latencyMs: latency });
+        await recordAudit({ robotId: p.robotId, deviceId: p.deviceId, subject: p.subject, operatorKind: p.operatorKind, role: p.role, kind: p.kind, value: p.value, result, reason: msg.fault_code || null, latencyMs: latency });
         const message = (p.computer || p.kind === 'headlight') && result === 'nack' && typeof msg.message === 'string' ? msg.message.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 300) : null;
         meterAiCommand(p, result, msg);
         sendFrame(p.conn, 'command_result', { id: p.opId, result, reason: message || msg.fault_code || null, latency_ms: latency, ...(data ? { data } : {}) });
@@ -871,6 +911,8 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         if (!robot) return sendError(conn, 'bot.robot_not_found', 'no such robot');
         let role = await domain.members.roleOf(robotId, conn.subject);
         if (!role && robot.access_policy === 'queue' && conn.subject) { await domain.queue.join(robotId, conn.subject); role = 'queue'; }
+        // A crowd robot: every signed-in person who is not the owner, a Mod or an Operator steers with the crowd.
+        if (robot.access_policy === 'crowd' && conn.subject && (!role || role === 'viewer')) role = 'crowd';
         if (!role) return sendError(conn, 'bot.not_an_operator', 'you have no access to this robot');
         if (conn.robotId && conn.robotId !== robotId) unsubscribe(conn);
         conn.robotId = robotId; conn.role = role;
@@ -890,6 +932,16 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
 
     async function onOperatorCommand(conn, msg) {
         if (!conn.robotId) return sendError(conn, 'bot.not_joined', 'join a robot first');
+        // In a crowd, a drive is an input for the mixer and never a command of its own; the rest is the owner's, a
+        // Mod's or an Operator's.
+        if (conn.role === 'crowd') {
+            const cid = (msg.id != null ? String(msg.id) : prefixedId('op', now())).slice(0, 64);
+            if (msg.kind !== 'drive') return sendFrame(conn, 'command_result', { id: cid, result: 'refused', code: 'bot.crowd_drive_only', reason: 'in a crowd you steer; the owner, Mods and Operators do the rest' });
+            const r = crowd.input(conn.robotId, { who: conn.subject, axes: msg.value });
+            return sendFrame(conn, 'command_result', r.accepted ? { id: cid, result: 'mixed', steering: r.steering } : { id: cid, result: 'refused', code: r.code, reason: r.reason });
+        }
+        // The owner, a Mod or an Operator driving a crowd robot directly: the crowd waits a second (no-op elsewhere).
+        if (conn.role === 'owner' || conn.role === 'mod' || conn.role === 'operator') crowd.pause(conn.robotId);
         // The operator's id is an idempotency key for THAT operator only (another person's id never reads or blocks
         // theirs); the device always gets a server-minted id, so an operator can never choose what a robot sees.
         const id = (msg.id != null ? String(msg.id) : prefixedId('op', now())).slice(0, 64);
@@ -915,13 +967,13 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         const device = deviceForRobot(robotId);
         const decision = await domain.control.prepare({ robotId, principal: conn.principal, kind: msg.kind, value: msg.value, online: !!(device && device.online), requestedMs: msg.ms });
         if (!decision.ok) {
-            await domain.audit.record({ robotId, deviceId: device ? device.device.id : null, subject: conn.subject, operatorKind: conn.principal.kind, role: decision.role || conn.role, kind: msg.kind, value: msg.value || {}, result: 'refused', reason: decision.code });
+            await recordAudit({ robotId, deviceId: device ? device.device.id : null, subject: conn.subject, operatorKind: conn.principal.kind, role: decision.role || conn.role, kind: msg.kind, value: msg.value || {}, result: 'refused', reason: decision.code });
             return sendFrame(conn, 'command_result', { id, result: 'refused', code: decision.code, reason: decision.reason });
         }
         // A queue turn that ended while the gate was deciding (domain epochs): its halt is already out, so this command
         // would follow it into the next turn. Checked here, with no await before the send.
         if (decision.role === 'queue' && domain.queue.epoch(robotId) !== decision.epoch) {
-            await domain.audit.record({ robotId, deviceId: device ? device.device.id : null, subject: conn.subject, operatorKind: conn.principal.kind, role: decision.role, kind: decision.kind, value: decision.value, result: 'refused', reason: 'bot.turn_ended' });
+            await recordAudit({ robotId, deviceId: device ? device.device.id : null, subject: conn.subject, operatorKind: conn.principal.kind, role: decision.role, kind: decision.kind, value: decision.value, result: 'refused', reason: 'bot.turn_ended' });
             return sendFrame(conn, 'command_result', { id, result: 'refused', code: 'bot.not_your_turn', reason: 'your turn ended before this command could be sent' });
         }
         const deviceCmdId = prefixedId('cmd', now());
@@ -938,7 +990,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         } : null;
         const frame = { v: 1, type: 'command', seq, ts: issuedAt, id: deviceCmdId, ref: id, kind: decision.kind, value: decision.value, deadline_ms: decision.deadlineMs, operator: { subject: conn.subject, role: decision.role }, robot_id: robotId, ...(provenance ? { provenance } : {}), ...(epoch ? { turn_epoch: epoch } : {}) };
         if (!send(device.ws, frame)) {
-            await domain.audit.record({ robotId, deviceId: device.device.id, subject: conn.subject, operatorKind: conn.principal.kind, role: decision.role, kind: decision.kind, value: decision.value, result: 'refused', reason: 'bot.device_offline' });
+            await recordAudit({ robotId, deviceId: device.device.id, subject: conn.subject, operatorKind: conn.principal.kind, role: decision.role, kind: decision.kind, value: decision.value, result: 'refused', reason: 'bot.device_offline' });
             return sendFrame(conn, 'command_result', { id, result: 'refused', code: 'bot.device_offline', reason: 'the device is offline' });
         }
         lastRobotCommandAt.set(robotId, now());
@@ -962,7 +1014,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         pendingCmds.delete(id);
         inflight.delete(p.key);
         cacheResult(p.key, { result: 'expired', reason: 'no acknowledgement before the deadline' });
-        await domain.audit.record({ robotId: p.robotId, deviceId: p.deviceId, subject: p.subject, operatorKind: p.operatorKind, role: p.role, kind: p.kind, value: p.value, result: 'expired', reason: 'deadline' }).catch(() => {});
+        await recordAudit({ robotId: p.robotId, deviceId: p.deviceId, subject: p.subject, operatorKind: p.operatorKind, role: p.role, kind: p.kind, value: p.value, result: 'expired', reason: 'deadline' }).catch(() => {});
         sendFrame(p.conn, 'command_result', { id: p.opId, result: 'expired', reason: 'no acknowledgement before the deadline' });
     }
 
@@ -1518,6 +1570,8 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         },
         /** A one-time ticket for the embedded panel's Drive (POST /panel/:id/ticket), or null. */
         issueControlTicket(principal, robotId) { return tickets.issue(principal, robotId); },
+        /** Crowd control: the last tick's telemetry for a robot (people steering, the pull, the style), or null. */
+        crowdTelemetry(robotId) { return crowd.telemetry(robotId); },
         isOnline, deviceState, sendToDevice, sendToRobotDevices, broadcast, closeDevice, robotState, refreshConfig, closeWatchers, dropSubject, operatorCommand,
         operatorActivity: operatorActivityOf,
         machineCommand, machineScreen, computerOf, machineChanged,

@@ -34,8 +34,12 @@ const data = (v) => esc(JSON.stringify(v));
 const STICK_X = ['steer', 'x', 'rotation'];
 const STICK_Y = ['throttle', 'y'];
 const POLICIES = [['private', 'Only me and people I add'], ['invite', 'People I invite'], ['queue', 'Anyone, taking turns']];
-const POLICY_LABEL = Object.fromEntries(POLICIES.map(([v]) => [v, { private: 'Private', invite: 'Invite only', queue: 'Open queue' }[v]]));
-const ROLE_LABEL = { owner: 'Owner', mod: 'Mod', operator: 'Operator', viewer: 'Viewer', queue: 'In the queue', watcher: 'Watching' };
+// Crowd control (plan §H2) is set through the API until a session on a real robot; the forms list it only for a robot
+// already set to it, so saving one of its other settings never switches it back to Private.
+const CROWD_POLICY = ['crowd', 'Everyone at once (crowd control)'];
+const policiesFor = (current) => (current === 'crowd' ? [...POLICIES, CROWD_POLICY] : POLICIES);
+const POLICY_LABEL = { private: 'Private', invite: 'Invite only', queue: 'Open queue', crowd: 'Crowd control' };
+const ROLE_LABEL = { owner: 'Owner', mod: 'Mod', operator: 'Operator', viewer: 'Viewer', queue: 'In the queue', crowd: 'In the crowd', watcher: 'Watching' };
 
 // ── Icons: 24×24 strokes in currentColor, decorative (the text beside them is the label) ─────────────────────
 const PATHS = {
@@ -465,7 +469,7 @@ function onStreamCard(robot, { liveUrl = null } = {}) {
 ${state}${liveUrl ? `<form method="post" action="/robots/${esc(robot.id)}/on-stream"><button type="submit" class="button primary">${icon('gamepad')}<span>Put the buttons under my OpenVibe.Live stream</span></button></form>
 <p class="setting-note">Opens your channel on OpenVibe.Live, which asks you to confirm. To take it off, choose no robot there, or turn off the panel below.</p>` : ''}
 <form class="access-form" method="post" action="/robots/${esc(robot.id)}/access">
-<label class="field"><span class="field-label">Who may drive</span><select name="access_policy">${POLICIES.map(([v, label]) => `<option value="${esc(v)}"${v === policy ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select></label>
+<label class="field"><span class="field-label">Who may drive</span><select name="access_policy">${policiesFor(policy).map(([v, label]) => `<option value="${esc(v)}"${v === policy ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select></label>
 <p class="setting-note">"Anyone, taking turns" lets every signed-in viewer queue for a turn. With the other two, only you and the people you add can drive; everyone else watches.</p>
 <button type="submit">Save</button>
 </form></section>`;
@@ -1118,7 +1122,7 @@ ${kit.pageHead({ title: `Add ${claim.hostname}?`, icon: 'gear', back: { href: '/
 ${error ? `<p class="error" role="alert">${esc(error)}</p>` : ''}
 <label class="field"><span class="field-label">Name</span><input type="text" name="name" maxlength="80" required autocomplete="off" value="${esc(values.name != null ? values.name : claim.hostname)}"></label>
 <label class="field"><span class="field-label">Model</span><select name="profile_id">${models.map(option).join('')}</select></label>
-<label class="field"><span class="field-label">Who may drive</span><select name="access_policy">${POLICIES.map(([v, label]) => `<option value="${esc(v)}"${v === policy ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select></label>
+<label class="field"><span class="field-label">Who may drive</span><select name="access_policy">${policiesFor(policy).map(([v, label]) => `<option value="${esc(v)}"${v === policy ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select></label>
 <label class="field check"><input type="checkbox" name="live" value="on"${live ? ' checked' : ''}> <span>Show its camera on my OpenVibe.Live channel</span></label>
 <button type="submit" class="primary">Approve</button>
 </form>

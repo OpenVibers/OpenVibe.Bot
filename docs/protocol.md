@@ -152,6 +152,21 @@ the turn:
 - The turn resumes 15 s after their last command, or at once when they send `give_back` on `/control`. Its end
   moves on by the paused time.
 
+**Crowd control** (`access_policy: "crowd"`, set through the API; plan §H2). Everyone signed in who joins and is
+not the owner, a Mod or an Operator gets the role `crowd`:
+- A crowd member's `drive` never reaches the device. It is an input for the robot's mixer, answered
+  `command_result` `{ result: "mixed", steering: <people> }`. Any other kind is refused `bot.crowd_drive_only`
+  (no halt: stopping is the owner's, a Mod's or an Operator's).
+- While anyone has steered recently, Bot mixes the inputs every 250 ms (`server/crowd/mixers.js`). The style is
+  `tug` (the average), `last` (the freshest input) or `mixed` (both, halved; the default). The viewer cap is a
+  fraction of each axis, 0.5 by default. All of these live in `limits.crowd` (`style`, `window_ms`, `cap`).
+- The mix goes to the device as one `drive` with `operator.role: "crowd"` and a 300 ms deadline. It passes the same
+  gate as an operator's command, so the owner's limits, cooldown and sole control apply; sole control given to
+  anyone stops the crowd.
+- When the owner, a Mod or an Operator drives, the crowd waits one second. When nobody steers, nothing is sent and
+  the robot stops at its deadline.
+- The audit keeps one crowd row a second per robot and result, not one per tick.
+
 `status` of a Network-paired machine also says what it is: `device_kind` (`onboard` \| `bridge` \|
 `server`), `drivers` (an array of strings), `capabilities` (an object) and `agent_version` (a string of at
 most 40 characters), each optional. Bot stores them on the device row when they differ from it (the row

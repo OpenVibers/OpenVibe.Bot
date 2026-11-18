@@ -301,6 +301,8 @@
     function notice(text) {
         const n = $('[data-notice]');
         if (!n) return;
+        // An alert region re-announces whatever is written to it: unchanged text (a crowd's input, ten a second) is not.
+        if (n.textContent === (text || '') && n.hidden === !text) return;
         n.textContent = text || '';
         n.hidden = !text;
     }
@@ -1583,7 +1585,7 @@
             if (m.ticket) ticket = m.ticket;
             const label = $('[data-role-label]');
             myRole = m.role || myRole;
-            if (label && m.role) label.textContent = { owner: 'Owner', mod: 'Mod', operator: 'Operator', viewer: 'Viewer', watcher: 'Watching', queue: 'In the queue' }[m.role] || m.role;
+            if (label && m.role) label.textContent = { owner: 'Owner', mod: 'Mod', operator: 'Operator', viewer: 'Viewer', watcher: 'Watching', queue: 'In the queue', crowd: 'In the crowd' }[m.role] || m.role;
             notice('');
             enableControls();
             paint(m.state);
@@ -1603,6 +1605,11 @@
             if (m.result === 'refused' && m.code !== 'bot.cooldown') notice(m.reason || m.code);
             else if (m.result === 'nack') { const t = nackText(m.reason); if (t) notice(t); }
             else if (m.result === 'ack') notice('');
+            // Crowd control: a drive is mixed with everyone else's (server/crowd/). Said once per change, not per input.
+            else if (m.result === 'mixed') {
+                const others = Math.max(0, (Number(m.steering) || 1) - 1);
+                notice(others ? `Steering together with ${others} other${others === 1 ? '' : 's'}` : 'Steering');
+            }
         } else if (m.type === 'error') {
             if (m.code === 'bot.not_an_operator' || m.code === 'bot.robot_not_found') { gone = true; joined = false; enableControls(); }
             notice(m.detail || m.code);
