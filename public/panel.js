@@ -1599,6 +1599,9 @@
         } else if (m.type === 'operators_result') {
             if (!m.ok) notice(m.reason || m.code || 'That change was refused.');
             else notice('');
+        } else if (m.type === 'crowd_tick') {
+            // bot.crowd-tick@1: while the owner, a Mod or an Operator drives, the crowd's steering waits for them.
+            if (m.paused && m.override) notice(`${{ owner: 'The owner', mod: 'A Mod', operator: 'An Operator' }[m.override.role] || 'Someone'} is driving: the crowd waits`);
         } else if (m.type === 'command_result') {
             roundTrip(m.id, m.result);
             if (m.id && headlightIds.delete(m.id)) { headlightAck(m); return; }

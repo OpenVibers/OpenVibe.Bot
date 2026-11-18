@@ -197,8 +197,21 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         return domain.audit.record(row);
     }
     let crowdSeq = 0;
+    // bot.crowd-tick@1 to every panel and watcher of the robot, at most twice a second (the Operators card, the overlay).
+    const crowdTickAt = new Map();
+    function crowdTick(robotId, tick) {
+        const t = now();
+        if (t - (crowdTickAt.get(robotId) || 0) < 500) return;
+        crowdTickAt.set(robotId, t);
+        const subs = subsByRobot.get(robotId);
+        if (!subs || !subs.size) return;
+        const pull = {};
+        for (const [axis, v] of Object.entries(tick.pull || {}).slice(0, 8)) if (Number.isFinite(v)) pull[axis] = Math.max(-1, Math.min(1, Math.round(v * 1000) / 1000));
+        const frame = { robot_id: robotId, people: tick.people, pull, style: tick.style, override: tick.override, paused: !!tick.paused };
+        for (const sub of subs) sendFrame(sub, 'crowd_tick', frame);
+    }
     const crowd = createCrowd({
-        now, log,
+        now, log, onTick: crowdTick,
         configFor: async (robotId) => {
             const robot = domain && await domain.robots.get(robotId);
             if (!robot || robot.access_policy !== 'crowd') return { axes: {} };   // no axes: idle, nothing is sent
@@ -941,7 +954,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             return sendFrame(conn, 'command_result', r.accepted ? { id: cid, result: 'mixed', steering: r.steering } : { id: cid, result: 'refused', code: r.code, reason: r.reason });
         }
         // The owner, a Mod or an Operator driving a crowd robot directly: the crowd waits a second (no-op elsewhere).
-        if (conn.role === 'owner' || conn.role === 'mod' || conn.role === 'operator') crowd.pause(conn.robotId);
+        if (conn.role === 'owner' || conn.role === 'mod' || conn.role === 'operator') crowd.pause(conn.robotId, undefined, conn.role);
         // The operator's id is an idempotency key for THAT operator only (another person's id never reads or blocks
         // theirs); the device always gets a server-minted id, so an operator can never choose what a robot sees.
         const id = (msg.id != null ? String(msg.id) : prefixedId('op', now())).slice(0, 64);

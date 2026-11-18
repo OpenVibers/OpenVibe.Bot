@@ -6,9 +6,11 @@
  * as any operator's command (domain.control.prepare as the `crowd` role: the owner's limits, cooldown and sole control
  * still apply), then to the device with its own deadline.
  *
- *   createCrowd({ send, configFor, now, setTimer, clearTimer, intervalMs })
+ *   createCrowd({ send, configFor, onTick, now, setTimer, clearTimer, intervalMs })
  *     input(robotId, { who, axes })   one person's latest drive (who: a subject, or a hashed anon id); → accepted
- *     pause(robotId, ms)              the owner, a Mod or an Operator drove directly: the crowd waits (default 1 s)
+ *     pause(robotId, ms, role)        the owner, a Mod or an Operator drove directly: the crowd waits (default 1 s)
+ *   onTick(robotId, { people, pull, style, override, paused }) after every tick that holds people, paused or not
+ *     (realtime.js sends it as bot.crowd-tick@1, at most twice a second)
  *     telemetry(robotId)              the last tick's telemetry, or null
  *     forget(robotId) / stop()        drop a robot's inputs / every timer
  *
@@ -34,10 +36,11 @@ function cleanAxes(axes) {
     return n ? out : null;
 }
 
-function createCrowd({ send, configFor, now = () => Date.now(), setTimer = setInterval, clearTimer = clearInterval, intervalMs = TICK_MS, log = console } = {}) {
+function createCrowd({ send, configFor, onTick = null, now = () => Date.now(), setTimer = setInterval, clearTimer = clearInterval, intervalMs = TICK_MS, log = console } = {}) {
     if (typeof send !== 'function' || typeof configFor !== 'function') throw new TypeError('createCrowd needs send(robotId, axes, telemetry) and configFor(robotId)');
     const robots = new Map();   // robotId → { people: Map(who → input), timer, busy, telemetry }
-    // robotId → until when the crowd waits. Its own map: the owner may drive before anyone in the crowd has steered.
+    // robotId → { until, role }: when the crowd waits to, and for whom. Its own map: the owner may drive before anyone
+    // in the crowd has steered.
     const pauses = new Map();
 
     function slot(robotId) {
@@ -58,14 +61,17 @@ function createCrowd({ send, configFor, now = () => Date.now(), setTimer = setIn
             // Inputs past four windows are gone; with none left the ticker stops (and the robot with its deadline).
             for (const [who, input] of r.people) if (t - input.at > cfg.windowMs * 4) r.people.delete(who);
             if (!r.people.size) { stopTimer(r); robots.delete(robotId); return; }
-            const until = pauses.get(robotId) || 0;
-            if (t < until) return;
-            if (until) pauses.delete(robotId);
+            const held = pauses.get(robotId) || null;
+            const paused = !!(held && t < held.until);
+            if (held && !paused) pauses.delete(robotId);
             // An input counts for its window plus one tick: the tick that follows it always sees it, however the
             // timer and the database wait line up (a window equal to the tick would otherwise miss a single press).
             const out = mix([...r.people.values()], { ...cfg, windowMs: Math.min(2000, cfg.windowMs + intervalMs) }, t);
             r.telemetry = out.telemetry || null;
-            if (out.axes) await send(robotId, out.axes, out.telemetry);
+            if (onTick && r.telemetry) {
+                try { onTick(robotId, { people: r.telemetry.people, pull: r.telemetry.pull, style: r.telemetry.style, override: paused ? { role: held.role } : null, paused }); } catch { /* a listener never stops the crowd */ }
+            }
+            if (!paused && out.axes) await send(robotId, out.axes, out.telemetry);
         } catch (err) {
             if (log && log.warn) log.warn(`[crowd] ${robotId}: ${err && err.message}`);
         } finally {
@@ -88,10 +94,13 @@ function createCrowd({ send, configFor, now = () => Date.now(), setTimer = setIn
         return { accepted: true, steering: r.people.size };
     }
 
-    function pause(robotId, ms = PAUSE_MS) {
+    function pause(robotId, ms = PAUSE_MS, role = 'owner') {
         const t = now();
-        if (pauses.size > 1000) for (const [id, until] of pauses) if (until <= t) pauses.delete(id);
-        pauses.set(robotId, Math.max(pauses.get(robotId) || 0, t + ms));
+        if (pauses.size > 1000) for (const [id, held] of pauses) if (held.until <= t) pauses.delete(id);
+        const had = pauses.get(robotId);
+        // The owner outranks a Mod or an Operator for the length of the wait; the later end wins.
+        const keep = had && had.until > t && had.role === 'owner' && role !== 'owner';
+        pauses.set(robotId, { until: Math.max(had ? had.until : 0, t + ms), role: keep ? had.role : role });
     }
 
     function forget(robotId) {

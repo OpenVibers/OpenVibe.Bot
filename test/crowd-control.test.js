@@ -4,6 +4,7 @@
 // (the owner's limits, the viewer cap, sole control), as the `crowd` role. A crowd member cannot halt or send anything
 // else; the owner driving pauses the crowd; an idle crowd sends nothing.
 const assert = require('assert');
+const { validate } = require('openvibe-contracts');
 const { boot, check, done } = require('./helpers/app');
 
 (async () => {
@@ -59,6 +60,12 @@ const { boot, check, done } = require('./helpers/app');
         assert.ok(Math.abs(m.value.steer) < 1e-9, 'opposite steering cancels in tug-of-war');
         assert.strictEqual(m.operator && m.operator.role, 'crowd');
         assert.ok(t.app.locals.hub.crowdTelemetry(robot.id), 'telemetry for the Operators card');
+        // bot.crowd-tick@1 reaches every panel: how many steer and their pull, naming no one.
+        const tick = await b.waitFor((x) => x.type === 'crowd_tick' && x.people === 2, 3000);
+        const v = validate('bot.crowd-tick@1', tick);
+        assert.ok(v.valid !== false && !(v.errors && v.errors.length), `the tick keeps its contract: ${JSON.stringify(v.errors || v)}`);
+        assert.deepStrictEqual([tick.style, tick.paused, tick.override, tick.pull.steer], ['tug', false, null, 0]);
+        assert.ok(!JSON.stringify(tick).includes(bob.subject) && !JSON.stringify(tick).includes(carol.subject), 'no subject in the tick');
         assert.ok(await auditRow(robot.id, (a) => a.role === 'crowd' && a.kind === 'drive' && a.result === 'ack'), 'the mixed command is audited as the crowd');
         // Four commands a second reach the device, but the audit keeps one row a second per result.
         const ack = setInterval(() => { for (const x of dev.messages) if (isCrowd(x) && !x.acked) { x.acked = true; dev.send({ type: 'ack', id: x.id }); } }, 20);
@@ -86,6 +93,8 @@ const { boot, check, done } = require('./helpers/app');
         await result(b, 'b2');
         await pause(500);
         assert.strictEqual(crowdSince(dev, mark).length, 0, 'within a second of the owner\'s command the crowd waits');
+        const waiting = b.messages.slice().reverse().find((x) => x.type === 'crowd_tick');
+        assert.ok(waiting && waiting.paused && waiting.override && waiting.override.role === 'owner', `the panels hear the crowd waits for the owner: ${JSON.stringify(waiting)}`);
         // After the pause the crowd drives again: last input wins at full cap.
         await pause(600);
         cmd(b, { id: 'b3', kind: 'drive', value: { throttle: 0.9 } });
