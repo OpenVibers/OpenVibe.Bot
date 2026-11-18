@@ -93,6 +93,19 @@ async function startAi() {
             assert.ok(call.at && !Number.isNaN(Date.parse(call.at)), 'an ISO time');
         });
 
+        await check('an embedding command (contracts 0.448.0 { model, input }) goes through and is metered as embedding (11-18: it crashed)', async () => {
+            gpu.setAnswer((m, c, send) => c.send(send('ack', {
+                id: m.id, data: { model: 'bge-small-en-v1.5:q8_0', embeddings: [[0.1, 0.2], [0.3, 0.4]], ms: 40, usage: { prompt_tokens: 9, total_tokens: 9 } },
+            })));
+            const r = await command('cmd_embed_1', { model: 'bge-small-en-v1.5:q8_0', input: ['hello world', 'a second text'] });
+            assert.strictEqual(r.status, 200, r.text);
+            assert.strictEqual(r.json.result, 'ack', r.text);
+            assert.deepStrictEqual(r.json.data.embeddings, [[0.1, 0.2], [0.3, 0.4]], 'the vectors come back to the caller');
+            await t.app.locals.meter.flush();
+            const call = ai.requests.at(-1).body.calls[0];
+            assert.deepStrictEqual([call.run_id, call.operation, call.model, call.input, call.outcome], ['cmd_embed_1', 'embedding', 'bge-small-en-v1.5:q8_0', 9, 'succeeded']);
+        });
+
         await check('a community/ model records the bare model and place community', async () => {
             gpu.setAnswer((m, c, send) => c.send(send('ack', {
                 id: m.id, data: { model: 'llama3.1:8b', server: 'lmstudio', message: { role: 'assistant', content: 'hi' }, usage: { prompt_tokens: 10, completion_tokens: 20 } },
