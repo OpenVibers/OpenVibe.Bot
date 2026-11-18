@@ -166,6 +166,9 @@ not the owner, a Mod or an Operator gets the role `crowd`:
 - When the owner, a Mod or an Operator drives, the crowd waits one second. When nobody steers, nothing is sent and
   the robot stops at its deadline.
 - The audit keeps one crowd row a second per robot and result, not one per tick.
+- Every panel and watcher of the robot gets `crowd_tick` (`bot.crowd-tick@1`, contracts 0.449.0) at most twice a
+  second while anyone steers: `people`, the crowd's `pull` per axis, `style`, `override` (`{ role }` of whoever
+  drives over the crowd, or null) and `paused`. It names no person.
 
 `status` of a Network-paired machine also says what it is: `device_kind` (`onboard` \| `bridge` \|
 `server`), `drivers` (an array of strings), `capabilities` (an object) and `agent_version` (a string of at
