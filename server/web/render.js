@@ -876,6 +876,13 @@ function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs
     // The Operators card sits under the controls, inside the same panel grid. A watcher has no roster and no card.
     const operatorsHtml = profile.id === 'looi' ? operatorsCard(robot, operators, role, viewer) : '';
     if (operatorsHtml) widgets.push(operatorsHtml);
+    // Crowd control (bot.crowd-tick@1): one live line under the controls, for everyone in the panel: how many steer,
+    // where the crowd pulls, and when it waits. It shows while the ticks come and hides when the crowd goes quiet.
+    if (robot.access_policy === 'crowd' && role) {
+        widgets.push('<section class="widget widget-crowd" data-widget="crowd" data-operators-crowd data-idle="true"><h2>Crowd</h2>'
+            + '<div class="crowd-row"><span class="crowd-pad" aria-hidden="true"><span class="crowd-dot"></span></span>'
+            + '<div class="crowd-read"><output class="readout" data-crowd-people>0</output><span class="crowd-what" data-crowd-what>Nobody is steering yet</span></div></div></section>');
+    }
     const arrangeButton = arrange && arrange.src && role === 'owner'
         ? `<button type="button" class="arrange-btn" data-arrange data-arrange-src="${esc(arrange.src || '')}" title="Arrange the controls">${icon('sliders')}<span>Arrange</span></button>` : '';
     // Make your own controls (plan §AB.50, make-your-own-controls; the owner: "these can be AI vibe coded … interconnected

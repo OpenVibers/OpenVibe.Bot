@@ -122,8 +122,10 @@ const { boot, check, done } = require('./helpers/app');
         const cookie = { Cookie: `ov_token=${t.network.signUser(alex)}` };
         const page = await (await fetch(`${t.base}/panel/${crowdRobot.id}`, { redirect: 'manual', headers: cookie })).text();
         assert.ok(page.includes('<option value="crowd" selected>'), 'a crowd robot\'s form keeps crowd control selected');
+        assert.ok(page.includes('data-operators-crowd'), 'the Operators card has its crowd line (bot.crowd-tick@1)');
         const plain = await (await fetch(`${t.base}/panel/${robot.id}`, { redirect: 'manual', headers: cookie })).text();
         assert.ok(plain.includes('<option value="private" selected>') && !plain.includes('value="crowd"'), 'other robots are not offered it yet');
+        assert.ok(!plain.includes('data-operators-crowd'), 'and draw no crowd line');
         const post = (id, policy) => fetch(`${t.base}/robots/${id}/access`, { method: 'POST', redirect: 'manual', body: new URLSearchParams({ access_policy: policy }).toString(),
             headers: { 'Content-Type': 'application/x-www-form-urlencoded', Origin: t.base, ...cookie } });
         assert.ok((await post(crowdRobot.id, 'crowd')).status < 400, 'saving a crowd robot\'s form keeps it');

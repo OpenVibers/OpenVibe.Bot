@@ -1282,6 +1282,43 @@
             robotLine.hidden = !robotLine.textContent;
         }
     }
+    // Crowd control's card (bot.crowd-tick@1): how many steer, the style, and the pull as a dot in a pad (right is
+    // steer, up is forward). Two seconds after the last tick the card says nobody is steering: an idle crowd sends none.
+    const CROWD_STYLE = { tug: 'tug-of-war', last: 'last input wins', mixed: 'mixed' };
+    let crowdHide = 0;
+    function crowdWords(pull) {
+        const fwd = Number(pull.throttle ?? pull.y ?? 0), turn = Number(pull.steer ?? pull.rotation ?? pull.x ?? 0);
+        const parts = [];
+        if (fwd > 0.15) parts.push('forward'); else if (fwd < -0.15) parts.push('back');
+        if (turn > 0.15) parts.push('right'); else if (turn < -0.15) parts.push('left');
+        return { fwd, turn, words: parts.length ? `pulling ${parts.join(' and ')}` : 'holding still' };
+    }
+    function paintCrowd(tick) {
+        const card = $('[data-operators-crowd]');
+        if (!card) return;
+        const people = $('[data-crowd-people]', card);
+        const what = $('[data-crowd-what]', card);
+        const dot = $('.crowd-dot', card);
+        clearTimeout(crowdHide);
+        if (!tick) {
+            card.dataset.idle = 'true'; card.dataset.paused = 'false';
+            if (people) people.textContent = '0';
+            if (what) what.textContent = 'Nobody is steering';
+            if (dot) { dot.style.setProperty('--x', '0'); dot.style.setProperty('--y', '0'); }
+            return;
+        }
+        const { fwd, turn, words } = crowdWords(tick.pull || {});
+        if (dot) { dot.style.setProperty('--x', String(Math.max(-1, Math.min(1, turn)))); dot.style.setProperty('--y', String(Math.max(-1, Math.min(1, fwd)))); }
+        const who = { owner: 'the owner', mod: 'a Mod', operator: 'an Operator' };
+        const driver = tick.override && (myRole === tick.override.role && tick.override.role === 'owner' ? 'you drive' : `${who[tick.override.role] || 'someone'} drives`);
+        if (people) people.textContent = String(tick.people);
+        if (what) what.textContent = tick.paused && driver
+            ? `steering · waiting while ${driver}`
+            : `steering · ${words} · ${CROWD_STYLE[tick.style] || tick.style}`;
+        card.dataset.idle = 'false';
+        card.dataset.paused = tick.paused ? 'true' : 'false';
+        crowdHide = setTimeout(() => paintCrowd(null), 2000);
+    }
     if (opsCard) {
         // Age "1s ago" and the Live badge even when no new command arrives (both are read from Bot's stamp).
         setInterval(() => { if (joined) { ops.now = new Date().toISOString(); paintOperators(ops, true); } }, 1000);
@@ -1600,8 +1637,9 @@
             if (!m.ok) notice(m.reason || m.code || 'That change was refused.');
             else notice('');
         } else if (m.type === 'crowd_tick') {
+            paintCrowd(m);
             // bot.crowd-tick@1: while the owner, a Mod or an Operator drives, the crowd's steering waits for them.
-            if (m.paused && m.override) notice(`${{ owner: 'The owner', mod: 'A Mod', operator: 'An Operator' }[m.override.role] || 'Someone'} is driving: the crowd waits`);
+            if (myRole === 'crowd' && m.paused && m.override) notice(`${{ owner: 'The owner', mod: 'A Mod', operator: 'An Operator' }[m.override.role] || 'Someone'} is driving: the crowd waits`);
         } else if (m.type === 'command_result') {
             roundTrip(m.id, m.result);
             if (m.id && headlightIds.delete(m.id)) { headlightAck(m); return; }
