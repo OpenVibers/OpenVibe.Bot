@@ -997,6 +997,10 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         // turn_epoch (contracts 0.213.0): the robot's epoch now, which a queue command's check above proved is the one it
         // was decided under; an owner's command that just took a turn over carries the epoch its own halt moved to.
         const epoch = domain.queue.epoch(robotId);
+        // This turn began with a handoff halt this link never received: it gets the halt first, in the same epoch.
+        if (epoch && handoffEpoch.get(robotId) === epoch && device.haltedEpoch !== epoch) {
+            haltForTurn(robotId, { from: null, reason: 'the robot was reconnecting when the last turn ended' });
+        }
         // A headlight carries Bot's own provenance: the hello session, this frame's seq and ts, and Bot's original
         // expiry 300 ms out (the gate's 250 ms deadline is the frame's deadline_ms). Nothing here comes from a browser.
         const issuedAt = decision.issuedAtMs != null ? decision.issuedAtMs : now();
@@ -1040,13 +1044,20 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     // on its own never runs into the next turn. Its operator is { subject: null, role: 'system' }; its ack or expiry is
     // audited as operator_kind `system`, value { reason, turn_of }, like any command, and goes to no one.
     const SYSTEM_CONN = { ws: { readyState: 3, send() {} }, seq: 0 };
+    // The epoch each robot's last handoff halt moved to. A device link that did not receive it (the robot was
+    // reconnecting when the turn ended, so the halt went to the old link or to none) gets it before the next
+    // person's first command (2026-11-19: on a busy machine the old link won that race and the next person drove a
+    // robot that had never been told to stop).
+    const handoffEpoch = new Map();
     function haltForTurn(robotId, { from, reason }) {
+        // The halt carries the epoch the change moved to: a device refuses anything older after it (turn_epoch).
+        const epoch = domain.queue.epoch(robotId);
+        if (epoch) handoffEpoch.set(robotId, epoch);
         const device = deviceForRobot(robotId);
         if (!device) return;
         const id = prefixedId('cmd', now());
-        // The halt carries the epoch the change moved to: a device refuses anything older after it (turn_epoch).
-        const epoch = domain.queue.epoch(robotId);
         if (!send(device.ws, { v: 1, type: 'command', seq: nextSeq(device), ts: now(), id, kind: 'halt', value: {}, operator: { subject: null, role: 'system' }, robot_id: robotId, ...(epoch ? { turn_epoch: epoch } : {}) })) return;
+        device.haltedEpoch = epoch;
         const p = { id, opId: id, key: `system|${id}`, deviceId: device.device.id, conn: SYSTEM_CONN, robotId, subject: null, operatorKind: 'system', role: null, kind: 'halt', value: { reason, turn_of: from || null }, at: now(), timer: null };
         pendingCmds.set(id, p);
         p.timer = setTimeout(() => expireCommand(id), 2500);
