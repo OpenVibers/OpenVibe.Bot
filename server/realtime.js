@@ -1585,6 +1585,10 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         issueControlTicket(principal, robotId) { return tickets.issue(principal, robotId); },
         /** Crowd control: the last tick's telemetry for a robot (people steering, the pull, the style), or null. */
         crowdTelemetry(robotId) { return crowd.telemetry(robotId); },
+        /** Crowd control, for the owner and Mods: who holds a recent drive, newest first ([{ who, at, inputs }]). */
+        crowdPeople(robotId) { return crowd.people(robotId); },
+        /** Crowd control: take someone out of the crowd for `minutes` (their drive goes now). → true when kicked */
+        crowdKick(robotId, subject, minutes) { return crowd.kick(robotId, subject, Math.round(minutes * 60000)); },
         isOnline, deviceState, sendToDevice, sendToRobotDevices, broadcast, closeDevice, robotState, refreshConfig, closeWatchers, dropSubject, operatorCommand,
         operatorActivity: operatorActivityOf,
         machineCommand, machineScreen, computerOf, machineChanged,

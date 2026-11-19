@@ -881,7 +881,10 @@ function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs
     if (robot.access_policy === 'crowd' && role) {
         widgets.push('<section class="widget widget-crowd" data-widget="crowd" data-operators-crowd data-idle="true"><h2>Crowd</h2>'
             + '<div class="crowd-row"><span class="crowd-pad" aria-hidden="true"><span class="crowd-dot"></span></span>'
-            + '<div class="crowd-read"><output class="readout" data-crowd-people>0</output><span class="crowd-what" data-crowd-what>Nobody is steering yet</span></div></div></section>');
+            + '<div class="crowd-read"><output class="readout" data-crowd-people>0</output><span class="crowd-what" data-crowd-what>Nobody is steering yet</span></div></div>'
+            // The owner and Mods: who is steering, each with Kick (public/panel.js; GET /panel/:id/crowd).
+            + (role === 'owner' || role === 'mod' ? '<ul class="crowd-who" data-crowd-who hidden></ul>' : '')
+            + '</section>');
     }
     const arrangeButton = arrange && arrange.src && role === 'owner'
         ? `<button type="button" class="arrange-btn" data-arrange data-arrange-src="${esc(arrange.src || '')}" title="Arrange the controls">${icon('sliders')}<span>Arrange</span></button>` : '';
