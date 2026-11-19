@@ -208,6 +208,10 @@ const plugins = require('./helpers/plugins');
         await result(c, 'q1');
         t.clock.offset += 120000;                     // past the 60 s turn
         try {
+            // The turn ends while the old link is still the robot's (the sweep, as the server's job runs it): its
+            // halt goes to that link, every time. Which happened first used to be a race this test lost on a busy
+            // machine (the shared node's CI, 2026-11-19); the new link must still get the halt before dave drives.
+            await t.domain.queue.sweep();
             // Device liveness runs on the same injected clock (a 200 ms beat, offline after 400 ms here), so
             // the jump drops this link: reconnecting with the same credential replaces the stale socket with
             // one that comes online at the jumped clock, and no real-time race decides whether dave's command
