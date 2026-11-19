@@ -247,6 +247,6 @@ OpenVibe.Sites no longer generates `deploy/nginx/openvibe.bot.conf` (sites.json 
 
 <!-- versions:start -->
 - openvibe-contracts: v0.449.0
-- openvibe-sdk: v0.177.0
+- openvibe-sdk: v0.188.0
 - openvibe-shared: v4.320.0
 <!-- versions:end -->
