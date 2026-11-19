@@ -147,6 +147,57 @@ const { boot, check, done } = require('./helpers/app');
         b.close(); c.close(); dev.close();
     });
 
+    await check('guests steer only while the owner lets them, until the robot reconnects; they can be kicked too', async () => {
+        const { robot, pairing } = await t.robot(alex, { access_policy: 'crowd', limits: { crowd: { style: 'last', cap: 1 } } });
+        // Paired once; the device connects (and later reconnects) with its own credential, beating as a real one does.
+        const paired = await t.call('POST', '/api/v1/pair', { token: null, body: { robot: robot.id, code: pairing.code } });
+        const connect = async () => {
+            const d = await t.ws('/device', { headers: { Authorization: `Bearer ${paired.json.credential}` } });
+            await d.waitFor((m) => m.type === 'hello');
+            const beat = setInterval(() => { try { d.send({ type: 'heartbeat', t: Date.now() }); } catch { /* closing */ } }, 100);
+            const close = d.close.bind(d); d.close = () => { clearInterval(beat); close(); };
+            return d;
+        };
+        const dev = await connect();
+        const cookie = (u) => ({ Cookie: `ov_token=${t.network.signUser(u)}` });
+        const post = (path, u, body) => fetch(`${t.base}/panel/${robot.id}/crowd/${path}`, { method: 'POST', body: JSON.stringify(body),
+            headers: { 'Content-Type': 'application/json', Origin: t.base, 'Sec-Fetch-Site': 'same-origin', ...cookie(u) } });
+        assert.strictEqual((await post('guests', alex, { on: true })).status, 409, 'not before the public panel is on');
+        await t.domain.robots.setEmbedPublic(robot.id, true);
+
+        const g = await t.ws('/watch');
+        g.send({ type: 'join', robot_id: robot.id });
+        let j = await g.waitFor((m) => m.type === 'joined');
+        assert.deepStrictEqual(j.allowed_commands, [], 'a guest watches by default');
+        g.send({ type: 'command', id: 'g1', kind: 'drive', value: { throttle: 0.7 } });
+        assert.strictEqual((await g.waitFor((m) => m.type === 'error')).code, 'bot.read_only');
+
+        assert.strictEqual((await post('guests', carol, { on: true })).status, 403, 'only the owner or a Mod opens it');
+        const on = await post('guests', alex, { on: true });
+        assert.deepStrictEqual(await on.json(), { guests: true });
+        j = await g.waitFor((m) => m.type === 'joined' && m.allowed_commands.includes('drive'));
+        g.send({ type: 'command', id: 'g2', kind: 'drive', value: { throttle: 0.7 } });
+        assert.strictEqual((await g.waitFor((m) => m.type === 'command_result' && m.id === 'g2')).result, 'mixed');
+        const c = await dev.waitFor((x) => isCrowd(x) && x.value && x.value.throttle > 0.6, 3000);
+        dev.send({ type: 'ack', id: c.id });
+
+        const list = await (await fetch(`${t.base}/panel/${robot.id}/crowd`, { headers: { Accept: 'application/json', ...cookie(alex) } })).json();
+        assert.strictEqual(list.guests, true);
+        const guest = list.people.find((x) => x.guest);
+        assert.ok(guest && guest.name === 'A guest' && /^guest:/.test(guest.subject), 'a guest is listed without a name or address');
+        assert.strictEqual((await post('kick', alex, { subject: guest.subject })).status, 200);
+        g.send({ type: 'command', id: 'g3', kind: 'drive', value: { throttle: 0.7 } });
+        assert.strictEqual((await g.waitFor((m) => m.type === 'command_result' && m.id === 'g3')).code, 'bot.crowd_kicked');
+
+        // The robot reconnects: guests are off again, and every watcher hears it.
+        dev.close();
+        await pause(200);
+        const relink = await connect();
+        j = await g.waitFor((m) => m.type === 'joined' && m.allowed_commands.length === 0 && g.messages.filter((x) => x.type === 'joined').length >= 3, 5000);
+        assert.deepStrictEqual(j.allowed_commands, []);
+        g.close(); relink.close();
+    });
+
     await check('the gate: the crowd role exists only on a crowd robot; private, invite, queue and crowd are the policies', async () => {
         const { robot } = await t.robot(alex);
         const r = await t.domain.control.prepare({ robotId: robot.id, principal: { kind: 'crowd', subject: alex.subject }, kind: 'drive', value: { throttle: 0.5 }, online: true });

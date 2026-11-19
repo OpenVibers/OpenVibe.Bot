@@ -1173,12 +1173,25 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
             const robot = await crowdManager(req);
             const list = hub ? hub.crowdPeople(robot.id).slice(0, 50) : [];
             let names = new Map();
-            if (list.length) { try { names = await identity.names(list.map((p) => p.who)); } catch (e) { log.warn(`[Bot] crowd names: ${e.message}`); } }
+            const accounts = list.map((p) => p.who).filter((w) => /^usr_/.test(w));
+            if (accounts.length) { try { names = await identity.names(accounts); } catch (e) { log.warn(`[Bot] crowd names: ${e.message}`); } }
             const now = Date.now();
-            res.json({ people: list.map((p) => {
+            res.json({ guests: hub ? hub.crowdGuests(robot.id) : false, embed_public: !!robot.embed_public, people: list.map((p) => {
                 const n = names.get(p.who) || {};
-                return { subject: p.who, username: n.username || null, name: n.display_name || n.username || null, inputs: p.inputs, seconds_ago: Math.max(0, Math.round((now - p.at) / 1000)) };
+                const guest = p.who.startsWith('guest:');
+                return { subject: p.who, guest, username: n.username || null, name: guest ? 'A guest' : (n.display_name || n.username || null), inputs: p.inputs, seconds_ago: Math.max(0, Math.round((now - p.at) / 1000)) };
             }) });
+        } catch (e) { crowdError(res, next, e); }
+    });
+    r.post('/panel/:id/crowd/guests', ...manage, express.json({ limit: '1kb' }), async (req, res, next) => {
+        res.setHeader('Cache-Control', 'no-store');
+        try {
+            const site = req.headers['sec-fetch-site'];
+            if (!sameOrigin(req) || (site && site !== 'same-origin')) throw new BotError(403, 'bot.forbidden', 'only openvibe.bot itself manages a crowd');
+            const robot = await crowdManager(req);
+            if (!robot.embed_public) throw new BotError(409, 'bot.not_public', 'guests watch through the public panel: turn it on first');
+            const on = !!(req.body && req.body.on);
+            res.json({ guests: hub ? hub.crowdGuests(robot.id, on) : false });
         } catch (e) { crowdError(res, next, e); }
     });
     r.post('/panel/:id/crowd/kick', ...manage, express.json({ limit: '2kb' }), async (req, res, next) => {
@@ -1188,8 +1201,9 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
             if (!sameOrigin(req) || (site && site !== 'same-origin')) throw new BotError(403, 'bot.forbidden', 'only openvibe.bot itself manages a crowd');
             const robot = await crowdManager(req);
             const subject = String((req.body && req.body.subject) || '');
-            if (!/^usr_[0-9A-HJKMNP-TV-Z]{26}$/.test(subject)) throw new BotError(422, 'bot.invalid_input', 'name the person to take out of the crowd');
-            const role = await domain.members.roleOf(robot.id, subject);
+            const guest = /^guest:[A-Za-z0-9_]{4,40}$/.test(subject);
+            if (!guest && !/^usr_[0-9A-HJKMNP-TV-Z]{26}$/.test(subject)) throw new BotError(422, 'bot.invalid_input', 'name the person to take out of the crowd');
+            const role = guest ? null : await domain.members.roleOf(robot.id, subject);
             if (role && role !== 'viewer') throw new BotError(422, 'bot.invalid_input', 'the owner, Mods and Operators are not in the crowd');
             const minutes = Math.max(1, Math.min(1440, Math.round(Number(req.body && req.body.minutes) || 10)));
             if (!hub || !hub.crowdKick(robot.id, subject, minutes)) throw new BotError(503, 'bot.busy', 'try again in a moment');

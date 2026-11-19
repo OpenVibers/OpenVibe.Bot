@@ -883,7 +883,8 @@ function renderPanel({ robot, profile, role, allowed_commands = [], holdResendMs
             + '<div class="crowd-row"><span class="crowd-pad" aria-hidden="true"><span class="crowd-dot"></span></span>'
             + '<div class="crowd-read"><output class="readout" data-crowd-people>0</output><span class="crowd-what" data-crowd-what>Nobody is steering yet</span></div></div>'
             // The owner and Mods: who is steering, each with Kick (public/panel.js; GET /panel/:id/crowd).
-            + (role === 'owner' || role === 'mod' ? '<ul class="crowd-who" data-crowd-who hidden></ul>' : '')
+            + (role === 'owner' || role === 'mod' ? '<ul class="crowd-who" data-crowd-who hidden></ul>'
+                + '<p class="crowd-guests"><button type="button" class="crowd-guests-btn" data-crowd-guests aria-pressed="false">Guests steer: off</button></p>' : '')
             + '</section>');
     }
     const arrangeButton = arrange && arrange.src && role === 'owner'
