@@ -1155,6 +1155,49 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         return undefined;
     });
 
+    // Crowd control (plan §H2, §AD.30 item 4): who is steering a crowd robot, and taking someone out of the crowd. The
+    // owner and Mods only; the list carries names (the tick that every panel gets names no one).
+    const crowdManager = async (req) => {
+        const me = requireUser(req);
+        const robot = await domain.robots.get(req.params.id);
+        if (!robot) throw new BotError(404, 'bot.robot_not_found', 'no such robot');
+        if (robot.access_policy !== 'crowd') throw new BotError(409, 'bot.not_crowd', 'this robot is not driven by its crowd');
+        const role = await memberRole(robot, me);
+        if (role !== 'owner' && role !== 'mod') throw new BotError(403, 'bot.forbidden', 'the owner and Mods see and manage the crowd');
+        return robot;
+    };
+    const crowdError = (res, next, e) => (e.status && e.code ? res.status(e.status).json({ code: e.code, detail: e.detail || e.code }) : next(e));
+    r.get('/panel/:id/crowd', ...manage, async (req, res, next) => {
+        res.setHeader('Cache-Control', 'private, no-store');
+        try {
+            const robot = await crowdManager(req);
+            const list = hub ? hub.crowdPeople(robot.id).slice(0, 50) : [];
+            let names = new Map();
+            if (list.length) { try { names = await identity.names(list.map((p) => p.who)); } catch (e) { log.warn(`[Bot] crowd names: ${e.message}`); } }
+            const now = Date.now();
+            res.json({ people: list.map((p) => {
+                const n = names.get(p.who) || {};
+                return { subject: p.who, username: n.username || null, name: n.display_name || n.username || null, inputs: p.inputs, seconds_ago: Math.max(0, Math.round((now - p.at) / 1000)) };
+            }) });
+        } catch (e) { crowdError(res, next, e); }
+    });
+    r.post('/panel/:id/crowd/kick', ...manage, express.json({ limit: '2kb' }), async (req, res, next) => {
+        res.setHeader('Cache-Control', 'no-store');
+        try {
+            const site = req.headers['sec-fetch-site'];
+            if (!sameOrigin(req) || (site && site !== 'same-origin')) throw new BotError(403, 'bot.forbidden', 'only openvibe.bot itself manages a crowd');
+            const robot = await crowdManager(req);
+            const subject = String((req.body && req.body.subject) || '');
+            if (!/^usr_[0-9A-HJKMNP-TV-Z]{26}$/.test(subject)) throw new BotError(422, 'bot.invalid_input', 'name the person to take out of the crowd');
+            const role = await domain.members.roleOf(robot.id, subject);
+            if (role && role !== 'viewer') throw new BotError(422, 'bot.invalid_input', 'the owner, Mods and Operators are not in the crowd');
+            const minutes = Math.max(1, Math.min(1440, Math.round(Number(req.body && req.body.minutes) || 10)));
+            if (!hub || !hub.crowdKick(robot.id, subject, minutes)) throw new BotError(503, 'bot.busy', 'try again in a moment');
+            log.info && log.info(`[Bot] crowd: ${requireUser(req).subject} took ${subject} out of robot ${robot.id}'s crowd for ${minutes} min`);
+            res.json({ ok: true, subject, minutes });
+        } catch (e) { crowdError(res, next, e); }
+    });
+
     // The embed's own CSP replaces the app's for this route only; it sets no cookie and needs none to watch.
     r.get('/panel/:id/embed', page(async (req, res) => {
         res.setHeader('Content-Security-Policy', embedCsp(config));

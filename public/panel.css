@@ -266,6 +266,15 @@ main { padding: 1rem max(1rem, env(safe-area-inset-right)) calc(1.5rem + env(saf
 .crowd-read { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
 .crowd-what { color: var(--muted); font-size: 0.85rem; overflow-wrap: anywhere; }
 html[data-ov-motion="off"] .crowd-dot { transition: none; }
+.crowd-who { list-style: none; margin: 0.8rem 0 0; padding: 0; display: grid; gap: 0.35rem; }
+.crowd-person { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 0.6rem; padding: 0.35rem 0.5rem;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+.crowd-person-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.88rem; }
+.crowd-person-when { color: var(--muted); font-size: 0.75rem; white-space: nowrap; }
+.crowd-kick { min-height: 2.25rem; padding: 0 0.75rem; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--text);
+  font: inherit; font-size: 0.8rem; cursor: pointer; }
+.crowd-kick:hover, .crowd-kick:focus-visible { border-color: var(--danger, #ef4444); color: var(--danger, #ef4444); }
+.crowd-kick:disabled { opacity: 0.5; cursor: default; }
 .ops-footer { margin: 0.75rem 0 0; color: var(--muted); font-size: 0.78rem; }
 @media (max-width: 30rem) {
   .ops-row { grid-template-columns: auto minmax(0, 1fr) auto; gap: 0.25rem 0.55rem; }

@@ -1318,6 +1318,43 @@
         card.dataset.idle = 'false';
         card.dataset.paused = tick.paused ? 'true' : 'false';
         crowdHide = setTimeout(() => paintCrowd(null), 2000);
+        loadCrowdWho();
+    }
+    // The owner and Mods: who is steering, each with Kick (GET /panel/:id/crowd, POST …/kick; the tick names no one).
+    // Asked at most every 3 s, and only while the crowd sends ticks.
+    let crowdWhoAt = 0, crowdWhoBusy = false;
+    async function loadCrowdWho(force = false) {
+        const list = $('[data-crowd-who]');
+        if (!list || crowdWhoBusy || (!force && Date.now() - crowdWhoAt < 3000)) return;
+        crowdWhoBusy = true; crowdWhoAt = Date.now();
+        try {
+            const r = await fetch(`/panel/${encodeURIComponent(ROBOT_ID)}/crowd`, { headers: { Accept: 'application/json' }, credentials: 'same-origin', cache: 'no-store' });
+            if (!r.ok) return;
+            const people = ((await r.json()) || {}).people || [];
+            list.textContent = '';
+            for (const p of people.slice(0, 12)) {
+                const li = document.createElement('li'); li.className = 'crowd-person';
+                const who = document.createElement('span'); who.className = 'crowd-person-name';
+                who.textContent = p.name ? (p.username ? `${p.name} (@${p.username})` : p.name) : 'Someone';
+                const when = document.createElement('span'); when.className = 'crowd-person-when';
+                when.textContent = p.seconds_ago < 2 ? 'steering now' : `${p.seconds_ago}s ago`;
+                const kick = document.createElement('button'); kick.type = 'button'; kick.className = 'crowd-kick';
+                kick.textContent = 'Kick 10 min';
+                kick.setAttribute('aria-label', `Take ${who.textContent} out of the crowd for 10 minutes`);
+                kick.addEventListener('click', async () => {
+                    kick.disabled = true;
+                    try {
+                        const k = await fetch(`/panel/${encodeURIComponent(ROBOT_ID)}/crowd/kick`, { method: 'POST', credentials: 'same-origin',
+                            headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ subject: p.subject, minutes: 10 }) });
+                        notice(k.ok ? `${who.textContent} is out of the crowd for 10 minutes` : 'That did not work. Try again.');
+                    } catch { notice('That did not work. Try again.'); }
+                    loadCrowdWho(true);
+                });
+                li.append(who, when, kick);
+                list.append(li);
+            }
+            list.hidden = !people.length;
+        } catch { /* the card stays as it was */ } finally { crowdWhoBusy = false; }
     }
     if (opsCard) {
         // Age "1s ago" and the Live badge even when no new command arrives (both are read from Bot's stamp).

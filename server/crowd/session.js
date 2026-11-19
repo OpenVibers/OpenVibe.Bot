@@ -13,6 +13,9 @@
  *     (realtime.js sends it as bot.crowd-tick@1, at most twice a second)
  *     telemetry(robotId)              the last tick's telemetry, or null
  *     forget(robotId) / stop()        drop a robot's inputs / every timer
+ *     people(robotId)                 [{ who, at, inputs }] holding a recent drive, newest first (the owner's list)
+ *     kick(robotId, who, ms)          the owner or a Mod takes someone out of the crowd for ms: their drive goes now and
+ *                                     their inputs are refused (bot.crowd_kicked) until then
  *
  * A ticker runs only while a robot holds a fresh input; an idle crowd sends nothing, so the device's own deadline and
  * Bot's movement lease stop the robot. Nothing here talks to a socket or the database: realtime.js passes `send`.
@@ -42,6 +45,17 @@ function createCrowd({ send, configFor, onTick = null, now = () => Date.now(), s
     // robotId → { until, role }: when the crowd waits to, and for whom. Its own map: the owner may drive before anyone
     // in the crowd has steered.
     const pauses = new Map();
+    const kicked = new Map();   // robotId → Map(who → until)
+
+    function isKicked(robotId, who, t = now()) {
+        const m = kicked.get(robotId);
+        const until = m && m.get(who);
+        if (!until) return false;
+        if (until > t) return true;
+        m.delete(who);
+        if (!m.size) kicked.delete(robotId);
+        return false;
+    }
 
     function slot(robotId) {
         let r = robots.get(robotId);
@@ -82,9 +96,11 @@ function createCrowd({ send, configFor, onTick = null, now = () => Date.now(), s
     function input(robotId, { who, axes, role = 'viewer' } = {}) {
         const clean = cleanAxes(axes);
         if (!robotId || !who || !clean) return { accepted: false, code: 'bot.invalid_input', reason: 'a crowd input is a drive with numeric axes' };
+        if (isKicked(robotId, who)) return { accepted: false, code: 'bot.crowd_kicked', reason: 'The owner or a Mod took you out of the crowd for a while.' };
         const r = slot(robotId);
         if (!r.people.has(who) && r.people.size >= MAX_PEOPLE) return { accepted: false, code: 'bot.crowd_full', reason: 'the crowd is full right now' };
-        r.people.set(who, { who, role, axes: clean, at: now() });
+        const had = r.people.get(who);
+        r.people.set(who, { who, role, axes: clean, at: now(), inputs: (had ? had.inputs || 0 : 0) + 1 });
         if (!r.timer) {
             // The first input of a quiet crowd moves the robot now, not a tick later; the ticker carries on from there.
             r.timer = setTimer(() => { tick(robotId); }, intervalMs);
@@ -109,9 +125,26 @@ function createCrowd({ send, configFor, onTick = null, now = () => Date.now(), s
         pauses.delete(robotId);
     }
 
-    function stop() { for (const id of [...robots.keys()]) forget(id); }
+    function stop() { for (const id of [...robots.keys()]) forget(id); kicked.clear(); }
 
-    return { input, pause, forget, stop, tick, telemetry: (robotId) => (robots.get(robotId) || {}).telemetry || null, size: (robotId) => ((robots.get(robotId) || {}).people || new Map()).size };
+    function people(robotId) {
+        const r = robots.get(robotId);
+        if (!r) return [];
+        return [...r.people.values()].map((p) => ({ who: p.who, at: p.at, inputs: p.inputs || 1 })).sort((a, b) => b.at - a.at);
+    }
+
+    function kick(robotId, who, ms) {
+        if (!robotId || !who || !(ms > 0)) return false;
+        let m = kicked.get(robotId);
+        if (!m) { m = new Map(); kicked.set(robotId, m); }
+        if (m.size >= MAX_PEOPLE && !m.has(who)) return false;
+        m.set(who, now() + ms);
+        const r = robots.get(robotId);
+        if (r) r.people.delete(who);
+        return true;
+    }
+
+    return { input, pause, forget, stop, tick, people, kick, isKicked, telemetry: (robotId) => (robots.get(robotId) || {}).telemetry || null, size: (robotId) => ((robots.get(robotId) || {}).people || new Map()).size };
 }
 
 module.exports = { createCrowd, cleanAxes, TICK_MS, PAUSE_MS, MAX_PEOPLE };
