@@ -308,7 +308,8 @@
     }
     function raw(frame) {
         if (!ws || ws.readyState !== 1) return false;     // OPEN, for a WebSocket and /try's local socket alike
-        if (watcher && frame.type !== 'join') return false;   // /watch is read-only
+        // /watch is read-only, except a guest's drive on a crowd robot whose owner let guests steer (joined allows it).
+        if (watcher && frame.type !== 'join' && !(frame.type === 'command' && frame.kind === 'drive' && allowed.includes('drive'))) return false;
         ws.send(JSON.stringify({ v: 1, ...frame }));
         return true;
     }
@@ -1320,6 +1321,33 @@
         crowdHide = setTimeout(() => paintCrowd(null), 2000);
         loadCrowdWho();
     }
+    // The owner and Mods: "Guests steer" (off by default and again whenever the robot connects; POST …/crowd/guests).
+    function paintGuestSwitch(body) {
+        const sw = $('[data-crowd-guests]');
+        if (!sw || !body) return;
+        const on = !!body.guests;
+        sw.setAttribute('aria-pressed', on ? 'true' : 'false');
+        sw.textContent = on ? 'Guests steer: on' : 'Guests steer: off';
+        sw.disabled = body.embed_public === false;
+        sw.title = body.embed_public === false ? 'Turn on the public panel first: guests steer from it' : 'Let people who are not signed in steer with the crowd';
+    }
+    {
+        const sw = $('[data-crowd-guests]');
+        if (sw) {
+            sw.addEventListener('click', async () => {
+                const on = sw.getAttribute('aria-pressed') !== 'true';
+                sw.disabled = true;
+                try {
+                    const r = await fetch(`/panel/${encodeURIComponent(ROBOT_ID)}/crowd/guests`, { method: 'POST', credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ on }) });
+                    const b = await r.json().catch(() => ({}));
+                    if (!r.ok) notice(b.detail || 'That did not work. Try again.');
+                    else { paintGuestSwitch({ guests: b.guests, embed_public: true }); notice(b.guests ? 'Guests can steer with the crowd until the robot reconnects' : 'Only people signed in steer now'); }
+                } catch { notice('That did not work. Try again.'); } finally { sw.disabled = false; }
+            });
+            setTimeout(() => loadCrowdWho(true), 0);
+        }
+    }
     // The owner and Mods: who is steering, each with Kick (GET /panel/:id/crowd, POST …/kick; the tick names no one).
     // Asked at most every 3 s, and only while the crowd sends ticks.
     let crowdWhoAt = 0, crowdWhoBusy = false;
@@ -1330,7 +1358,9 @@
         try {
             const r = await fetch(`/panel/${encodeURIComponent(ROBOT_ID)}/crowd`, { headers: { Accept: 'application/json' }, credentials: 'same-origin', cache: 'no-store' });
             if (!r.ok) return;
-            const people = ((await r.json()) || {}).people || [];
+            const body = (await r.json()) || {};
+            const people = body.people || [];
+            paintGuestSwitch(body);
             list.textContent = '';
             for (const p of people.slice(0, 12)) {
                 const li = document.createElement('li'); li.className = 'crowd-person';

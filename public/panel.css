@@ -275,6 +275,11 @@ html[data-ov-motion="off"] .crowd-dot { transition: none; }
   font: inherit; font-size: 0.8rem; cursor: pointer; }
 .crowd-kick:hover, .crowd-kick:focus-visible { border-color: var(--danger, #ef4444); color: var(--danger, #ef4444); }
 .crowd-kick:disabled { opacity: 0.5; cursor: default; }
+.crowd-guests { margin: 0.7rem 0 0; }
+.crowd-guests-btn { min-height: 2.25rem; padding: 0 0.9rem; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--muted);
+  font: inherit; font-size: 0.82rem; cursor: pointer; }
+.crowd-guests-btn[aria-pressed="true"] { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.crowd-guests-btn:disabled { opacity: 0.55; cursor: default; }
 .ops-footer { margin: 0.75rem 0 0; color: var(--muted); font-size: 0.78rem; }
 @media (max-width: 30rem) {
   .ops-row { grid-template-columns: auto minmax(0, 1fr) auto; gap: 0.25rem 0.55rem; }

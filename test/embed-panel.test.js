@@ -38,7 +38,9 @@ const { renderPanel } = require('../server/web/render');
         const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'panel.js'), 'utf8');
         assert.match(js, /let watcher = main\.dataset\.role === 'watcher';/);
         assert.match(js, /const path = watcher \? '\/watch' : '\/control';/);
-        assert.match(js, /if \(watcher && frame\.type !== 'join'\) return false;/);
+        // A watcher sends join only; the one exception is a guest's drive on a crowd robot whose owner let guests steer,
+        // and only once its joined frame allowed drive (server/realtime.js crowdGuests).
+        assert.match(js, /if \(watcher && frame\.type !== 'join' && !\(frame\.type === 'command' && frame\.kind === 'drive' && allowed\.includes\('drive'\)\)\) return false;/);
         // The live camera reads the server's attribute, the pinned mediasoup-client build Live loads, and
         // the sfu-viewer-* flow; a page with no tile carrying it never imports anything.
         assert.match(js, /for \(const tile of \$\$\('\[data-signaling-url\]'\)\) liveCamera\(tile\);/);

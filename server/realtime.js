@@ -247,6 +247,9 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         handleProtocols: (protocols) => (protocols.has(TICKET_PROTOCOL) ? TICKET_PROTOCOL : false) });
     const watchWss = new WebSocketServer({ noServer: true, maxPayload: WATCH_MAX_PAYLOAD, perMessageDeflate: false });
     const watchConns = new Set();      // every /watch socket, joined or not
+    // Crowd control (plan §H2): a crowd robot whose owner or a Mod let guests steer. In memory, and off again whenever the
+    // robot's device connects, so it never outlives the session it was opened for.
+    const crowdGuests = new Set();
     const watchersByAddr = new Map();  // client address → open /watch sockets
     const offlineAfterMs = config.device.heartbeatMs * config.device.offlineMisses + config.device.offlineGraceMs;
     let jobs = null;                   // the jobs service (server/jobs/index.js), bound by server/app.js
@@ -421,6 +424,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         if (existing && existing.ws !== conn.ws) { try { existing.ws.close(4000, 'replaced by a newer connection'); } catch { /* gone */ } dropDevice(existing, { silent: true }); }
         conn.pending = false; conn.device = device; conn.online = true; conn.lastHeartbeat = now();
         deviceConns.set(device.id, conn);
+        for (const robotId of deviceRobotIds(device)) setCrowdGuests(robotId, false);
     }
 
     function sendHello(conn) {
@@ -1303,6 +1307,13 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         if (!msg || typeof msg !== 'object') return sendError(conn, 'bot.bad_frame', 'a frame must be an object');
         if (msg.type === 'join') return onWatchJoin(conn, msg);
         if (msg.type === 'leave') { unsubscribe(conn); conn.robotId = null; return undefined; }
+        if (msg.type === 'command' && msg.kind === 'drive' && conn.robotId && crowdGuests.has(conn.robotId)) {
+            const cid = (msg.id != null ? String(msg.id) : prefixedId('op', now())).slice(0, 64);
+            // A guest is a random id for this socket's life, never an address or anything that names them.
+            if (!conn.guestId) conn.guestId = `guest:${prefixedId('g', now()).slice(-12)}`;
+            const r = crowd.input(conn.robotId, { who: conn.guestId, axes: msg.value });
+            return sendFrame(conn, 'command_result', r.accepted ? { id: cid, result: 'mixed', steering: r.steering } : { id: cid, result: 'refused', code: r.code, reason: r.reason });
+        }
         return sendError(conn, 'bot.read_only', 'this socket only watches; sign in on openvibe.bot to control');
     }
 
@@ -1323,7 +1334,17 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         conn.robotId = robotId;
         conn.readouts = readoutKeys(profile);
         subscribe(conn);
-        return sendFrame(conn, 'joined', { role: 'watcher', profile, allowed_commands: [], state: publicState(await robotState(robotId), conn.readouts) });
+        const guests = robot.access_policy === 'crowd' && crowdGuests.has(robotId);
+        return sendFrame(conn, 'joined', { role: 'watcher', profile, allowed_commands: guests ? ['drive'] : [], state: publicState(await robotState(robotId), conn.readouts) });
+    }
+
+    /** Guests may (or may no longer) steer a crowd robot: every watcher of it joins again and hears what it may send. */
+    function setCrowdGuests(robotId, on) {
+        const had = crowdGuests.has(robotId);
+        if (on) crowdGuests.add(robotId); else crowdGuests.delete(robotId);
+        if (had === !!on) return;
+        const set = subsByRobot.get(robotId);
+        if (set) for (const c of [...set]) if (c.watcher) onWatchJoin(c, { robot_id: robotId }).catch(() => { /* it rejoins on its own */ });
     }
 
     /** The owner turned embed_public off: every watcher of the robot is dropped at once. */
@@ -1587,6 +1608,8 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         crowdTelemetry(robotId) { return crowd.telemetry(robotId); },
         /** Crowd control, for the owner and Mods: who holds a recent drive, newest first ([{ who, at, inputs }]). */
         crowdPeople(robotId) { return crowd.people(robotId); },
+        /** Crowd control: whether guests (watchers, signed out) may steer this crowd robot; off when it connects. */
+        crowdGuests(robotId, on) { if (on !== undefined) setCrowdGuests(robotId, !!on); return crowdGuests.has(robotId); },
         /** Crowd control: take someone out of the crowd for `minutes` (their drive goes now). → true when kicked */
         crowdKick(robotId, subject, minutes) { return crowd.kick(robotId, subject, Math.round(minutes * 60000)); },
         isOnline, deviceState, sendToDevice, sendToRobotDevices, broadcast, closeDevice, robotState, refreshConfig, closeWatchers, dropSubject, operatorCommand,
