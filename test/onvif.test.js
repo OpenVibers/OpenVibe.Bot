@@ -219,7 +219,9 @@ function unitOnvif({ fetchImpl, log = { warn() {} } } = {}) {
         assert.ok(move.body.includes('#PasswordDigest'), 'the password is digested');
         assert.ok(!move.body.includes(CAM_PASS), 'the password is never sent in clear');
         assert.ok(!t.logs.join('\n').includes(CAM_PASS), 'the password is never logged');
-        const state = await op.waitFor((m) => m.type === 'robot_state' && m.state && m.state.telemetry && m.state.telemetry.camera);
+        // The state that carries the PTZ readout: an earlier one may already name the camera without it (11-21: test-pg
+        // took that first state and failed one run in three).
+        const state = await op.waitFor((m) => m.type === 'robot_state' && m.state && m.state.telemetry && m.state.telemetry.camera && m.state.telemetry.camera.ptz);
         assert.ok(state && state.state.telemetry.camera.ptz, 'the operator sees the camera readout');
         op.close();
     });
