@@ -12,7 +12,11 @@ require('../server/realtime');
     // "Your turn" notifications go to a fake Network notifier here (the real one pushes as app bot).
     const pushes = [];
     // A guest's place waits a second for a reload here (30 s in production), so "closing the page leaves" is quick.
-    const t = await boot({ env: { BOT_HEARTBEAT_MS: '60000', BOT_GUEST_GRACE_MS: '1000' }, appOpts: { notifier: { push: async (n) => { pushes.push(n); return { ok: true }; } } } });
+    // The fast lane's reads (Network's follows, Billing's subscriptions) are fakes here: who follows, who subscribes.
+    const followers = new Set();
+    const subscribers = new Set();
+    const lanes = { follows: async (s) => followers.has(s), subscribes: async (s) => subscribers.has(s) };
+    const t = await boot({ env: { BOT_HEARTBEAT_MS: '60000', BOT_GUEST_GRACE_MS: '1000' }, appOpts: { lanes, notifier: { push: async (n) => { pushes.push(n); return { ok: true }; } } } });
     const alex = t.network.newUser('alex');     // the owner
     const mona = t.network.newUser('mona');     // a Mod
     const otto = t.network.newUser('otto');     // an Operator
@@ -346,6 +350,28 @@ require('../server/realtime');
         const p = await t.call('POST', `/api/v1/robots/${priv.id}/queue/join`, { user: quinn, body: {} });
         assert.strictEqual(p.status, 409);
         assert.match(p.text, /bot\.not_a_queue/);
+    });
+
+    await check('the fast lane: where the owner turned it on, subscribers then followers go before anyone else in line', async () => {
+        const wes = t.network.newUser('wes');
+        const fay = t.network.newUser('fay');
+        const zed = t.network.newUser('zed');
+        followers.add(fay.subject);
+        subscribers.add(zed.subject);
+        const { robot } = await t.robot(alex, { profile_id: 'looi', access_policy: 'queue', limits: { turn_ms: 30000, lane_followers: true, lane_subscribers: true } });
+        for (const u of [quinn, wes, fay, zed]) await t.domain.queue.join(robot.id, u.subject);
+        const view = async (u) => t.domain.queue.state(robot.id, u.subject);
+        assert.ok((await view(quinn)).active, 'the first to join drives');
+        assert.deepStrictEqual([(await view(zed)).position, (await view(zed)).lane], [1, 2], 'a subscriber is next');
+        assert.deepStrictEqual([(await view(fay)).position, (await view(fay)).lane], [2, 1], 'then a follower');
+        assert.deepStrictEqual([(await view(wes)).position, (await view(wes)).lane], [3, 0], 'then everyone else, in order');
+        t.clock.offset += 31000;
+        await t.domain.queue.sweep();
+        assert.ok((await view(zed)).active, 'the subscriber got the next turn though they joined last');
+        // Off: everyone in the order they joined.
+        const { robot: plain } = await t.robot(alex, { profile_id: 'looi', access_policy: 'queue' });
+        for (const u of [wes, zed]) await t.domain.queue.join(plain.id, u.subject);
+        assert.strictEqual((await t.domain.queue.state(plain.id, zed.subject)).lane, 0);
     });
 
     await done();

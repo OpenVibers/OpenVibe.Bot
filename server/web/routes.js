@@ -857,7 +857,11 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         const guestSeconds = optNum(req.body.guest_turn_s, 10, 3600);
         const turnSpeed = optNum(req.body.turn_speed, 10, 100);
         const guestSpeed = optNum(req.body.guest_speed, 10, 100);
+        const on = (name) => (Array.isArray(req.body[name]) ? req.body[name].includes('on') : req.body[name] === 'on');
         const limits = { ...stored, turn_ms: seconds * 1000, turn_budget: presses, guest_turns: guestTurns };
+        // The fast lane's two switches (an older form without them leaves them as they were).
+        if (req.body.lane_followers !== undefined) limits.lane_followers = on('lane_followers');
+        if (req.body.lane_subscribers !== undefined) limits.lane_subscribers = on('lane_subscribers');
         if (guestSeconds != null) limits.guest_turn_ms = Math.round(guestSeconds) * 1000;
         if (turnSpeed != null) limits.turn_speed = Math.round(turnSpeed) / 100;
         if (guestSpeed != null) limits.guest_speed = Math.round(guestSpeed) / 100;

@@ -778,6 +778,8 @@ ${toggle('guest_turns', own.guest_turns === true, 'Guests can take turns', 'View
 <label class="field"><span class="field-label">Guest turn length (seconds)</span><input type="number" name="guest_turn_s" min="10" max="3600" step="5" value="${esc(guestSeconds)}" required></label>
 <label class="field"><span class="field-label">Top speed for guests (%)</span><input type="number" name="guest_speed" min="10" max="100" step="5" value="${esc(pct(own.guest_speed > 0 ? own.guest_speed : own.turn_speed))}" required></label>
 <p class="setting-note">Top speed is a share of the robot's own limits; the robot's speed setting still applies on top. You and your Mods and Operators always drive at full speed.</p>
+${toggle('lane_followers', own.lane_followers === true, 'People who follow you go first', 'They wait in a faster lane: the next turn goes to a follower before anyone else in line.')}
+${toggle('lane_subscribers', own.lane_subscribers === true, 'Your subscribers go first', 'Ahead of followers and everyone else in line.')}
 <button type="submit">Save</button>
 </form></section>`;
 }

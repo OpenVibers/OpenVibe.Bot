@@ -88,7 +88,7 @@ function noteToHz(note) {
 }
 
 
-function createDomain({ db, config, outbox, link = null, nodes = null, openre = null, webhooks = null, onEvent = null, now = () => Date.now(), log = console }) {
+function createDomain({ db, config, outbox, link = null, nodes = null, openre = null, webhooks = null, onEvent = null, lanes = null, now = () => Date.now(), log = console }) {
     // Listeners told when a device appears, goes on or offline, changes what it advertises or is revoked (the worker
     // offers Bot reports to Network follow these, server/jobs/offers.js).
     const changeListeners = new Set();
@@ -314,6 +314,9 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         }
         // Guests (signed out) may take turns on a queue robot: the owner's switch, off unless set.
         if (typeof limits.guest_turns === 'boolean') out.guest_turns = limits.guest_turns;
+        // The fast lane: followers of the owner's channel, and their subscribers, go first (each the owner's switch).
+        if (typeof limits.lane_followers === 'boolean') out.lane_followers = limits.lane_followers;
+        if (typeof limits.lane_subscribers === 'boolean') out.lane_subscribers = limits.lane_subscribers;
         // Crowd control's settings: the style, the window and the viewer speed cap (a fraction of each axis's range).
         if (limits.crowd && typeof limits.crowd === 'object') {
             const c = limits.crowd; const o = {};
@@ -1348,7 +1351,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
             }
         }
         if (held) return null;   // no turn starts while the robot cannot move
-        const next = await q.maybe(`SELECT * FROM robot_queue WHERE robot_id = $1 AND state = 'waiting' ORDER BY joined_at LIMIT 1 FOR UPDATE`, [robotId]);
+        const next = await q.maybe(`SELECT * FROM robot_queue WHERE robot_id = $1 AND state = 'waiting' ORDER BY lane DESC, joined_at LIMIT 1 FOR UPDATE`, [robotId]);
         if (!next) return null;
         const at = now();
         // A guest's turn may be shorter than a signed-in person's (limits.guest_turn_ms, the owner's Taking turns card).
@@ -1370,10 +1373,27 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         const n = await db.value(`WITH gone AS (DELETE FROM robot_queue WHERE subject LIKE 'gst\\_%' RETURNING 1) SELECT count(*)::int FROM gone`);
         return Number(n) || 0;
     }
+    /**
+     * A person's lane in a robot's line (0 anyone, 1 a follower of the owner's channel, 2 a subscriber), where the owner
+     * turned the fast lane on; a guest is always 0. The answer of `lanes` (Network's follows, Billing's entitlement),
+     * never fatal: a read that fails is lane 0.
+     */
+    async function laneFor(robotId, subject) {
+        if (!lanes || isGuest(subject) || !/^usr_/.test(String(subject || ''))) return 0;
+        const robot = await getRobot(robotId);
+        const own = robot ? json(robot.limits, {}) : {};
+        if (!robot || (!own.lane_followers && !own.lane_subscribers) || subject === robot.owner_subject) return 0;
+        try {
+            if (own.lane_subscribers && await lanes.subscribes(subject, robot.owner_subject)) return 2;
+            if (own.lane_followers && await lanes.follows(subject, robot.owner_subject)) return 1;
+        } catch (e) { log.warn(`[Bot] fast lane for ${robotId}: ${e.message}`); }
+        return 0;
+    }
     async function joinQueue(robotId, subject) {
         const at = iso(now());
-        await db.query(`INSERT INTO robot_queue (robot_id, subject, joined_at, state) VALUES ($1, $2, $3, 'waiting')
-            ON CONFLICT (robot_id, subject) DO NOTHING`, [robotId, subject, at]);
+        const lane = await laneFor(robotId, subject);
+        await db.query(`INSERT INTO robot_queue (robot_id, subject, joined_at, state, lane) VALUES ($1, $2, $3, 'waiting', $4)
+            ON CONFLICT (robot_id, subject) DO NOTHING`, [robotId, subject, at, lane]);
         await currentTurn(robotId);
         return queueState(robotId, subject);
     }
@@ -1399,7 +1419,9 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         const mine = await db.maybe('SELECT * FROM robot_queue WHERE robot_id = $1 AND subject = $2', [robotId, subject]);
         let position = null;
         if (mine && mine.state === 'waiting') {
-            const n = await db.value(`SELECT count(*)::int FROM robot_queue WHERE robot_id = $1 AND state = 'waiting' AND joined_at <= $2`, [robotId, mine.joined_at]);
+            // Ahead of me: a higher lane, or my lane and joined no later than me.
+            const n = await db.value(`SELECT count(*)::int FROM robot_queue WHERE robot_id = $1 AND state = 'waiting'
+                AND (lane > $3 OR (lane = $3 AND joined_at <= $2))`, [robotId, mine.joined_at, Number(mine.lane) || 0]);
             position = Number(n);
         }
         return {
@@ -1412,6 +1434,8 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
             // No turn runs while the robot cannot move: the line waits, and says why.
             held: robotHeld.has(robotId) ? { why: robotHeld.get(robotId).why, words: heldWords(robotId) } : null,
             position: active && active.subject === subject ? 0 : position,
+            // The reader's own lane: 2 a subscriber, 1 a follower (the owner's fast lane), else 0.
+            lane: mine ? Number(mine.lane) || 0 : 0,
             budget: turnBudget(robot),
             used: active && active.subject === subject ? active.commands_used : 0,
         };
