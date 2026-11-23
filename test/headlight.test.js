@@ -10,7 +10,11 @@ const { loadProfiles } = require('../server/profiles');
 require('../server/realtime');
 
 (async () => {
-    const t = await boot();
+    // The headlight budget (two a rolling second) is stepped with the injected clock, and device liveness runs on the same
+    // clock: at the suite's 200 ms beat a 1 s step left the device 1 s silent, so a liveness sweep that landed between the
+    // step and the next command dropped it and the command never reached the device (hl-3 on test-pg, 11-21 to 11-23).
+    // Nothing here is about liveness, so this suite's beat is a minute.
+    const t = await boot({ env: { BOT_HEARTBEAT_MS: '60000' } });
     const alex = t.network.newUser('alex');
     const bob = t.network.newUser('bob');
     const carol = t.network.newUser('carol');
