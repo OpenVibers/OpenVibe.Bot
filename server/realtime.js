@@ -154,18 +154,44 @@ function deviceCredentialFromProtocols(header) {
 const SENSOR_KEYS = { ultrasonic: ['distance_cm'], line: ['line'], cliff: ['cliff', 'picked_up'], pickup: ['picked_up', 'pickup'] };
 
 /**
+ * The owner's caps as the robot holds them (Maticus, LOOI app 0.2.20, 11-23: its status says role_caps_applied, outside
+ * manifest 1.1.0): what Bot last sent in config.role_caps, and whether the robot says it holds them. The robot may say
+ * `true` / `false`, or the caps it applied in config.role_caps's shape; then each capped setting Bot sent must match.
+ *   { turn: { <setting>: <option> } | null, guest: … | null, applied: true | false | null (the robot does not say) }
+ * Null when Bot sent no caps.
+ */
+function capsReport(merged, conn) {
+    const sent = conn && conn.roleCaps;
+    if (!sent || typeof sent !== 'object') return null;
+    const settingsOf = (role) => (sent[role] && sent[role].settings && Object.keys(sent[role].settings).length ? sent[role].settings : null);
+    if (!settingsOf('turn') && !settingsOf('guest')) return null;
+    let said = merged.role_caps_applied;
+    if (said === undefined && conn.status) said = conn.status.role_caps_applied;
+    let applied = null;
+    if (typeof said === 'boolean') applied = said;
+    else if (said && typeof said === 'object') {
+        applied = ['turn', 'guest'].every((role) => Object.entries(settingsOf(role) || {}).every(([name, opt]) => {
+            const r = said[role];
+            const v = r && typeof r === 'object' ? (r.settings && typeof r.settings === 'object' ? r.settings[name] : r[name]) : undefined;
+            return v != null && String(v).toLowerCase() === String(opt).toLowerCase();
+        }));
+    }
+    return { turn: settingsOf('turn'), guest: settingsOf('guest'), applied };
+}
+
+/**
  * The robot's own report of what is in effect, in Bot's words (Maticus's 11-23 spec: the LOOI app sends
  * status.capabilities.looi_bridge { operators_allowed, mode, speed_stage, armed }; a fuller object may ride in
  * telemetry.sensors.looi_bridge). Read from the paths its profile names (mapping.state), later paths winning:
  *   { reported, why, armed, stop, remote, link, settings: { <name>: <its declared option> }, yaw_from_center,
- *     yaw_center_set, orientation }
+ *     yaw_center_set, orientation, caps (capsReport) }
  * `why` is null when a remote driver's command can move the robot, else offline | stop | link_down | not_armed |
  * remote_off. Null for a profile that names no state. Display and the queue's hold only: the robot still decides.
  */
 function robotReport(conn, profile) {
     const m = profile && profile.mapping;
     if (!m || !Array.isArray(m.state)) return null;
-    const none = { reported: false, why: null, armed: null, stop: null, remote: null, link: null, settings: {}, yaw_from_center: null, yaw_center_set: null, orientation: null };
+    const none = { reported: false, why: null, armed: null, stop: null, remote: null, link: null, settings: {}, yaw_from_center: null, yaw_center_set: null, orientation: null, caps: null };
     if (!conn || !conn.online) return { ...none, why: 'offline' };
     const merged = {};
     let reported = false;
@@ -199,6 +225,7 @@ function robotReport(conn, profile) {
         yaw_from_center: num(merged.yaw_from_center),
         yaw_center_set: typeof merged.yaw_center_set === 'boolean' ? merged.yaw_center_set : null,
         orientation: /^(portrait|landscape)$/i.test(String(merged.orientation || '')) ? String(merged.orientation).toLowerCase() : null,
+        caps: capsReport(merged, conn),
     };
 }
 
@@ -511,6 +538,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         const base = robot ? domain.control.allowedFor(robot, 'owner', profile) : ['halt'];
         const allowed = conn.computerAllowed ? [...new Set([...base, ...COMPUTER_KINDS, SCREEN_KIND])] : base;
         const caps = robot ? domain.control.roleCaps(robot, profile) : null;
+        conn.roleCaps = caps;   // what the robot was last told, beside what it says it holds (robot_state.ready.caps)
         sendFrame(conn, 'config', {
             heartbeat_ms: config.device.heartbeatMs, limits, allowed_commands: allowed,
             // The owner's caps for turns and guests (contracts 0.454.0; Maticus: "the turn-taker stage cap can wait for
