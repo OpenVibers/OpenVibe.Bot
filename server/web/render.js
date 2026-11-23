@@ -281,7 +281,9 @@ function settingsWidget(profile, enabled) {
     const settings = (profile.mapping && profile.mapping.settings) || {};
     const rows = [];
     const actions = [];
-    for (const [name, s] of Object.entries(settings)) {
+    // In the profile's order (`order`; a profile stored as jsonb comes back with its keys sorted by length).
+    const entries = Object.entries(settings).map((e, i) => [e, e[1].order != null ? e[1].order : 1000 + i]).sort((a, b) => a[1] - b[1]).map((x) => x[0]);
+    for (const [name, s] of entries) {
         if (s.action) {
             actions.push(`<button type="button" class="robot-action" data-set-action="${esc(name)}"${disabledUnless(enabled)}>${icon('plus')}<span>${esc(s.label)}</span></button>`);
             continue;
@@ -292,7 +294,7 @@ function settingsWidget(profile, enabled) {
     }
     return '<p class="robot-ready" data-ready role="status" hidden></p>'
         + '<ul class="robot-chips" data-robot-chips aria-label="What the robot reports"></ul>'
-        + (rows.length || actions.length ? `<div class="robot-sets" data-robot-sets>${rows.join('')}${actions.length ? `<div class="robot-actions">${actions.join('')}</div>` : ''}</div>` : '')
+        + (rows.length || actions.length ? `<div class="robot-sets" data-robot-sets>${rows.join('')}${actions.length ? `<div class="rcard-actions">${actions.join('')}</div>` : ''}</div>` : '')
         + '<p class="robot-set-note" data-set-note role="status" hidden></p>';
 }
 

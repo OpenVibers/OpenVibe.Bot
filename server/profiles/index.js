@@ -185,7 +185,8 @@ const STATE_PATH = /^(status\.capabilities|telemetry\.sensors)\.[a-z][a-z0-9_]{0
  * A driver's robot settings and the robot's own report, in the open `mapping` (the contract keeps `commands` closed;
  * LOOI's speed stage, mode, head speed and spin limit, Maticus 11-21/11-23):
  *   settings    { <name>: { label, options: [string|number, …], names?: [label per option], owner_only?: [options],
- *                 when?: { <other setting>: <option> } } | { label, action: true } }   the `setting` kind's names and values
+ *                 when?: { <other setting>: <option> }, order? } | { label, action: true, order? } }   the `setting` kind's
+ *                 names and values; `order` keeps the panel's order (a stored profile's keys come back sorted)
  *   state       [ "status.capabilities.<key>" | "telemetry.sensors.<key>", … ]       where the robot reports what is in
  *                 effect (armed, stop, operators allowed, link, each setting's value); later paths win
  *   wire_roles  { <role>: <role> }   how this robot's driver names a role (LOOI's app knows no `queue`: a turn holder
@@ -198,6 +199,7 @@ function validateMappingExtras(id, m) {
             const where = `${id}: mapping.settings.${name}`;
             if (!SETTING_RE.test(name)) bad(`${where}: a setting name is lower case letters, digits and _`);
             if (!isObject(s) || typeof s.label !== 'string' || !s.label.trim() || s.label.length > 40) bad(`${where}.label is required (at most 40 characters)`);
+            if (s.order != null && !Number.isInteger(s.order)) bad(`${where}.order is a whole number`);
             if (s.action === true) {
                 if (s.options != null || s.owner_only != null) bad(`${where}: an action takes no options`);
                 continue;

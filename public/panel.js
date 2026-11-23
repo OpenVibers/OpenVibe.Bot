@@ -1698,6 +1698,25 @@
         const settings = r.settings || {};
         const can = joined && allowed.includes('setting');
         const valueOf = (name) => (settings[name] !== undefined ? settings[name] : confirmed.get(name));
+        // Someone who cannot change them reads the settings as a few more chips, not a wall of pickers they cannot use.
+        const setsEl = $('[data-robot-sets]', robotEl);
+        if (setsEl) setsEl.hidden = !can;
+        if (!can && chipsEl) {
+            for (const row of $$('[data-set]', robotEl)) {
+                const v = valueOf(row.dataset.set);
+                if (v === undefined) continue;
+                const when = row.dataset.when ? JSON.parse(row.dataset.when) : null;
+                if (when && !Object.entries(when).every(([k, w]) => valueOf(k) !== undefined && sameOption(valueOf(k), w))) continue;
+                const button = $$('[data-option]', row).find((b) => sameOption(JSON.parse(b.dataset.option), v));
+                const label = $('.robot-set-l', row);
+                const li = document.createElement('li');
+                li.className = 'robot-chip';
+                li.dataset.tone = 'setting';
+                li.textContent = row.dataset.set === 'mode' ? (button ? button.textContent : String(v)) : `${label ? label.textContent : row.dataset.set} ${button ? button.textContent : v}`;
+                chipsEl.append(li);
+            }
+            chipsEl.hidden = !chipsEl.children.length;
+        }
         for (const row of $$('[data-set]', robotEl)) {
             const name = row.dataset.set;
             const when = row.dataset.when ? JSON.parse(row.dataset.when) : null;
