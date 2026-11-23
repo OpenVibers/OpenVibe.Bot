@@ -312,6 +312,8 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
             const n = Number(limits[k]);
             if (limits[k] != null && Number.isFinite(n) && n >= 0) out[k] = n;
         }
+        // Guests (signed out) may take turns on a queue robot: the owner's switch, off unless set.
+        if (typeof limits.guest_turns === 'boolean') out.guest_turns = limits.guest_turns;
         // Crowd control's settings: the style, the window and the viewer speed cap (a fraction of each axis's range).
         if (limits.crowd && typeof limits.crowd === 'object') {
             const c = limits.crowd; const o = {};
@@ -1694,7 +1696,15 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         const crowdMix = !!(principal && principal.kind === 'crowd');
         if (crowdMix && robot.access_policy !== 'crowd') return { ok: false, code: 'bot.not_crowd', reason: 'this robot is not driven by its crowd', robot };
         const subject = principal && principal.kind !== 'device' ? principal.subject : null;
-        const member = crowdMix ? null : await operatorStateOf(robotId, subject);
+        // A guest (a signed-out viewer of the robot's public panel, `gst_…`) drives only a queue robot whose owner lets
+        // guests take turns, and only as the holder of a turn: never a member, never anything but the queue's kinds.
+        if (principal && principal.kind === 'guest') {
+            const own = json(robot.limits, {});
+            if (robot.access_policy !== 'queue' || own.guest_turns !== true || !/^gst_[A-Za-z0-9_-]{8,40}$/.test(String(subject || ''))) {
+                return { ok: false, code: 'bot.sign_in', reason: 'Sign in to take a turn driving this robot.', robot };
+            }
+        }
+        const member = crowdMix || (principal && principal.kind === 'guest') ? null : await operatorStateOf(robotId, subject);
         let role = crowdMix ? 'crowd' : member ? member.role : null;
         if (!role && robot.access_policy === 'queue' && subject) {
             const turn = await currentTurn(robotId);
