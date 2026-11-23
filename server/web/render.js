@@ -728,6 +728,30 @@ ${row('Longest command', 'max_command_ms', `${effective.maxCommandMs} ms`)}
 
 
 /**
+ * The robot's devices (the owner's page; Maticus, 11-23): what connects as this robot, online now or when it was last
+ * seen, and Revoke for one no longer used (its credential, its Network link and its video key go; it disconnects at once).
+ * Revoking asks once more, inline.
+ */
+function devicesCard(robot, info) {
+    const list = info && Array.isArray(info.devices) ? info.devices : null;
+    if (!list) return '';
+    const seen = (at) => {
+        if (!at) return 'never connected';
+        const s = Math.max(0, Math.round((Date.now() - Date.parse(at)) / 1000));
+        return s < 90 ? 'seen just now' : s < 5400 ? `last seen ${Math.round(s / 60)} min ago` : s < 129600 ? `last seen ${Math.round(s / 3600)} h ago` : `last seen ${Math.round(s / 86400)} days ago`;
+    };
+    const rows = list.map((d) => `<li class="device-row"><span class="device-name"><b>${esc(d.name || (d.link ? 'OpenVibe Link' : 'Device'))}</b>`
+        + `<small>${esc([d.kind, d.agent_version].filter(Boolean).join(' · '))}</small></span>`
+        + `<span class="pill${d.online ? ' online' : ''}">${d.online ? '<span class="dot"></span>Online now' : esc(seen(d.last_seen))}</span>`
+        + `<details class="device-revoke"><summary>Revoke</summary><form method="post" action="/robots/${esc(robot.id)}/devices/${esc(d.id)}/revoke">`
+        + `<p class="setting-note">It disconnects now and can never connect again; pair it afresh to use it.</p><button type="submit" class="danger">Revoke this device</button></form></details></li>`).join('');
+    return `<section class="setting-card" id="devices" aria-labelledby="devices-h"><h2 id="devices-h">Devices</h2>
+<p class="setting-note">What connects as this robot. Revoke one you no longer use, like an old computer, so only the one you drive with is online.</p>
+${rows ? `<ul class="people-list devices-list">${rows}</ul>` : '<p class="setting-note">No devices yet.</p>'}
+<p class="setting-note"><a href="/pair/${esc(robot.id)}">Pair a device</a></p></section>`;
+}
+
+/**
  * Taking turns (a queue robot, the owner's page): how long a turn lasts and how many presses it has, with what each
  * means (Maticus, 11-23: "explain what the turn budget is and make it adjustable"). Driving is bounded by the turn's
  * length; the presses count buttons and clicks on the video, never the stick (a held stick resends every 150 ms).
@@ -966,7 +990,7 @@ ${tryIt ? tryIntro() : ''}
 <div class="widgets"${arrange ? require('./surface').surfaceAttrs(arrange.catalog, arrange.layout, arrange.device, arrangeApply) : ''}>
 ${widgets.join('\n')}
 </div>
-${arrange ? `<script type="application/json" id="ov-arrange-data">${JSON.stringify({ catalog: arrange.catalog, layout: arrange.layout, device: arrange.device, surface: arrange.catalog.id, signedIn: arrange.signedIn, layoutSource: arrange.layoutSource || 'default', save: arrange.save || null, suggest: arrange.suggest || null, share: arrange.share || null, reset: arrange.reset || null, author: arrange.author || null, defaultLayout: arrange.defaultLayout || null }).replace(/</g, '\\u003c')}</script>` : ''}${tryIt ? tryOutro(profile) : ''}${role === 'owner' && !embed && !tryIt ? `<div class="owner-settings">${limitsCard(robot, limitsInfo, profile)}${onStreamCard(robot, { liveUrl })}${turnsCard(robot, limitsInfo)}${localProfileForm(robot, profile, profileForm)}${commissionForm(robot, profile)}${automation ? routinesCard(robot, profile, automation) + webhooksCard(robot, automation) : ''}${agentForm(robot)}${listingForm(robot)}${embedForm(robot)}${streamingForm(robot, streaming)}${people ? peopleCard(robot, people) : ''}</div>` : ''}
+${arrange ? `<script type="application/json" id="ov-arrange-data">${JSON.stringify({ catalog: arrange.catalog, layout: arrange.layout, device: arrange.device, surface: arrange.catalog.id, signedIn: arrange.signedIn, layoutSource: arrange.layoutSource || 'default', save: arrange.save || null, suggest: arrange.suggest || null, share: arrange.share || null, reset: arrange.reset || null, author: arrange.author || null, defaultLayout: arrange.defaultLayout || null }).replace(/</g, '\\u003c')}</script>` : ''}${tryIt ? tryOutro(profile) : ''}${role === 'owner' && !embed && !tryIt ? `<div class="owner-settings">${limitsCard(robot, limitsInfo, profile)}${onStreamCard(robot, { liveUrl })}${turnsCard(robot, limitsInfo)}${devicesCard(robot, limitsInfo)}${localProfileForm(robot, profile, profileForm)}${commissionForm(robot, profile)}${automation ? routinesCard(robot, profile, automation) + webhooksCard(robot, automation) : ''}${agentForm(robot)}${listingForm(robot)}${embedForm(robot)}${streamingForm(robot, streaming)}${people ? peopleCard(robot, people) : ''}</div>` : ''}
 </main>`;
     return page(tryIt ? 'Try the panel with a simulated rover' : robot.name, body, {
         scripts: panelScripts(profile, tryIt, embed), bodyClass: embed ? 'embed-page' : 'panel-page',

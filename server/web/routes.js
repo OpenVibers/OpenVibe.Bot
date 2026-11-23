@@ -824,6 +824,22 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         if (hub) { await hub.refreshConfig(robot.id); hub.broadcast(robot.id); }
         return res.redirect(303, `/panel/${robot.id}#commission`);
     }));
+    // A device the owner no longer uses, revoked from the robot's page: the same steps as POST /api/v1/devices/:id/revoke
+    // (Network's principal and the OpenRestream key go too, and the socket closes at once).
+    r.post('/robots/:id/devices/:device/revoke', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
+        const me = requireUser(req);
+        if (!sameOrigin(req)) throw new BotError(403, 'bot.forbidden', 'cross-site form posts are refused');
+        const robot = await domain.robots.get(req.params.id);
+        if (!robot) throw new BotError(404, 'bot.robot_not_found', 'no such robot');
+        if (robot.owner_subject !== me.subject) throw new BotError(403, 'bot.forbidden', 'only the owner may revoke this robot\'s devices');
+        const d = await domain.devices.get(req.params.device);
+        if (!d || !(Array.isArray(d.robot_ids) ? d.robot_ids : JSON.parse(d.robot_ids || '[]')).includes(robot.id)) throw new BotError(404, 'bot.device_not_found', 'no such device on this robot');
+        await domain.devices.revoke(d.id);
+        if (d.node_principal) await domain.devices.revokeNode(d.node_principal).catch((e) => log.warn(`[Bot] revoke on Network: ${e.message}`));
+        await domain.devices.revokeVideo(d.id).catch((e) => log.warn(`[Bot] revoke the video key: ${e.message}`));
+        if (hub) { hub.closeDevice(d.id, 'revoked'); hub.broadcast(robot.id); }
+        return res.redirect(303, `/panel/${robot.id}#devices`);
+    }));
     // Taking turns, on the owner's page: the turn's length and its presses (limits.turn_ms, limits.turn_budget).
     r.post('/robots/:id/turns', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {
         const me = requireUser(req);
@@ -949,7 +965,11 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         // profile or was set for this robot (never leave an owner reading a bare `{}` as "no limits").
         const limitsInfo = role === 'owner' && mode === 'page'
             ? { effective, profileName: profile.name || robot.profile_id, robotLimits: json(robot.limits, {}), subject: robot.owner_subject,
-                turnMs: config.control.queueTurnMs, turnBudget: config.control.queueTurnBudget }
+                turnMs: config.control.queueTurnMs, turnBudget: config.control.queueTurnBudget,
+                devices: (await domain.devices.listForRobot(robot.id)).filter((d) => !d.revoked_at).map((d) => ({
+                    id: d.id, name: d.name || null, kind: d.kind || null, agent_version: d.agent_version || null,
+                    last_seen: d.last_seen ? new Date(d.last_seen).toISOString() : null, online: !!(hub && hub.isOnline(d.id)),
+                    link: !!d.node_principal })) }
             : null;
         // Two OpenRestream reads, run together. Only the owner's own page shows the streaming switches, greyed out
         // with a reason when OpenRestream does not answer; the live session is for the camera tile of every page,

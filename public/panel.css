@@ -1061,3 +1061,13 @@ html[data-ov-motion="off"] .seg button { transition: none; }
 .robot-action:disabled { opacity: 0.55; cursor: default; }
 .robot-set-note { margin: 0; font-size: 0.85rem; color: var(--muted); }
 html.embed-page[data-bot-view="panel"] .seg button { min-height: 38px; font-size: 0.82rem; }
+
+/* The owner's Devices card: each device, its state and an inline Revoke that asks once more. */
+.devices-list .device-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.35rem 0.75rem; align-items: center; }
+.device-name { display: grid; min-width: 0; }
+.device-name b, .device-name small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.device-name small { color: var(--muted); }
+.device-revoke { grid-column: 1 / -1; }
+.device-revoke summary { cursor: pointer; color: var(--danger-text, var(--danger)); font-weight: 600; font-size: 0.85rem; min-height: var(--tap); display: inline-flex; align-items: center; }
+.device-revoke form { display: grid; gap: 0.5rem; justify-items: start; }
+.device-revoke .danger { min-height: var(--tap); padding: 0 1rem; border-radius: 999px; border: 0; background: var(--fill-danger); color: #fff; font-weight: 700; cursor: pointer; }

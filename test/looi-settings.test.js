@@ -7,7 +7,9 @@ const { boot, check, done } = require('./helpers/app');
 require('../server/realtime');
 
 (async () => {
-    const t = await boot();
+    // The hold test steps the injected clock 30 s, and device liveness runs on the same clock: at the suite-wide 200 ms beat a
+    // sweep between the step and the robot's next report would drop the fake phone (the headlight suite's flake). A minute.
+    const t = await boot({ env: { BOT_HEARTBEAT_MS: '60000' } });
     const alex = t.network.newUser('alex');     // the owner
     const mona = t.network.newUser('mona');     // a Mod
     const otto = t.network.newUser('otto');     // an Operator
@@ -139,7 +141,7 @@ require('../server/realtime');
         const rh = await result(q, 'h1');
         assert.strictEqual(rh.code, 'bot.robot_not_ready');
         assert.match(rh.reason, /keeps its time: the robot is not armed yet/);
-        t.clock.offset += 30000;   // thirty seconds unarmed
+        t.clock.offset += 30000;   // thirty seconds unarmed (liveness is a minute here)
         report(dev, { operators_allowed: true, mode: 'DRIVE_AND_HEAD', speed_stage: '24', armed: true });
         await q.waitFor((x) => x.type === 'robot_state' && x.state.queue && !x.state.queue.paused);
         const after = await t.domain.queue.state(robot.id, quinn.subject);
@@ -162,6 +164,25 @@ require('../server/realtime');
         assert.match(page, /data-set-action="yaw_center"/);
         assert.match(page, /action="\/robots\/[^"]+\/turns"/, 'the owner\'s Taking turns card');
         assert.match(page, /Driving and the head never count/);
+    });
+
+    await check('the owner revokes an old device from the robot\'s page: it disconnects at once and the card lists only the rest', async () => {
+        const { robot, pairing } = await t.robot(alex, { profile_id: 'looi' });
+        const dev = await deviceFor(robot.id, pairing.code);
+        const page = await fetch(`${t.base}/panel/${robot.id}`, { headers: cookie(alex) }).then((r) => r.text());
+        const id = (page.match(/\/devices\/(dev_[0-9A-Z]+)\/revoke/) || [])[1];
+        assert.ok(id, 'the Devices card names the device with its Revoke');
+        assert.match(page, /Online now/);
+        const closed = new Promise((resolve) => dev.ws.on('close', (code) => resolve(code)));
+        const r = await fetch(`${t.base}/robots/${robot.id}/devices/${id}/revoke`, { method: 'POST', redirect: 'manual',
+            headers: { ...cookie(alex), Origin: t.base, 'content-type': 'application/x-www-form-urlencoded' }, body: '' });
+        assert.strictEqual(r.status, 303);
+        assert.strictEqual(await closed, 4003, 'revoked: the socket closes');
+        const after = await fetch(`${t.base}/panel/${robot.id}`, { headers: cookie(alex) }).then((x) => x.text());
+        assert.ok(!after.includes(`/devices/${id}/revoke`), 'a revoked device leaves the card');
+        const other = await fetch(`${t.base}/robots/${robot.id}/devices/${id}/revoke`, { method: 'POST', redirect: 'manual',
+            headers: { ...cookie(quinn), Origin: t.base, 'content-type': 'application/x-www-form-urlencoded' }, body: '' });
+        assert.ok(other.status === 403 || other.status === 404, `only the owner (${other.status})`);
     });
 
     await done();
