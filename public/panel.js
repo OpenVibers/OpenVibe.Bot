@@ -1841,7 +1841,8 @@
             if (ends != null) turnTimer = setInterval(paintLeft, 1000);
         } else {
             turnStateEl.textContent = `You're #${queue.position} in line`;
-            turnMetaEl.textContent = '';
+            // The owner's fast lane (followers, subscribers go first).
+            turnMetaEl.textContent = queue.lane === 2 ? 'Subscriber lane: you go before others' : queue.lane === 1 ? 'Follower lane: you go before others' : '';
         }
     }
 

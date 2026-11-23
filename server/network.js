@@ -113,6 +113,60 @@ function createOfferReporter(config, { fetchImpl = globalThis.fetch, path = '/in
 }
 
 /**
+ * The fast lane's two reads (11-23): does a person follow the owner's channel (Network, network.follows.read: the
+ * channel's followers, a page of 200 at a time, kept two minutes per owner), and do they subscribe to it (Billing,
+ * billing.entitlement.check as the person, kept five minutes per pair). Either may be absent (no Billing URL): then that
+ * lane is never given.
+ */
+function createLanes(config, { fetchImpl = globalThis.fetch, now = () => Date.now() } = {}) {
+    const net = serviceAuth.createTokenClient({
+        tokenUrl: `${config.network.internalUrl}/oauth/token`, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret,
+        audience: 'openvibe.network', scope: 'network.follows.read', fetchImpl,
+    });
+    const billing = config.billing && config.billing.url ? serviceAuth.createTokenClient({
+        tokenUrl: `${config.network.internalUrl}/oauth/token`, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret,
+        audience: 'openvibe.billing', scope: 'billing.entitlement.check', fetchImpl,
+    }) : null;
+    const followersOf = new Map();   // owner → { at, set }
+    const subs = new Map();          // `${owner}|${subject}` → { at, yes }
+    async function getJson(url, headers) {
+        const res = await fetchImpl(url, { headers: { Accept: 'application/json', ...headers }, signal: AbortSignal.timeout(6000) });
+        if (!res.ok) throw new Error(`answered ${res.status}`);
+        return res.json();
+    }
+    async function follows(subject, owner) {
+        let hit = followersOf.get(owner);
+        if (!hit || now() - hit.at > 120000) {
+            const set = new Set();
+            let cursor = '';
+            for (let page = 0; page < 10; page++) {
+                const out = await getJson(`${config.network.internalUrl}/api/v1/follows/channel/${encodeURIComponent(owner)}/followers?limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, await net.authHeaders());
+                for (const f of (out && (out.items || out.followers)) || []) { const s = f && (f.subject || f.follower || f.id); if (s) set.add(String(s)); }
+                cursor = out && out.next_cursor;
+                if (!cursor) break;
+            }
+            hit = { at: now(), set };
+            followersOf.set(owner, hit);
+            if (followersOf.size > 1000) followersOf.delete(followersOf.keys().next().value);
+        }
+        return hit.set.has(subject);
+    }
+    async function subscribes(subject, owner) {
+        if (!billing) return false;
+        const key = `${owner}|${subject}`;
+        const hit = subs.get(key);
+        if (hit && now() - hit.at < 300000) return hit.yes;
+        const out = await getJson(`${config.billing.url.replace(/\/$/, '')}/api/v1/entitlements/${encodeURIComponent(subject)}?streamer=${encodeURIComponent(owner)}`,
+            { ...(await billing.authHeaders()), 'X-OV-Subject': subject });
+        const yes = !!(out && (out.active === true || out.entitled === true || (out.entitlement && out.entitlement.active === true)));
+        subs.set(key, { at: now(), yes });
+        if (subs.size > 20000) subs.delete(subs.keys().next().value);
+        return yes;
+    }
+    return { follows, subscribes };
+}
+
+/**
  * Network's notifications as app bot (network.notifications.push): "your turn on <robot> started". push({ subject,
  * type, title, message, url, … }) → Network's answer; a failure throws 503 bot.network_unavailable.
  */
@@ -218,4 +272,4 @@ function createAiOfferReporter(config, { fetchImpl = globalThis.fetch } = {}) {
     return createOfferReporter(config, { fetchImpl, path: '/internal/ai/offers/report' });
 }
 
-module.exports = { createKeyProvider, createUserAuth, createNodePrincipals, createIdentity, createOfferReporter, createAiOfferReporter, createNotifier };
+module.exports = { createKeyProvider, createUserAuth, createNodePrincipals, createIdentity, createOfferReporter, createAiOfferReporter, createNotifier, createLanes };

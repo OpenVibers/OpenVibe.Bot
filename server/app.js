@@ -24,7 +24,7 @@ const { http } = require('openvibe-contracts');
 const { isLoopbackDirect } = require('openvibe-shared/metrics');
 const { loadConfig } = require('./config');
 const { openDb } = require('./db');
-const { createKeyProvider, createUserAuth, createNodePrincipals, createIdentity, createOfferReporter, createNotifier } = require('./network');
+const { createKeyProvider, createUserAuth, createNodePrincipals, createIdentity, createOfferReporter, createNotifier, createLanes } = require('./network');
 const { createOfferPublisher } = require('./jobs/offers');
 const { createOpenRe } = require('./openre/client');
 const { createBotOutbox } = require('./events/outbox');
@@ -82,7 +82,9 @@ function createApp(opts = {}) {
     // Webhooks are made first: the domain writes their deliveries in the transaction that emits each event.
     const webhooks = createWebhooks({ db, post: createWebhookPoster({ userAgent: 'OpenVibe.Bot' }), now, log, tickMs: config.automation.webhookTickMs });
     let routines = null;
-    const domain = createDomain({ db, config, outbox, link: hub, nodes, openre, now, log, webhooks,
+    // The fast lane's reads (Network's follows, Billing's subscriptions); a test passes its own.
+    const lanes = opts.lanes !== undefined ? opts.lanes : (config.oauth.clientSecret ? createLanes(config, { fetchImpl, now }) : null);
+    const domain = createDomain({ db, config, outbox, link: hub, nodes, openre, now, log, webhooks, lanes,
         onEvent: (type, robotId) => { if (type === 'bot.robot.online' && routines) routines.onOnline(robotId).catch((e) => log.warn(`[Bot] online routines: ${e.message}`)); } });
     routines = createRoutines({ db, domain, hub, now, log, tickMs: config.automation.routineTickMs });
     const submissions = createSubmissions({ db, config, now, log });

@@ -206,6 +206,11 @@ service acting for them with `bot.robot.control` and `X-OV-Subject`, as Live for
 signed-in person in a `queue` robot's line or take them out, and answer `{ robot_id, queue }`, their own view of it.
 Another policy answers `409 bot.not_a_queue`; no person, `401 bot.sign_in`.
 
+**The fast lane** (`limits.lane_followers`, `limits.lane_subscribers`, the owner's switches): a person who follows the
+owner's channel (Network, `network.follows.read`) joins the line in lane 1, a subscriber (Billing's entitlement check)
+in lane 2, anyone else and every guest in lane 0. The next turn goes to the highest lane, then the earliest to join; a
+person's `queue.position` counts those ahead of them that way and `queue.lane` says theirs. A read that fails is lane 0.
+
 **A turn's top speed** (`limits.turn_speed`, a share 0.1–1 of the robot's own limits; `limits.guest_speed` for guests,
 else the turn's): the gate clamps a turn holder's drive to it before the robot's own stage or ceiling applies. The owner,
 Mods and Operators always drive at the robot's full limits.
