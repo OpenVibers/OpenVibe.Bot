@@ -40,7 +40,9 @@ const { renderPanel } = require('../server/web/render');
         assert.match(js, /const path = watcher \? '\/watch' : '\/control';/);
         // A watcher sends join only; the one exception is a guest's drive on a crowd robot whose owner let guests steer,
         // and only once its joined frame allowed drive (server/realtime.js crowdGuests).
-        assert.match(js, /if \(watcher && frame\.type !== 'join' && !\(frame\.type === 'command' && frame\.kind === 'drive' && allowed\.includes\('drive'\)\)\) return false;/);
+        // A watcher sends join, and (11-23) take_turn / leave_turn where guests may take turns; a command only as a guest
+        // holding a place (the queue's kinds) or as a crowd's guest steering (drive).
+        assert.match(js, /if \(watcher && frame\.type !== 'join' && frame\.type !== 'take_turn' && frame\.type !== 'leave_turn'\s*&& !\(frame\.type === 'command' && \(guestTurn \? allowed\.includes\(frame\.kind\) : frame\.kind === 'drive' && allowed\.includes\('drive'\)\)\)\) return false;/);
         // The live camera reads the server's attribute, the pinned mediasoup-client build Live loads, and
         // the sfu-viewer-* flow; a page with no tile carrying it never imports anything.
         assert.match(js, /for \(const tile of \$\$\('\[data-signaling-url\]'\)\) liveCamera\(tile\);/);

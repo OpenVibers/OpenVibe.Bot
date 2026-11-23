@@ -1847,15 +1847,17 @@
 
     // ── A guest's turn (11-23): a signed-out viewer of a queue robot whose owner lets guests take turns ──────────────
     let guestTurn = false;
-    const takeTurnEl = $('[data-take-turn]');
     const guestLeaveEl = $('[data-guest-leave]');
-    if (takeTurnEl) takeTurnEl.addEventListener('click', () => { takeTurnEl.disabled = true; if (!raw({ type: 'take_turn' })) takeTurnEl.disabled = false; });
     if (guestLeaveEl) guestLeaveEl.addEventListener('click', () => raw({ type: 'leave_turn' }));
+    let guestOffered = false;
     function paintGuest(m) {
         guestTurn = !!m.guest;
-        if (takeTurnEl) { takeTurnEl.hidden = !(m.guest_turns && !guestTurn); takeTurnEl.disabled = false; }
-        const driveBar = $('[data-drive-bar]');
-        if (driveBar) driveBar.hidden = guestTurn;
+        guestOffered = !!m.guest_turns;
+        for (const b of $$('[data-drive]')) {
+            b.hidden = guestTurn;
+            const words = b.querySelector('span');
+            if (words) words.textContent = guestOffered ? 'Take a turn' : 'Drive';
+        }
         if (guestLeaveEl) guestLeaveEl.hidden = !guestTurn;
     }
 
@@ -1899,7 +1901,6 @@
                 notice(others ? `Steering together with ${others} other${others === 1 ? '' : 's'}` : 'Steering');
             }
         } else if (m.type === 'error' && (m.code === 'bot.one_place' || m.code === 'bot.sign_in') && watcher) {
-            if (takeTurnEl) takeTurnEl.disabled = false;
             notice(m.detail || m.code);
         } else if (m.type === 'error') {
             if (m.code === 'bot.not_an_operator' || m.code === 'bot.robot_not_found') { gone = true; joined = false; enableControls(); }
@@ -1975,6 +1976,7 @@
     };
     for (const btn of $$('[data-drive]')) {
         btn.addEventListener('click', () => {
+            if (guestOffered && !guestTurn && (!framed || parentSilent)) { raw({ type: 'take_turn' }); return; }
             if (!framed || parentSilent) return openPopup();
             for (const origin of PARENTS) {
                 try { window.parent.postMessage({ type: 'ov-bot-ticket-request', robot_id: ROBOT_ID }, origin); } catch { /* not that origin */ }
@@ -2011,6 +2013,7 @@
         }
         if (fromParent && d.type === 'ov-bot-ticket-none' && d.robot_id === ROBOT_ID) {
             clearTimeout(asked);
+            if (guestOffered && !guestTurn) { notice(''); raw({ type: 'take_turn' }); return; }
             notice(typeof d.message === 'string' ? d.message.slice(0, 200) : 'You cannot drive this robot from here.');
             return;
         }
