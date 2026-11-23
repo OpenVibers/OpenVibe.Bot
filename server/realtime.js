@@ -510,8 +510,12 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         conn.computerAllowed = !robot || !!declared.computer;
         const base = robot ? domain.control.allowedFor(robot, 'owner', profile) : ['halt'];
         const allowed = conn.computerAllowed ? [...new Set([...base, ...COMPUTER_KINDS, SCREEN_KIND])] : base;
+        const caps = robot ? domain.control.roleCaps(robot, profile) : null;
         sendFrame(conn, 'config', {
             heartbeat_ms: config.device.heartbeatMs, limits, allowed_commands: allowed,
+            // The owner's caps for turns and guests (contracts 0.454.0; Maticus: "the turn-taker stage cap can wait for
+            // role_caps"): the phone clamps a turn's (and a guest's) speed stage to it.
+            ...(caps ? { role_caps: caps } : {}),
             estop_latched: false,   // the field stays for older devices; Bot has no remote stop latch
             // Vibe by voice: the machine listens for its call word only while its owner has voice on.
             ...(conn.device.voice_on ? { voice: true, call_word: voice.callWordOf(conn.device) } : {}),

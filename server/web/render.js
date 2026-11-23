@@ -760,7 +760,13 @@ ${rows ? `<ul class="people-list devices-list">${rows}</ul>` : '<p class="settin
  * means (Maticus, 11-23: "explain what the turn budget is and make it adjustable"). Driving is bounded by the turn's
  * length; the presses count buttons and clicks on the video, never the stick (a held stick resends every 150 ms).
  */
-function turnsCard(robot, info) {
+/** The owner's cap on a setting for turns or guests: a row of its options and "Any", as radio chips (no native select). */
+function capChoice(field, setting, chosen) {
+    const names = setting.names || setting.options.map(String);
+    const one = (value, label) => `<label><input type="radio" name="${esc(field)}" value="${esc(value)}"${String(chosen == null ? '' : chosen) === String(value) ? ' checked' : ''}><span>${esc(label)}</span></label>`;
+    return `<div class="seg seg-radio" role="radiogroup">${one('', 'Any')}${setting.options.map((o, i) => one(o, names[i])).join('')}</div>`;
+}
+function turnsCard(robot, info, profile = null) {
     if (robot.access_policy !== 'queue' || !info) return '';
     const own = info.robotLimits || {};
     const seconds = Math.round((own.turn_ms > 0 ? own.turn_ms : info.turnMs) / 1000);
@@ -778,6 +784,10 @@ ${toggle('guest_turns', own.guest_turns === true, 'Guests can take turns', 'View
 <label class="field"><span class="field-label">Guest turn length (seconds)</span><input type="number" name="guest_turn_s" min="10" max="3600" step="5" value="${esc(guestSeconds)}" required></label>
 <label class="field"><span class="field-label">Top speed for guests (%)</span><input type="number" name="guest_speed" min="10" max="100" step="5" value="${esc(pct(own.guest_speed > 0 ? own.guest_speed : own.turn_speed))}" required></label>
 <p class="setting-note">Top speed is a share of the robot's own limits; the robot's speed setting still applies on top. You and your Mods and Operators always drive at full speed.</p>
+${Object.entries((profile && profile.mapping && profile.mapping.settings) || {}).filter(([, s]) => s.cap && Array.isArray(s.options)).map(([name, s]) => `
+<div class="field"><span class="field-label">Highest ${esc(String(s.label || name).toLowerCase())} for turns</span>${capChoice(`turn_cap_${name}`, s, (own.turn_settings || {})[name])}</div>
+<div class="field"><span class="field-label">Highest ${esc(String(s.label || name).toLowerCase())} for guests</span>${capChoice(`guest_cap_${name}`, s, (own.guest_settings || {})[name])}</div>
+<p class="setting-note">The robot holds turns (and guests) to it, whatever its own ${esc(String(s.label || name).toLowerCase())} is set to.</p>`).join('')}
 ${toggle('lane_followers', own.lane_followers === true, 'People who follow you go first', 'They wait in a faster lane: the next turn goes to a follower before anyone else in line.')}
 ${toggle('lane_subscribers', own.lane_subscribers === true, 'Your subscribers go first', 'Ahead of followers and everyone else in line.')}
 <button type="submit">Save</button>
@@ -1003,7 +1013,7 @@ ${tryIt ? tryIntro() : ''}
 <div class="widgets"${arrange ? require('./surface').surfaceAttrs(arrange.catalog, arrange.layout, arrange.device, arrangeApply) : ''}>
 ${widgets.join('\n')}
 </div>
-${arrange ? `<script type="application/json" id="ov-arrange-data">${JSON.stringify({ catalog: arrange.catalog, layout: arrange.layout, device: arrange.device, surface: arrange.catalog.id, signedIn: arrange.signedIn, layoutSource: arrange.layoutSource || 'default', save: arrange.save || null, suggest: arrange.suggest || null, share: arrange.share || null, reset: arrange.reset || null, author: arrange.author || null, defaultLayout: arrange.defaultLayout || null }).replace(/</g, '\\u003c')}</script>` : ''}${tryIt ? tryOutro(profile) : ''}${role === 'owner' && !embed && !tryIt ? `<div class="owner-settings">${limitsCard(robot, limitsInfo, profile)}${onStreamCard(robot, { liveUrl })}${turnsCard(robot, limitsInfo)}${devicesCard(robot, limitsInfo)}${localProfileForm(robot, profile, profileForm)}${commissionForm(robot, profile)}${automation ? routinesCard(robot, profile, automation) + webhooksCard(robot, automation) : ''}${agentForm(robot)}${listingForm(robot)}${embedForm(robot)}${streamingForm(robot, streaming)}${people ? peopleCard(robot, people) : ''}</div>` : ''}
+${arrange ? `<script type="application/json" id="ov-arrange-data">${JSON.stringify({ catalog: arrange.catalog, layout: arrange.layout, device: arrange.device, surface: arrange.catalog.id, signedIn: arrange.signedIn, layoutSource: arrange.layoutSource || 'default', save: arrange.save || null, suggest: arrange.suggest || null, share: arrange.share || null, reset: arrange.reset || null, author: arrange.author || null, defaultLayout: arrange.defaultLayout || null }).replace(/</g, '\\u003c')}</script>` : ''}${tryIt ? tryOutro(profile) : ''}${role === 'owner' && !embed && !tryIt ? `<div class="owner-settings">${limitsCard(robot, limitsInfo, profile)}${onStreamCard(robot, { liveUrl })}${turnsCard(robot, limitsInfo, profile)}${devicesCard(robot, limitsInfo)}${localProfileForm(robot, profile, profileForm)}${commissionForm(robot, profile)}${automation ? routinesCard(robot, profile, automation) + webhooksCard(robot, automation) : ''}${agentForm(robot)}${listingForm(robot)}${embedForm(robot)}${streamingForm(robot, streaming)}${people ? peopleCard(robot, people) : ''}</div>` : ''}
 </main>`;
     return page(tryIt ? 'Try the panel with a simulated rover' : robot.name, body, {
         scripts: panelScripts(profile, tryIt, embed), bodyClass: embed ? 'embed-page' : 'panel-page',

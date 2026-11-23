@@ -374,5 +374,28 @@ require('../server/realtime');
         assert.strictEqual((await t.domain.queue.state(plain.id, zed.subject)).lane, 0);
     });
 
+    await check('the owner caps the speed stage for turns and guests: the robot hears it in config.role_caps, at once', async () => {
+        const { robot, pairing } = await t.robot(alex, { profile_id: 'looi', access_policy: 'queue' });
+        const dev = await deviceFor(robot.id, pairing.code);
+        const page = await fetch(`${t.base}/panel/${robot.id}`, { headers: cookie(alex) }).then((r) => r.text());
+        assert.match(page, /name="turn_cap_speed_stage" value="48"/, 'the Taking turns card offers the stages');
+        const post = (body) => fetch(`${t.base}/robots/${robot.id}/turns`, { method: 'POST', redirect: 'manual',
+            headers: { ...cookie(alex), Origin: t.base, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(body).toString() });
+        const bad = await post({ turn_s: '60', turn_budget: '50', turn_cap_speed_stage: '50' });
+        assert.strictEqual(bad.status, 422, 'only a stage the robot has');
+        const before = dev.messages.filter((m) => m.type === 'config').length;
+        const ok = await post({ turn_s: '60', turn_budget: '50', turn_speed: '50', turn_cap_speed_stage: '48', guest_cap_speed_stage: '32' });
+        assert.strictEqual(ok.status, 303);
+        const cfg = await dev.waitFor((m) => m.type === 'config' && !!m.role_caps);
+        assert.ok(dev.messages.filter((x) => x.type === 'config').length > before, 'a new config went out');
+        assert.deepStrictEqual(cfg.role_caps, { turn: { max_speed: 0.5, settings: { speed_stage: 48 } }, guest: { max_speed: 0.5, settings: { speed_stage: 32 } } });
+        // "Any" takes the cap away; guests then follow the turn's.
+        const cleared = await post({ turn_s: '60', turn_budget: '50', turn_speed: '100', turn_cap_speed_stage: '48', guest_cap_speed_stage: '' });
+        assert.strictEqual(cleared.status, 303);
+        const cfg2 = await dev.waitFor((m) => m.type === 'config' && m.role_caps && !m.role_caps.turn.max_speed);
+        assert.deepStrictEqual(cfg2.role_caps, { turn: { settings: { speed_stage: 48 } }, guest: { settings: { speed_stage: 48 } } });
+        dev.close();
+    });
+
     await done();
 })();
