@@ -309,7 +309,9 @@
     function raw(frame) {
         if (!ws || ws.readyState !== 1) return false;     // OPEN, for a WebSocket and /try's local socket alike
         // /watch is read-only, except a guest's drive on a crowd robot whose owner let guests steer (joined allows it).
-        if (watcher && frame.type !== 'join' && !(frame.type === 'command' && frame.kind === 'drive' && allowed.includes('drive'))) return false;
+        // A guest in line (11-23) also takes and leaves a turn and sends the queue's commands.
+        if (watcher && frame.type !== 'join' && frame.type !== 'take_turn' && frame.type !== 'leave_turn'
+            && !(frame.type === 'command' && (guestTurn ? allowed.includes(frame.kind) : frame.kind === 'drive' && allowed.includes('drive')))) return false;
         ws.send(JSON.stringify({ v: 1, ...frame }));
         return true;
     }
@@ -1843,8 +1845,25 @@
         }
     }
 
+    // ── A guest's turn (11-23): a signed-out viewer of a queue robot whose owner lets guests take turns ──────────────
+    let guestTurn = false;
+    const guestLeaveEl = $('[data-guest-leave]');
+    if (guestLeaveEl) guestLeaveEl.addEventListener('click', () => raw({ type: 'leave_turn' }));
+    let guestOffered = false;
+    function paintGuest(m) {
+        guestTurn = !!m.guest;
+        guestOffered = !!m.guest_turns;
+        for (const b of $$('[data-drive]')) {
+            b.hidden = guestTurn;
+            const words = b.querySelector('span');
+            if (words) words.textContent = guestOffered ? 'Take a turn' : 'Drive';
+        }
+        if (guestLeaveEl) guestLeaveEl.hidden = !guestTurn;
+    }
+
     function onFrame(m) {
         if (m.type === 'joined') {
+            paintGuest(m);
             joined = true; retry = 0;
             allowed = m.allowed_commands || [];
             if (hlBox) hlBox.hidden = !allowed.includes('headlight');
@@ -1881,6 +1900,8 @@
                 const others = Math.max(0, (Number(m.steering) || 1) - 1);
                 notice(others ? `Steering together with ${others} other${others === 1 ? '' : 's'}` : 'Steering');
             }
+        } else if (m.type === 'error' && (m.code === 'bot.one_place' || m.code === 'bot.sign_in') && watcher) {
+            notice(m.detail || m.code);
         } else if (m.type === 'error') {
             if (m.code === 'bot.not_an_operator' || m.code === 'bot.robot_not_found') { gone = true; joined = false; enableControls(); }
             notice(m.detail || m.code);
@@ -1955,6 +1976,7 @@
     };
     for (const btn of $$('[data-drive]')) {
         btn.addEventListener('click', () => {
+            if (guestOffered && !guestTurn && (!framed || parentSilent)) { raw({ type: 'take_turn' }); return; }
             if (!framed || parentSilent) return openPopup();
             for (const origin of PARENTS) {
                 try { window.parent.postMessage({ type: 'ov-bot-ticket-request', robot_id: ROBOT_ID }, origin); } catch { /* not that origin */ }
@@ -1991,6 +2013,7 @@
         }
         if (fromParent && d.type === 'ov-bot-ticket-none' && d.robot_id === ROBOT_ID) {
             clearTimeout(asked);
+            if (guestOffered && !guestTurn) { notice(''); raw({ type: 'take_turn' }); return; }
             notice(typeof d.message === 'string' ? d.message.slice(0, 200) : 'You cannot drive this robot from here.');
             return;
         }

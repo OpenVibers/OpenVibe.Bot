@@ -566,6 +566,18 @@ owner's panel leads with **On your stream**: one button (`POST /robots/:id/on-st
 same-origin) turns `embed_public` on and sends them to their Live channel's bind prompt
 (`<LIVE_URL>/@<username>?bind_robot=<id>`), and a **Who may drive** select (`POST /robots/:id/access`,
 `private`/`invite`/`queue`) sits beside it.
+
+**Guest turns** (11-23). On a `queue` robot whose owner turned on "Guests can take turns" (`limits.guest_turns`, off by
+default; the Taking turns card) and whose panel is public, a watcher takes a place in line without signing in:
+- `joined` on `/watch` says `guest_turns: true`, and the panel offers **Take a turn**.
+- The watcher sends `{ "type": "take_turn" }`. Bot gives the socket a random guest id (`gst_…`, never an address or
+  anything that names them), puts it in the line, and answers `joined` with `role: "queue"`, `guest: true`, the
+  queue's `allowed_commands` and the state with the guest's own `queue` view. Every `robot_state` after that carries it.
+- The guest's `command` frames go through the same gate as anyone's: only the turn's holder drives, only the queue's
+  kinds (never a setting or a headlight), and a robot that cannot move holds the turn. On the wire the guest is
+  `{ "subject": "gst_…", "role": "queue" }`, or `role: "operator", via: "queue", turn: true` where the profile renames it.
+- One place per network address and robot (`error` `bot.one_place`). `{ "type": "leave_turn" }`, `leave` or closing
+  the page leaves the line. With the switch off, `take_turn` and a guest's command answer `bot.sign_in`.
 An unknown robot is `404`. The panel shows only the controls and the optional Stop a role may use.
 Its response carries `Content-Security-Policy: default-src 'self'; frame-ancestors 'self' <BOT_EMBED_ORIGINS>;
 object-src 'none'; base-uri 'self'` and `Cache-Control: no-store`; every other page keeps

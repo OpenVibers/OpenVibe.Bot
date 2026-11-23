@@ -27,6 +27,7 @@ const { createControlTickets, ticketFromProtocols, PROTOCOL: TICKET_PROTOCOL } =
 const { createCrowd } = require('./crowd/session');
 const { capabilities, ids, validate } = require('openvibe-contracts');
 const { json, iso, prefixedId } = require('./util');
+const crypto = require('crypto');
 const { userPrincipal, verifyService, verifyLink, isLinkToken, PRINCIPAL_SUB, decodePayload } = require('./api/auth');
 const { getProfile } = require('./profiles');
 const { createVoice } = require('./voice');
@@ -1394,6 +1395,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         watchConns.add(conn);
         watchersByAddr.set(addr, (watchersByAddr.get(addr) || 0) + 1);
         ws.on('close', () => {
+            if (conn.guestTurn) onGuestLeave(conn).catch((e) => log.warn(`[Bot] guest leaves the line: ${e.message}`));
             unsubscribe(conn);
             watchConns.delete(conn);
             const n = (watchersByAddr.get(addr) || 1) - 1;
@@ -1409,7 +1411,12 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         let msg; try { msg = JSON.parse(String(raw)); } catch { return sendError(conn, 'bot.bad_json', 'frames must be JSON'); }
         if (!msg || typeof msg !== 'object') return sendError(conn, 'bot.bad_frame', 'a frame must be an object');
         if (msg.type === 'join') return onWatchJoin(conn, msg);
-        if (msg.type === 'leave') { unsubscribe(conn); conn.robotId = null; return undefined; }
+        if (msg.type === 'leave') { if (conn.guestTurn) await onGuestLeave(conn); unsubscribe(conn); conn.robotId = null; return undefined; }
+        if (msg.type === 'take_turn') return onGuestTake(conn);
+        if (msg.type === 'leave_turn') return onGuestLeave(conn, true);
+        // A guest holding a place drives through the same gate as anyone (prepare: a queue robot whose owner lets guests
+        // take turns, and only the turn's holder).
+        if (msg.type === 'command' && conn.guestTurn) return onOperatorCommand(conn, msg);
         if (msg.type === 'command' && msg.kind === 'drive' && conn.robotId && crowdGuests.has(conn.robotId)) {
             const cid = (msg.id != null ? String(msg.id) : prefixedId('op', now())).slice(0, 64);
             // A guest is a random id for this socket's life, never an address or anything that names them.
@@ -1438,7 +1445,57 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         conn.readouts = readoutKeys(profile);
         subscribe(conn);
         const guests = robot.access_policy === 'crowd' && crowdGuests.has(robotId);
-        return sendFrame(conn, 'joined', { role: 'watcher', profile, allowed_commands: guests ? ['drive'] : [], state: publicState(await robotState(robotId), conn.readouts) });
+        // guest_turns: this robot's line takes signed-out viewers (the panel offers "Take a turn").
+        return sendFrame(conn, 'joined', { role: 'watcher', profile, allowed_commands: guests ? ['drive'] : [], guest_turns: guestTurnsOn(robot), state: publicState(await robotState(robotId), conn.readouts) });
+    }
+
+    // ── Guest turns (11-23; Maticus's spec, question 1: can a signed-out viewer hold a turn?) ───────────────────────
+    // On a queue robot whose owner lets guests take turns (limits.guest_turns, off by default), a watcher of its public
+    // panel takes a place in line. A guest is a random id for the socket's life (`gst_…`), never an address or anything
+    // that names them; one place per address and robot; closing the page leaves the line. To the robot a guest's turn is
+    // like anyone's: { role: "operator", via: "queue", turn: true } on LOOI, with the guest's id as the subject.
+    const guestPlaces = new Map();   // `${robotId}|${addr}` → the guest id holding a place
+    const guestTurnsOn = (robot) => !!robot && robot.access_policy === 'queue' && json(robot.limits, {}).guest_turns === true;
+    async function onGuestTake(conn) {
+        if (!conn.robotId) return sendError(conn, 'bot.not_joined', 'join a robot first');
+        const robot = await domain.robots.get(conn.robotId);
+        if (!guestTurnsOn(robot) || !robot.embed_public) return sendError(conn, 'bot.sign_in', 'Sign in to take a turn driving this robot.');
+        if (!conn.guestTurn) {
+            const key = `${robot.id}|${conn.addr}`;
+            const holder = guestPlaces.get(key);
+            if (holder) return sendError(conn, 'bot.one_place', 'Someone on this network already has a place in line here.');
+            conn.guestId = `gst_${crypto.randomBytes(15).toString('base64url')}`;
+            guestPlaces.set(key, conn.guestId);
+            if (guestPlaces.size > 20000) guestPlaces.delete(guestPlaces.keys().next().value);
+            conn.guestTurn = true;
+            conn.subject = conn.guestId;
+            conn.principal = { kind: 'guest', subject: conn.guestId };
+            conn.role = 'queue';
+            await domain.queue.join(robot.id, conn.guestId);
+        }
+        const profile = await profileFor(robot);
+        const state = await robotState(robot.id, conn.guestId);
+        sendFrame(conn, 'joined', { role: 'queue', guest: true, guest_turns: true, profile,
+            allowed_commands: domain.control.allowedFor(robot, 'queue', profile),
+            state: { ...publicState(state, conn.readouts), queue: state.queue } });
+        broadcast(robot.id);
+        return undefined;
+    }
+    async function onGuestLeave(conn, answer = false) {
+        if (!conn.guestTurn) return undefined;
+        const robotId = conn.robotId;
+        const guestId = conn.guestId;
+        conn.guestTurn = false;
+        conn.subject = null;
+        conn.principal = null;
+        conn.role = 'watcher';
+        for (const [k, v] of guestPlaces) if (v === guestId) guestPlaces.delete(k);
+        if (robotId) {
+            await domain.queue.leave(robotId, guestId).catch((e) => log.warn(`[Bot] guest leaves the line: ${e.message}`));
+            broadcast(robotId);
+            if (answer && conn.ws.readyState === 1) await onWatchJoin(conn, { robot_id: robotId });
+        }
+        return undefined;
     }
 
     /** Guests may (or may no longer) steer a crowd robot: every watcher of it joins again and hears what it may send. */
@@ -1656,6 +1713,11 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         if (!subs || !subs.size) return;
         let watched = null;   // one state for every watcher (no subject, no queue view)
         for (const sub of [...subs]) {
+            // A guest in line sees the public state and their own place in it (never anyone else's).
+            if (sub.watcher && sub.guestTurn) {
+                robotState(robotId, sub.guestId).then((state) => sendFrame(sub, 'robot_state', { state: { ...publicState(state, sub.readouts), queue: state.queue } })).catch(() => {});
+                continue;
+            }
             if (sub.watcher) {
                 watched = watched || robotState(robotId);
                 watched.then((state) => sendFrame(sub, 'robot_state', { state: publicState(state, sub.readouts) })).catch(() => {});

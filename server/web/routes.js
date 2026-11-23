@@ -851,7 +851,8 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         if (!Number.isInteger(seconds) || seconds < 10 || seconds > 3600) throw new BotError(422, 'bot.invalid_input', 'a turn lasts 10 to 3600 seconds');
         if (!Number.isInteger(presses) || presses < 1 || presses > 10000) throw new BotError(422, 'bot.invalid_input', 'a turn has 1 to 10000 presses');
         const stored = typeof robot.limits === 'string' ? JSON.parse(robot.limits || '{}') : (robot.limits || {});
-        await domain.robots.update(robot.id, { limits: { ...stored, turn_ms: seconds * 1000, turn_budget: presses } }, { subject: me.subject, kind: 'user' });
+        const guestTurns = Array.isArray(req.body.guest_turns) ? req.body.guest_turns.includes('on') : req.body.guest_turns === 'on';
+        await domain.robots.update(robot.id, { limits: { ...stored, turn_ms: seconds * 1000, turn_budget: presses, guest_turns: guestTurns } }, { subject: me.subject, kind: 'user' });
         if (hub) hub.broadcast(robot.id);
         return res.redirect(303, `/panel/${robot.id}#turns`);
     }));

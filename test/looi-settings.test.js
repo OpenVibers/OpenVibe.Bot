@@ -185,5 +185,60 @@ require('../server/realtime');
         assert.ok(other.status === 403 || other.status === 404, `only the owner (${other.status})`);
     });
 
+    await check('a guest takes a turn where the owner lets guests: one place per network, the robot sees an operator\'s turn, the page closing leaves the line', async () => {
+        const { robot, pairing } = await t.robot(alex, { profile_id: 'looi', access_policy: 'queue', limits: { turn_ms: 60000, turn_budget: 50 } });
+        await t.domain.robots.setEmbedPublic(robot.id, true);
+        const dev = await deviceFor(robot.id, pairing.code);
+        const watch = (ip) => t.ws('/watch', { headers: { 'X-Forwarded-For': ip } });
+        const g = await watch('10.9.0.1');
+        g.send({ type: 'join', robot_id: robot.id });
+        const j0 = await g.waitFor((m) => m.type === 'joined');
+        assert.deepStrictEqual([j0.role, j0.guest_turns], ['watcher', false], 'off until the owner turns it on');
+        g.send({ type: 'take_turn' });
+        const off = await g.waitFor((m) => m.type === 'error');
+        assert.strictEqual(off.code, 'bot.sign_in');
+
+        await t.domain.robots.update(robot.id, { limits: { turn_ms: 60000, turn_budget: 50, guest_turns: true } }, { subject: alex.subject, kind: 'user' });
+        g.send({ type: 'join', robot_id: robot.id });
+        const j1 = await g.waitFor((m) => m.type === 'joined' && m.guest_turns === true);
+        assert.strictEqual(j1.role, 'watcher');
+        g.send({ type: 'take_turn' });
+        const j2 = await g.waitFor((m) => m.type === 'joined' && m.guest === true);
+        assert.strictEqual(j2.role, 'queue');
+        assert.ok(j2.allowed_commands.includes('drive') && !j2.allowed_commands.includes('setting'));
+        assert.ok(j2.state.queue && j2.state.queue.active, 'first in line: the turn is the guest\'s');
+        g.send({ type: 'command', id: 'g1', kind: 'drive', value: { throttle: 0.3, steer: 0 } });
+        const c = await dev.waitFor((m) => m.type === 'command' && m.ref === 'g1');
+        assert.match(c.operator.subject, /^gst_[A-Za-z0-9_-]{8,40}$/, 'a random guest id, nothing that names them');
+        assert.deepStrictEqual([c.operator.role, c.operator.via, c.operator.turn], ['operator', 'queue', true]);
+        dev.send({ type: 'ack', id: c.id });
+        assert.strictEqual((await g.waitFor((m) => m.type === 'command_result' && m.id === 'g1')).result, 'ack');
+        // A setting is never a guest's.
+        g.send({ type: 'command', id: 'g2', kind: 'setting', value: { name: 'speed_stage', value: 127 } });
+        const r2 = await g.waitFor((m) => m.type === 'command_result' && m.id === 'g2');
+        assert.strictEqual(r2.result, 'refused');
+
+        // One place per network and robot.
+        const h = await watch('10.9.0.1');
+        h.send({ type: 'join', robot_id: robot.id });
+        await h.waitFor((m) => m.type === 'joined');
+        h.send({ type: 'take_turn' });
+        assert.strictEqual((await h.waitFor((m) => m.type === 'error')).code, 'bot.one_place');
+        // Another network waits its turn.
+        const k = await watch('10.9.0.2');
+        k.send({ type: 'join', robot_id: robot.id });
+        await k.waitFor((m) => m.type === 'joined');
+        k.send({ type: 'take_turn' });
+        const jk = await k.waitFor((m) => m.type === 'joined' && m.guest === true);
+        assert.strictEqual(jk.state.queue.position, 1);
+        k.send({ type: 'command', id: 'k1', kind: 'drive', value: { throttle: 0.3 } });
+        assert.strictEqual((await k.waitFor((m) => m.type === 'command_result' && m.id === 'k1')).code, 'bot.not_your_turn');
+
+        // The first guest closes the page: the line moves on.
+        g.close();
+        await k.waitFor((m) => m.type === 'robot_state' && m.state.queue && m.state.queue.active);
+        h.close(); k.close(); dev.close();
+    });
+
     await done();
 })();

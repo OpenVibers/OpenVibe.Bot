@@ -697,6 +697,10 @@ ${viewerRow}
  * the state frames; it stays hidden until one says there is something to show this person.
  */
 function turnStrip(robot, role) {
+    // A watcher of the public panel may become a guest in line (public/panel.js): its strip has a Leave button of its own.
+    if (robot.access_policy === 'queue' && role === 'watcher') {
+        return '<div class="turn" data-turn hidden><span class="turn-state" data-turn-state></span><span class="turn-meta" data-turn-meta></span><button type="button" class="quiet" data-guest-leave hidden>Leave the line</button></div>';
+    }
     if (robot.access_policy !== 'queue' || !['queue', 'owner', 'operator'].includes(role)) return '';
     const leave = role === 'queue' ? `<form method="post" action="/robots/${esc(robot.id)}/queue/leave" data-turn-leave><button type="submit" class="quiet">Leave the queue</button></form>` : '';
     const give = role === 'queue' ? '' : '<button type="button" class="quiet" data-turn-give hidden>Give back now</button>';
@@ -767,6 +771,7 @@ function turnsCard(robot, info) {
 <label class="field"><span class="field-label">Turn length (seconds)</span><input type="number" name="turn_s" min="10" max="3600" step="5" value="${esc(seconds)}" required></label>
 <label class="field"><span class="field-label">Presses per turn</span><input type="number" name="turn_budget" min="1" max="10000" step="1" value="${esc(presses)}" required></label>
 <p class="setting-note">Presses are buttons and clicks on the video. Driving and the head never count: the turn's length limits them.</p>
+${toggle('guest_turns', own.guest_turns === true, 'Guests can take turns', 'Viewers who are not signed in can join the line from your stream. One place per network; leaving the page leaves the line. Needs the panel under your stream to be on.')}
 <button type="submit">Save</button>
 </form></section>`;
 }
