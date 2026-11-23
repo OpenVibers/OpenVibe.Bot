@@ -5,11 +5,11 @@
   "runtime": "node 22, express 4, ws; PostgreSQL 18 via openvibe-sdk/db (pg, or embedded PGlite in tests); Valkey optional; no build step",
   "port": 4630,
   "domain": "openvibe.bot (www -> apex; /device and /control WebSockets; /install)",
-  "contracts": "openvibe-contracts v0.449.0",
+  "contracts": "openvibe-contracts v0.453.0",
   "sdk": "openvibe-sdk v0.188.0",
   "shared": "openvibe-shared v4.337.0",
   "packages": [
-    "openvibe-contracts v0.449.0",
+    "openvibe-contracts v0.453.0",
     "openvibe-sdk v0.188.0",
     "openvibe-shared v4.337.0"
   ],
@@ -30,7 +30,9 @@
   "events": [
     "bot.robot.online",
     "bot.robot.offline",
-    "bot.command.refused"
+    "bot.command.refused",
+    "bot.turn.started",
+    "bot.turn.ended"
   ],
   "deployed": true,
   "deployment": "Production at https://openvibe.bot on openvibe-ovh since 2026-10-02: release layout /opt/openvibe.bot, unit openvibe-bot.service (WorkingDirectory /opt/openvibe.bot, EnvironmentFile /etc/openvibe/bot.env, PORT 4630, TimeoutStopSec 10), behind the nginx vhost deploy/nginx/openvibe.bot.conf, deployed with `ov deploy bot`. Liveness /api/health and readiness /api/ready are loopback-only.",

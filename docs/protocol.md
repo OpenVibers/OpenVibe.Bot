@@ -201,6 +201,26 @@ remote driving off, its link down, or its device gone), the turn in progress pau
 `bot.robot_not_ready`), no new turn starts (`queue.held` `{ why, words }`), and the paused time is added to the turn when
 the robot is ready again.
 
+**The line from outside the panel**: `POST /api/v1/robots/:id/queue/join` and `…/queue/leave` (the person, or a
+service acting for them with `bot.robot.control` and `X-OV-Subject`, as Live forwards a channel chat's `!drive`) put a
+signed-in person in a `queue` robot's line or take them out, and answer `{ robot_id, queue }`, their own view of it.
+Another policy answers `409 bot.not_a_queue`; no person, `401 bot.sign_in`.
+
+**A turn's top speed** (`limits.turn_speed`, a share 0.1–1 of the robot's own limits; `limits.guest_speed` for guests,
+else the turn's): the gate clamps a turn holder's drive to it before the robot's own stage or ceiling applies. The owner,
+Mods and Operators always drive at the robot's full limits.
+
+**"Your turn"** (11-23): when someone signed in gets their turn and joined the line more than 5 s before, Bot pushes
+them a Network notification as app bot (`network.notifications.push`; type `ROBOT_TURN`, the robot's panel as its link),
+so a person who switched tabs does not miss it. Never a guest's. The line's turns are also events,
+`bot.turn.started` `{ robot_id, owner, ends_at, guest, waiting }` and `bot.turn.ended` `{ robot_id, owner, reason:
+turn_ended|turn_left, guest, presses_used }` (contracts 0.453.0), on OpenVibe.Events and the owner's webhooks. Neither
+names the person.
+
+**The device that drives**: when two devices of a robot are online, commands go to the newest to connect (a phone that
+took over from an old computer still paired), and the owner's Devices card marks it. A simulator drives only when no real
+device is online.
+
 **A turn's presses** (`limits.turn_budget`, 50 by default; the owner sets it with the turn's length on the robot's page):
 the buttons and clicks on the video a turn may send. Driving and the head never count (a held stick resends every
 150 ms, which spent 50 commands in about 7 s): the turn's length (`limits.turn_ms`, 60 s by default) bounds them. A spent
@@ -576,8 +596,13 @@ default; the Taking turns card) and whose panel is public, a watcher takes a pla
 - The guest's `command` frames go through the same gate as anyone's: only the turn's holder drives, only the queue's
   kinds (never a setting or a headlight), and a robot that cannot move holds the turn. On the wire the guest is
   `{ "subject": "gst_…", "role": "queue" }`, or `role: "operator", via: "queue", turn: true` where the profile renames it.
-- One place per network address and robot (`error` `bot.one_place`). `{ "type": "leave_turn" }`, `leave` or closing
-  the page leaves the line. With the switch off, `take_turn` and a guest's command answer `bot.sign_in`.
+- One place per network address and robot (`error` `bot.one_place`). `{ "type": "leave_turn" }` or `leave` leaves the
+  line at once; closing the page gives the place up after `BOT_GUEST_GRACE_MS` (30 s) unless the page comes back.
+- A reload keeps the place: `joined` carries `guest_token` (the guest id signed for this robot by this process); the page
+  keeps it for the tab and sends `{ "type": "take_turn", "token": … }` when it joins again. A place that is gone (or a
+  token that is not this robot's) answers `bot.place_gone`. Places do not survive a Bot restart: they leave the line at boot.
+- `limits.guest_turn_ms` makes a guest's turn shorter than a signed-in person's (`limits.turn_ms`).
+- With the switch off, `take_turn` and a guest's command answer `bot.sign_in`.
 An unknown robot is `404`. The panel shows only the controls and the optional Stop a role may use.
 Its response carries `Content-Security-Policy: default-src 'self'; frame-ancestors 'self' <BOT_EMBED_ORIGINS>;
 object-src 'none'; base-uri 'self'` and `Cache-Control: no-store`; every other page keeps

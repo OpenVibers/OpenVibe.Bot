@@ -494,6 +494,20 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
     // ── Commands (the /control gate over HTTP: a service forwards a bound channel's chat commands) ─
     // The same onOperatorCommand path as the /control socket — the gate, the audit and the per-subject
     // idempotency key are shared. `id` is that idempotency key; a repeated id is answered from the cache.
+    // The line from outside the panel (11-23: "!drive" in a Live channel's chat): a person (or a service acting for one,
+    // bot.robot.control + X-OV-Subject, like Live forwarding chat) joins or leaves a queue robot's line. Signed-in
+    // people only; a robot that is not a queue answers bot.not_a_queue. → the person's own view of the line.
+    r.post('/robots/:id/queue/:action(join|leave)', commandControl, wrap(async (req, res) => {
+        requireControlCap(req);
+        const subject = actedFor(req);
+        if (!/^usr_/.test(String(subject || ''))) fail(401, 'bot.sign_in', 'Sign in to take a turn driving this robot.');
+        const robot = await domain.robots.get(req.params.id);
+        if (!robot) fail(404, 'bot.robot_not_found', 'no such robot');
+        if (robot.access_policy !== 'queue') fail(409, 'bot.not_a_queue', 'This robot does not take turns: its owner decides who drives.');
+        const queue = req.params.action === 'join' ? await domain.queue.join(robot.id, subject) : await domain.queue.leave(robot.id, subject);
+        if (hub) hub.broadcast(robot.id);
+        res.json({ robot_id: robot.id, queue });
+    }));
     r.post('/robots/:id/commands', commandControl, wrap(async (req, res) => {
         requireControlCap(req);
         const subject = actedFor(req);

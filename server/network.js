@@ -113,6 +113,33 @@ function createOfferReporter(config, { fetchImpl = globalThis.fetch, path = '/in
 }
 
 /**
+ * Network's notifications as app bot (network.notifications.push): "your turn on <robot> started". push({ subject,
+ * type, title, message, url, … }) → Network's answer; a failure throws 503 bot.network_unavailable.
+ */
+function createNotifier(config, { fetchImpl = globalThis.fetch } = {}) {
+    const tokens = serviceAuth.createTokenClient({
+        tokenUrl: `${config.network.internalUrl}/oauth/token`, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret,
+        audience: 'openvibe.network', scope: 'network.notifications.push', fetchImpl,
+    });
+    async function push(notification) {
+        let res;
+        try {
+            res = await fetchImpl(`${config.network.internalUrl}/internal/notifications/push`, {
+                method: 'POST', headers: { ...(await tokens.authHeaders()), Accept: 'application/json', 'Content-Type': 'application/json' },
+                body: JSON.stringify(notification), signal: AbortSignal.timeout(8000),
+            });
+        } catch (e) {
+            throw new BotError(503, 'bot.network_unavailable', `Network did not answer the notification: ${e.message}`);
+        }
+        if (res.status === 401) tokens.invalidate();
+        const out = await res.json().catch(() => null);
+        if (!res.ok) throw new BotError(503, 'bot.network_unavailable', `Network answered ${res.status} for the notification${out && out.error ? `: ${out.error}` : ''}`);
+        return out;
+    }
+    return { push };
+}
+
+/**
  * Network's identity resolution for people (usernames ↔ subjects), with Bot's own svc:bot token
  * (audience openvibe.network, identity.subject.resolve — Network grants Bot this).
  *   byUsername(name) → GET /internal/identity/resolve?username=<name> → { subject, username, display_name },
@@ -191,4 +218,4 @@ function createAiOfferReporter(config, { fetchImpl = globalThis.fetch } = {}) {
     return createOfferReporter(config, { fetchImpl, path: '/internal/ai/offers/report' });
 }
 
-module.exports = { createKeyProvider, createUserAuth, createNodePrincipals, createIdentity, createOfferReporter, createAiOfferReporter };
+module.exports = { createKeyProvider, createUserAuth, createNodePrincipals, createIdentity, createOfferReporter, createAiOfferReporter, createNotifier };

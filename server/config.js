@@ -280,6 +280,8 @@ function loadConfig(env = process.env) {
         embed: { origins: embedOrigins },
         // The anonymous read-only /watch socket: open sockets per client address and watchers per robot; over → close 4003.
         watch: {
+            // How long a guest's place in line waits for their page to come back after it closed (a reload).
+            guestGraceMs: Math.max(0, int(env.BOT_GUEST_GRACE_MS, 30000)),
             maxPerIp: Math.max(1, int(env.BOT_WATCH_MAX_PER_IP, 20)),
             maxPerRobot: Math.max(1, int(env.BOT_WATCH_MAX_PER_ROBOT, 500)),
         },

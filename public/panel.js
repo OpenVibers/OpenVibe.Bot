@@ -1848,11 +1848,17 @@
     // ── A guest's turn (11-23): a signed-out viewer of a queue robot whose owner lets guests take turns ──────────────
     let guestTurn = false;
     const guestLeaveEl = $('[data-guest-leave]');
-    if (guestLeaveEl) guestLeaveEl.addEventListener('click', () => raw({ type: 'leave_turn' }));
+    if (guestLeaveEl) guestLeaveEl.addEventListener('click', () => { keepPlace(null); raw({ type: 'leave_turn' }); });
     let guestOffered = false;
+    const placeKey = `ovbot-guest-${ROBOT_ID}`;
+    const keptPlace = () => { try { return sessionStorage.getItem(placeKey); } catch { return null; } };
+    const keepPlace = (token) => { try { if (token) sessionStorage.setItem(placeKey, token); else sessionStorage.removeItem(placeKey); } catch { /* a place for this page only */ } };
     function paintGuest(m) {
         guestTurn = !!m.guest;
         guestOffered = !!m.guest_turns;
+        if (m.guest && m.guest_token) keepPlace(m.guest_token);
+        // A reload (or a reconnect) of a guest who had a place: ask for that place again.
+        if (!m.guest && m.guest_turns && watcher && keptPlace()) raw({ type: 'take_turn', token: keptPlace() });
         for (const b of $$('[data-drive]')) {
             b.hidden = guestTurn;
             const words = b.querySelector('span');
@@ -1900,7 +1906,8 @@
                 const others = Math.max(0, (Number(m.steering) || 1) - 1);
                 notice(others ? `Steering together with ${others} other${others === 1 ? '' : 's'}` : 'Steering');
             }
-        } else if (m.type === 'error' && (m.code === 'bot.one_place' || m.code === 'bot.sign_in') && watcher) {
+        } else if (m.type === 'error' && (m.code === 'bot.one_place' || m.code === 'bot.sign_in' || m.code === 'bot.place_gone') && watcher) {
+            if (m.code === 'bot.place_gone' || m.code === 'bot.sign_in') keepPlace(null);
             notice(m.detail || m.code);
         } else if (m.type === 'error') {
             if (m.code === 'bot.not_an_operator' || m.code === 'bot.robot_not_found') { gone = true; joined = false; enableControls(); }

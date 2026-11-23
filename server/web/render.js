@@ -746,11 +746,11 @@ function devicesCard(robot, info) {
     };
     const rows = list.map((d) => `<li class="device-row"><span class="device-name"><b>${esc(d.name || (d.link ? 'OpenVibe Link' : 'Device'))}</b>`
         + `<small>${esc([d.kind, d.agent_version].filter(Boolean).join(' · '))}</small></span>`
-        + `<span class="pill${d.online ? ' online' : ''}">${d.online ? '<span class="dot"></span>Online now' : esc(seen(d.last_seen))}</span>`
+        + `<span class="pill${d.online ? ' online' : ''}">${d.drives ? '<span class="dot"></span>Online · drives' : d.online ? '<span class="dot"></span>Online now' : esc(seen(d.last_seen))}</span>`
         + `<details class="device-revoke"><summary>Revoke</summary><form method="post" action="/robots/${esc(robot.id)}/devices/${esc(d.id)}/revoke">`
         + `<p class="setting-note">It disconnects now and can never connect again; pair it afresh to use it.</p><button type="submit" class="danger">Revoke this device</button></form></details></li>`).join('');
     return `<section class="setting-card" id="devices" aria-labelledby="devices-h"><h2 id="devices-h">Devices</h2>
-<p class="setting-note">What connects as this robot. Revoke one you no longer use, like an old computer, so only the one you drive with is online.</p>
+<p class="setting-note">What connects as this robot. When two are online, the newest to connect drives. Revoke one you no longer use, like an old computer.</p>
 ${rows ? `<ul class="people-list devices-list">${rows}</ul>` : '<p class="setting-note">No devices yet.</p>'}
 <p class="setting-note"><a href="/pair/${esc(robot.id)}">Pair a device</a></p></section>`;
 }
@@ -765,13 +765,19 @@ function turnsCard(robot, info) {
     const own = info.robotLimits || {};
     const seconds = Math.round((own.turn_ms > 0 ? own.turn_ms : info.turnMs) / 1000);
     const presses = own.turn_budget > 0 ? own.turn_budget : info.turnBudget;
+    const guestSeconds = own.guest_turn_ms > 0 ? Math.round(own.guest_turn_ms / 1000) : seconds;
+    const pct = (v) => (v > 0 && v <= 1 ? Math.round(v * 100) : 100);
     return `<section class="setting-card" id="turns" aria-labelledby="turns-h"><h2 id="turns-h">Taking turns</h2>
 <p class="setting-note">One person drives at a time, in the order they joined. A turn ends when its time is up or they leave. While the robot cannot move (not armed, its own STOP, remote driving off, or offline) the line waits and the turn keeps its time.</p>
 <form method="post" action="/robots/${esc(robot.id)}/turns" class="limits-form">
 <label class="field"><span class="field-label">Turn length (seconds)</span><input type="number" name="turn_s" min="10" max="3600" step="5" value="${esc(seconds)}" required></label>
 <label class="field"><span class="field-label">Presses per turn</span><input type="number" name="turn_budget" min="1" max="10000" step="1" value="${esc(presses)}" required></label>
 <p class="setting-note">Presses are buttons and clicks on the video. Driving and the head never count: the turn's length limits them.</p>
-${toggle('guest_turns', own.guest_turns === true, 'Guests can take turns', 'Viewers who are not signed in can join the line from your stream. One place per network; leaving the page leaves the line. Needs the panel under your stream to be on.')}
+<label class="field"><span class="field-label">Top speed for turns (%)</span><input type="number" name="turn_speed" min="10" max="100" step="5" value="${esc(pct(own.turn_speed))}" required></label>
+${toggle('guest_turns', own.guest_turns === true, 'Guests can take turns', 'Viewers who are not signed in can join the line from your stream. One place per network; a reload keeps it, closing the page gives it up. Needs the panel under your stream to be on.')}
+<label class="field"><span class="field-label">Guest turn length (seconds)</span><input type="number" name="guest_turn_s" min="10" max="3600" step="5" value="${esc(guestSeconds)}" required></label>
+<label class="field"><span class="field-label">Top speed for guests (%)</span><input type="number" name="guest_speed" min="10" max="100" step="5" value="${esc(pct(own.guest_speed > 0 ? own.guest_speed : own.turn_speed))}" required></label>
+<p class="setting-note">Top speed is a share of the robot's own limits; the robot's speed setting still applies on top. You and your Mods and Operators always drive at full speed.</p>
 <button type="submit">Save</button>
 </form></section>`;
 }
