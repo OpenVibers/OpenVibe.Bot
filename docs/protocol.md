@@ -170,6 +170,42 @@ not the owner, a Mod or an Operator gets the role `crowd`:
   second while anyone steers: `people`, the crowd's `pull` per axis, `style`, `override` (`{ role }` of whoever
   drives over the crowd, or null) and `paused`. It names no person.
 
+**Roles on the wire.** A command's `operator.role` is the role Bot's gate decided: `owner`, `mod`, `operator`, `queue`
+(a signed-in person holding a turn), `crowd` (the crowd's one mixed drive) or `system` (Bot's own halt). A profile may
+rename a role for its driver in `mapping.wire_roles`: LOOI's phone app knows no `queue`, so a turn holder reaches it as
+`{ "subject": "usr_…", "role": "operator", "via": "queue", "turn": true }`. Bot's audit keeps the role it decided. Never
+`viewer` or a guest: they are refused at the gate and nothing reaches the device.
+
+**Robot settings** (`setting`, LOOI's speed stage, mode, head speed and spin limit; declared in the profile's open
+`mapping.settings`, the contract keeping `commands` closed). The value is `{ "name": "speed_stage", "value": 48 }`, one of
+the setting's declared `options`, or `{ "name": "yaw_center" }` for an action (`action: true`). Only the owner and Mods
+may send one (`bot.command_not_allowed` "Only the owner and Mods change the robot's settings" for anyone else), and an
+option in the setting's `owner_only` only the owner (`bot.owner_only`: LOOI's spin limit Off). It is not motion: no
+deadline, and it never renews a lease. **It is a request**: the robot checks it, answers `ack` or `nack` with a
+`fault_code` and an optional `message` (shown on the panel as it is), and reports what is really in effect (below). A
+setting is sent as `kind: "setting"`, which `config.allowed_commands` lists for the owner.
+
+**The robot's report** (the profile's `mapping.state`: LOOI reads `status.capabilities.looi_bridge`, then
+`telemetry.sensors.looi_bridge`, later paths winning). Bot reads these fields from it, in any case and with these names:
+`armed`, `stop_latched` (or `estop_latched`, `local_stop`; else the status frame's own `estop_latched`),
+`operators_allowed`, `ble` (`ready`/`connected` or `disconnected`), `orientation` (`portrait`/`landscape`),
+`yaw_from_center` (degrees), `yaw_center_set`, and each setting by its name (`mode: "DRIVE_AND_HEAD"` is the option
+`drive_and_head`, `speed_stage: "24"` is `24`). Every panel and watcher gets it as `robot_state.state.ready`:
+`{ reported, why, armed, stop, remote, link, settings, yaw_from_center, yaw_center_set, orientation }`, where `why` is null
+when a remote driver can move the robot, else `offline`, `stop`, `link_down`, `not_armed` or `remote_off`. It names no
+person. The panel shows why the robot waits before anyone presses, and marks a setting as waiting until the report shows it.
+
+**A queue waits for its robot.** While a `queue` robot's report says it cannot move (`why` above: not armed, its STOP,
+remote driving off, its link down, or its device gone), the turn in progress pauses with its clock stopped
+(`robot_state.queue.paused` `{ by: "robot", why, words, since }`; the holder's commands are refused
+`bot.robot_not_ready`), no new turn starts (`queue.held` `{ why, words }`), and the paused time is added to the turn when
+the robot is ready again.
+
+**A turn's presses** (`limits.turn_budget`, 50 by default; the owner sets it with the turn's length on the robot's page):
+the buttons and clicks on the video a turn may send. Driving and the head never count (a held stick resends every
+150 ms, which spent 50 commands in about 7 s): the turn's length (`limits.turn_ms`, 60 s by default) bounds them. A spent
+turn is refused `bot.turn_budget` for presses only.
+
 `status` of a Network-paired machine also says what it is: `device_kind` (`onboard` \| `bridge` \|
 `server`), `drivers` (an array of strings), `capabilities` (an object) and `agent_version` (a string of at
 most 40 characters), each optional. Bot stores them on the device row when they differ from it (the row
@@ -452,7 +488,7 @@ pass). Each authority change is in `robot_operator_audit` with the actor and sub
 | type | fields | notes |
 |---|---|---|
 | `joined` | `robot, role, profile, allowed_commands, state, operators` | the answer to `join`; `allowed_commands` is the role's allowlist cut to the profile's kinds, with `halt` for every role that may drive; `operators` is the roster, sole-control policy and Bot's command activity for the Operators card |
-| `robot_state` | `state{robot_id, online, latency_ms, battery, telemetry, status, queue}` | on every change and on telemetry, ≤ 2 Hz (a telemetry frame with `events` always); `battery` is 0..1 (a Node 0..100 reading is divided by 100, and a missing reading is `null`) |
+| `robot_state` | `state{robot_id, online, latency_ms, battery, telemetry, status, ready, queue}` | on every change and on telemetry, ≤ 2 Hz (a telemetry frame with `events` always); `battery` is 0..1 (a Node 0..100 reading is divided by 100, and a missing reading is `null`) |
 | `operators_state` | `operators{sole, members[{subject, role, enabled}], viewers, activity{subject{last{kind,channel,at,source},drive_at,head_at,lights_at}}, now}` | the Operators card's live view: an accepted authority change at once, and activity at most twice a second. `channel` is drive, head, lights (non-motion), button, say, display or ptz. An admitted command is `source: "bot"`; a valid `sensors.p7_commander` from a roster member is recorded as that subject's activity with `source: "robot"` from its `at`, and the newer `at` wins on one channel |
 | `operators_result` | `id?, action, ok, code?, reason?` | the answer to an `operators` frame; a refusal is never a silent drop |
 | `command_result` | `id, result, code?, reason?, latency_ms?, cached?` | `result` is `ack`, `nack`, `refused` or `expired`; a repeated `id` is answered `cached: true` |
@@ -507,7 +543,9 @@ Refusal codes (the gate, in order): `bot.robot_not_found`, `bot.unknown_command`
 (the profile takes no such kind), `bot.not_an_operator`, `bot.sign_in`,
 `bot.read_only`, `bot.operator_off`, `bot.sole_control`, `bot.command_not_allowed` (the role's allowlist),
 `bot.device_offline`, `bot.cooldown`,
-`bot.not_your_turn`, `bot.owner_control` (the owner or an operator has taken the turn over), `bot.turn_budget`,
+`bot.not_your_turn` (said with the person's place in line), `bot.owner_control` (the owner or an operator has taken the
+turn over), `bot.robot_not_ready` (the robot cannot move: the turn waits with its time kept), `bot.turn_budget` (presses
+only), `bot.owner_only` (a setting's option only the owner may pick),
 `bot.unknown_actuator`, `bot.invalid_input`, `bot.text_too_long`.
 A `command` whose `id` is still in flight (the first one has not been acked) is answered `refused`
 `bot.command_pending` rather than a second device command or a silent wait.

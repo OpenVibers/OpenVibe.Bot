@@ -151,6 +151,67 @@ function deviceCredentialFromProtocols(header) {
 }
 // The keys the Link's drivers report a sensor capability under (the Adeept and Cozmo plugins: distance_cm, line).
 const SENSOR_KEYS = { ultrasonic: ['distance_cm'], line: ['line'], cliff: ['cliff', 'picked_up'], pickup: ['picked_up', 'pickup'] };
+
+/**
+ * The robot's own report of what is in effect, in Bot's words (Maticus's 11-23 spec: the LOOI app sends
+ * status.capabilities.looi_bridge { operators_allowed, mode, speed_stage, armed }; a fuller object may ride in
+ * telemetry.sensors.looi_bridge). Read from the paths its profile names (mapping.state), later paths winning:
+ *   { reported, why, armed, stop, remote, link, settings: { <name>: <its declared option> }, yaw_from_center,
+ *     yaw_center_set, orientation }
+ * `why` is null when a remote driver's command can move the robot, else offline | stop | link_down | not_armed |
+ * remote_off. Null for a profile that names no state. Display and the queue's hold only: the robot still decides.
+ */
+function robotReport(conn, profile) {
+    const m = profile && profile.mapping;
+    if (!m || !Array.isArray(m.state)) return null;
+    const none = { reported: false, why: null, armed: null, stop: null, remote: null, link: null, settings: {}, yaw_from_center: null, yaw_center_set: null, orientation: null };
+    if (!conn || !conn.online) return { ...none, why: 'offline' };
+    const merged = {};
+    let reported = false;
+    for (const path of m.state) {
+        const [root, ...rest] = path.split('.');
+        let v = root === 'status' ? conn.status : root === 'telemetry' ? conn.telemetry : null;
+        for (const k of rest) v = v && typeof v === 'object' ? v[k] : undefined;
+        if (v && typeof v === 'object' && !Array.isArray(v)) { Object.assign(merged, v); reported = true; }
+    }
+    const bool = (...keys) => { for (const k of keys) if (typeof merged[k] === 'boolean') return merged[k]; return null; };
+    let stop = bool('stop_latched', 'estop_latched', 'local_stop', 'stop');
+    if (stop == null && conn.status && typeof conn.status.estop_latched === 'boolean') stop = conn.status.estop_latched;
+    if (!reported && stop == null) return none;
+    const armed = bool('armed');
+    const remote = bool('operators_allowed', 'remote_allowed');
+    const rawLink = merged.ble != null ? merged.ble : merged.link;
+    const link = rawLink == null ? null : (rawLink === true || /^(ready|connected|ok|up)$/i.test(String(rawLink))) ? 'up'
+        : (rawLink === false || /^(down|disconnected|lost|off)$/i.test(String(rawLink))) ? 'down' : 'connecting';
+    // A setting's value as one of its declared options: "DRIVE_AND_HEAD" is drive_and_head, "24" is 24.
+    const canon = (x) => String(x).toLowerCase().replace(/[^a-z0-9]/g, '');
+    const settings = {};
+    for (const [name, s] of Object.entries(m.settings || {})) {
+        if (!Array.isArray(s.options) || merged[name] == null || typeof merged[name] === 'object') continue;
+        const hit = s.options.find((o) => canon(o) === canon(merged[name]));
+        if (hit !== undefined) settings[name] = hit;
+    }
+    const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v * 10) / 10 : null);
+    const why = stop === true ? 'stop' : link === 'down' ? 'link_down' : armed === false ? 'not_armed' : remote === false ? 'remote_off' : null;
+    return {
+        reported: true, why, armed, stop, remote, link, settings,
+        yaw_from_center: num(merged.yaw_from_center),
+        yaw_center_set: typeof merged.yaw_center_set === 'boolean' ? merged.yaw_center_set : null,
+        orientation: /^(portrait|landscape)$/i.test(String(merged.orientation || '')) ? String(merged.orientation).toLowerCase() : null,
+    };
+}
+
+/**
+ * How this robot's driver names a role (the profile's mapping.wire_roles): LOOI's app knows no `queue`, so a turn holder
+ * goes to it as an operator with `turn: true` and `via: "queue"` (Maticus, 11-23: 50 of a viewer's drives came back
+ * role_refused). Bot's own audit and gate keep the role it decided.
+ */
+function wireOperator(profile, subject, role) {
+    const map = profile && profile.mapping && profile.mapping.wire_roles;
+    const to = map && Object.prototype.hasOwnProperty.call(map, role) ? map[role] : null;
+    if (!to || to === role) return { subject, role };
+    return { subject, role: to, via: role, ...(role === 'queue' ? { turn: true } : {}) };
+}
 const finite = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 const rgbOrNull = (c) => (c && typeof c === 'object' ? { r: finite(c.r), g: finite(c.g), b: finite(c.b) } : null);
 /** A simulated rover's view for a watcher: its pose, drive, lights and horn as numbers, nothing else. */
@@ -425,6 +486,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         conn.pending = false; conn.device = device; conn.online = true; conn.lastHeartbeat = now();
         deviceConns.set(device.id, conn);
         for (const robotId of deviceRobotIds(device)) setCrowdGuests(robotId, false);
+        noteReadyAll(conn, true);   // back online: an offline hold lifts until the robot's report says otherwise
     }
 
     function sendHello(conn) {
@@ -475,6 +537,33 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         for (const robotId of deviceRobotIds(conn.device)) broadcast(robotId);
     }
 
+    // Profiles by robot, a minute at a time (a broadcast reads the robot's at most twice a second).
+    const profiles = new Map();
+    async function profileFor(robot) {
+        const key = `${robot.profile_id}@${robot.profile_version}`;
+        const hit = profiles.get(key);
+        if (hit && now() - hit.at < 60000) return hit.profile;
+        const row = await getProfile(domain.db, robot.profile_id, robot.profile_version);
+        const profile = row ? row.profile : null;
+        profiles.set(key, { at: now(), profile });
+        if (profiles.size > 512) profiles.delete(profiles.keys().next().value);
+        return profile;
+    }
+    // A queue robot that cannot move holds its line (domain.queue.hold): the turn in progress keeps its time and no new
+    // one starts until the robot says it is ready (armed, no STOP, remote driving on, its link up) or comes back online.
+    const readyNotedAt = new Map();
+    async function noteReady(robotId, { force = false } = {}) {
+        if (!force && now() - (readyNotedAt.get(robotId) || 0) < 1000) return;
+        readyNotedAt.set(robotId, now());
+        if (readyNotedAt.size > 10000) readyNotedAt.delete(readyNotedAt.keys().next().value);
+        const robot = await domain.robots.get(robotId);
+        if (!robot || robot.access_policy !== 'queue') return;
+        const report = robotReport(deviceForRobot(robotId), await profileFor(robot));
+        if (!report) return;
+        if (await domain.queue.hold(robotId, report.why)) broadcast(robotId);
+    }
+    const noteReadyAll = (conn, force) => { for (const r of deviceRobotIds(conn.device)) noteReady(r, { force }).catch((e) => log.warn(`[Bot] queue hold: ${e.message}`)); };
+
     function dropDevice(conn, { silent = false } = {}) {
         if (!conn || !conn.device) return;
         const current = deviceConns.get(conn.device.id);
@@ -486,6 +575,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         if (silent) return;
         reportOnline(conn, false);
         for (const robotId of deviceRobotIds(conn.device)) broadcast(robotId);
+        noteReadyAll(conn, true);
     }
 
     // ── Machine-to-machine relay (stage 1: Network's grant, Bot's pipe) ───────────────────────────────
@@ -706,6 +796,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             case 'telemetry': return onTelemetry(conn, msg);
             case 'status':
                 conn.status = msg;
+                noteReadyAll(conn, true);
                 // A robot's machine that turns its computer plugin on is told it takes the computer kinds.
                 if (!conn.computerAllowed && msg.capabilities && msg.capabilities.computer) await sendConfig(conn);
                 for (const r of deviceRobotIds(conn.device)) broadcast(r);
@@ -800,6 +891,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             }
         }
         for (const robotId of deviceRobotIds(conn.device)) broadcast(robotId);
+        noteReadyAll(conn, false);
     }
 
     /**
@@ -857,7 +949,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         // repeated id still says accepted/refused.
         cacheResult(p.key, { result, reason: msg.fault_code || null, ...(p.kind === 'headlight' && data ? { data } : {}) });
         await recordAudit({ robotId: p.robotId, deviceId: p.deviceId, subject: p.subject, operatorKind: p.operatorKind, role: p.role, kind: p.kind, value: p.value, result, reason: msg.fault_code || null, latencyMs: latency });
-        const message = (p.computer || p.kind === 'headlight') && result === 'nack' && typeof msg.message === 'string' ? msg.message.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 300) : null;
+        const message = (p.computer || p.kind === 'headlight' || p.kind === 'setting') && result === 'nack' && typeof msg.message === 'string' ? msg.message.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 300) : null;
         meterAiCommand(p, result, msg);
         sendFrame(p.conn, 'command_result', { id: p.opId, result, reason: message || msg.fault_code || null, latency_ms: latency, ...(data ? { data } : {}) });
     }
@@ -1009,7 +1101,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             session: device.sessionId, seq, issued_at_ms: issuedAt, expires_at_ms: decision.expiresAtMs,
             clock_uncertainty_ms: Number.isFinite(device.rttMs) ? Math.max(0, Math.ceil(device.rttMs)) : 0,
         } : null;
-        const frame = { v: 1, type: 'command', seq, ts: issuedAt, id: deviceCmdId, ref: id, kind: decision.kind, value: decision.value, deadline_ms: decision.deadlineMs, operator: { subject: conn.subject, role: decision.role }, robot_id: robotId, ...(provenance ? { provenance } : {}), ...(epoch ? { turn_epoch: epoch } : {}) };
+        const frame = { v: 1, type: 'command', seq, ts: issuedAt, id: deviceCmdId, ref: id, kind: decision.kind, value: decision.value, deadline_ms: decision.deadlineMs, operator: wireOperator(decision.profile, conn.subject, decision.role), robot_id: robotId, ...(provenance ? { provenance } : {}), ...(epoch ? { turn_epoch: epoch } : {}) };
         if (!send(device.ws, frame)) {
             await recordAudit({ robotId, deviceId: device.device.id, subject: conn.subject, operatorKind: conn.principal.kind, role: decision.role, kind: decision.kind, value: decision.value, result: 'refused', reason: 'bot.device_offline' });
             return sendFrame(conn, 'command_result', { id, result: 'refused', code: 'bot.device_offline', reason: 'the device is offline' });
@@ -1424,7 +1516,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     const operatorMembers = new Map();    // robot_id → Set(subject) the last roster the card knew
     const operatorsSentAt = new Map();    // robot_id → when the last operators_state went out (ms)
     const operatorsTimer = new Map();     // robot_id → a pending throttled broadcast
-    const channelOf = (kind) => (kind === 'drive' ? 'drive' : kind === 'actuator' ? 'head' : kind === 'headlight' ? 'lights'
+    const channelOf = (kind) => (kind === 'drive' ? 'drive' : kind === 'actuator' ? 'head' : kind === 'headlight' ? 'lights' : kind === 'setting' ? 'settings'
         : kind === 'button' ? 'button' : kind === 'say' ? 'say' : kind === 'display' ? 'display' : kind === 'ptz' ? 'ptz' : 'other');
     const ROBOT_CHANNELS = { drive: 'drive', head: 'head', headlight: 'lights' };
     const ROBOT_ROLES = new Set(['owner', 'mod', 'operator']);
@@ -1514,9 +1606,11 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
             status: online && conn.status ? conn.status : null,
         };
         const robot = await domain.robots.get(robotId);
+        const profile = robot ? await profileFor(robot) : null;
         const state = {
             robot_id: robotId, online,
             ...live,
+            ready: robotReport(conn, profile),
             queue: null,
         };
         if (robot && robot.access_policy === 'queue') state.queue = await domain.queue.state(robotId, subjectForQueue);
@@ -1552,6 +1646,8 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         return {
             robot_id: state.robot_id, online: state.online,
             latency_ms: state.latency_ms, battery: state.battery,
+            // Whether it can move now and the settings in effect (no person's name or id): a viewer sees why it waits.
+            ready: state.ready || null,
             telemetry: t ? { sensors: picked, ...(sim ? { sim } : {}) } : null,
         };
     }

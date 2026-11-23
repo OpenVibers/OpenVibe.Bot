@@ -1487,14 +1487,27 @@
         }
     }
     // What a device's refusal means, in words (a nack's fault code). A deadline that passed in transit is not news.
+    // The LOOI app's codes (Maticus's 11-23 spec §5): never "you are not an operator" when Bot gave the person a turn.
     const NACK_TEXT = {
         local_stop: 'The robot is stopped on the robot itself; release it there first.',
+        stop_latched: 'The robot\'s own STOP is on. It is released on the robot.',
         not_connected: 'The robot is not connected to its device.',
+        ble_disconnected: 'The robot lost the link to its body (Bluetooth).',
         no_heartbeat: 'The device lost its link to the robot.',
         not_ready: 'The robot is still starting.',
         plugin_down: 'The robot\'s driver is not running.',
+        not_armed: 'The robot is connected but not armed yet: the streamer arms it on the robot.',
+        no_grant: 'The streamer has not turned on remote driving on the robot yet.',
+        role_refused: 'The robot\'s app does not take this kind of driver yet (role_refused).',
+        unknown_kind: 'The robot\'s app does not know that command yet.',
+        not_neutral: 'Let go of the stick first, then try again.',
+        not_camera_only: 'That works in Camera only mode.',
+        yaw_center_failed: 'The robot could not set its center: its heading is not ready.',
+        yaw_limit: 'At the spin limit: turn back toward the center.',
+        moving: 'Stop moving before changing that.',
+        owner_only: 'Only the owner can pick that.',
     };
-    const QUIET_NACKS = new Set(['expired']);
+    const QUIET_NACKS = new Set(['expired', 'stale', 'already_armed']);
     function nackText(code) {
         if (!code || QUIET_NACKS.has(code)) return '';
         return NACK_TEXT[code] || `The robot refused that (${code}).`;
@@ -1621,6 +1634,7 @@
         }
         paintBattery(state);
         paintHeadRange(state);
+        paintRobot(state);
         const sensors = state.telemetry && state.telemetry.sensors;
         headlightTelemetry(sensors);
         for (const el of $$('[data-telemetry]')) {
@@ -1629,6 +1643,142 @@
         }
         window.dispatchEvent(new CustomEvent('ov-bot-state', { detail: state }));
     }
+
+    // ── The robot's own card (the profile's mapping.settings / mapping.state; Maticus, 11-21 and 11-23) ─────────
+    // What the robot reports is the truth. A pick is a request the robot checks: it is marked waiting until the report
+    // shows it in effect (or the robot acks a setting it does not report), until the robot refuses it (its words), or 4 s.
+    // The owner and Mods pick; everyone else reads the same rows. An option only the owner may pick stays the owner's.
+    const robotEl = $('[data-widget="settings"]');
+    const readyEl = robotEl && $('[data-ready]', robotEl);
+    const chipsEl = robotEl && $('[data-robot-chips]', robotEl);
+    const setNoteEl = robotEl && $('[data-set-note]', robotEl);
+    const settingIds = new Map();   // command id → { name, value }
+    const pendingSet = new Map();   // setting name → { value, timer }
+    const confirmed = new Map();    // setting name → the value the robot acked (for a setting its report leaves out)
+    const sameOption = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
+    const setNote = (text) => { if (setNoteEl) { setNoteEl.textContent = text || ''; setNoteEl.hidden = !text; } };
+    const READY_TEXT = {
+        offline: () => 'The robot is offline.',
+        stop: () => 'Stopped on the robot: its own STOP is on, and it is released there.',
+        link_down: () => 'The robot lost the link to its body (Bluetooth).',
+        not_armed: (owner) => (owner ? 'Arm the robot on its phone to drive.' : 'Waiting for the streamer to arm the robot.'),
+        remote_off: (owner) => (owner ? 'Remote driving is off on the robot: turn on Allow operators there so others can drive.' : 'The streamer has not turned on remote driving yet.'),
+    };
+    function paintRobot(state) {
+        if (!robotEl) return;
+        const r = state && state.ready;
+        if (!r || !r.reported) { robotEl.hidden = true; return; }
+        robotEl.hidden = false;
+        const owner = myRole === 'owner';
+        if (readyEl) {
+            const text = r.why && READY_TEXT[r.why] ? READY_TEXT[r.why](owner) : '';
+            readyEl.textContent = text;
+            readyEl.hidden = !text;
+            readyEl.dataset.tone = r.why === 'stop' || r.why === 'link_down' ? 'stop' : 'wait';
+        }
+        if (chipsEl) {
+            const chips = [];
+            if (r.stop === true) chips.push(['stop', 'STOP on']);
+            else if (r.armed != null) chips.push([r.armed ? 'ok' : 'wait', r.armed ? 'Armed' : 'Not armed']);
+            if (r.remote != null) chips.push([r.remote ? 'ok' : 'off', r.remote ? 'Remote driving on' : 'Remote driving off']);
+            if (r.link) chips.push([r.link === 'up' ? 'ok' : r.link === 'down' ? 'stop' : 'wait', r.link === 'up' ? 'Link up' : r.link === 'down' ? 'Link down' : 'Linking']);
+            if (r.orientation) chips.push(['', r.orientation === 'portrait' ? 'Portrait' : 'Landscape']);
+            if (r.yaw_center_set === false) chips.push(['wait', 'Center not set']);
+            else if (r.yaw_from_center != null) chips.push(['', `${Math.round(Math.abs(r.yaw_from_center))}° from center`]);
+            chipsEl.textContent = '';
+            for (const [tone, text] of chips) {
+                const li = document.createElement('li');
+                li.className = 'robot-chip';
+                if (tone) li.dataset.tone = tone;
+                li.textContent = text;
+                chipsEl.append(li);
+            }
+            chipsEl.hidden = !chips.length;
+        }
+        const settings = r.settings || {};
+        const can = joined && allowed.includes('setting');
+        const valueOf = (name) => (settings[name] !== undefined ? settings[name] : confirmed.get(name));
+        // Someone who cannot change them reads the settings as a few more chips, not a wall of pickers they cannot use.
+        const setsEl = $('[data-robot-sets]', robotEl);
+        if (setsEl) setsEl.hidden = !can;
+        if (!can && chipsEl) {
+            for (const row of $$('[data-set]', robotEl)) {
+                const v = valueOf(row.dataset.set);
+                if (v === undefined) continue;
+                const when = row.dataset.when ? JSON.parse(row.dataset.when) : null;
+                if (when && !Object.entries(when).every(([k, w]) => valueOf(k) !== undefined && sameOption(valueOf(k), w))) continue;
+                const button = $$('[data-option]', row).find((b) => sameOption(JSON.parse(b.dataset.option), v));
+                const label = $('.robot-set-l', row);
+                const li = document.createElement('li');
+                li.className = 'robot-chip';
+                li.dataset.tone = 'setting';
+                li.textContent = row.dataset.set === 'mode' ? (button ? button.textContent : String(v)) : `${label ? label.textContent : row.dataset.set} ${button ? button.textContent : v}`;
+                chipsEl.append(li);
+            }
+            chipsEl.hidden = !chipsEl.children.length;
+        }
+        for (const row of $$('[data-set]', robotEl)) {
+            const name = row.dataset.set;
+            const when = row.dataset.when ? JSON.parse(row.dataset.when) : null;
+            row.hidden = !!when && !Object.entries(when).every(([k, v]) => valueOf(k) !== undefined && sameOption(valueOf(k), v));
+            const current = valueOf(name);
+            const pending = pendingSet.get(name);
+            if (pending && settings[name] !== undefined && sameOption(settings[name], pending.value)) { clearTimeout(pending.timer); pendingSet.delete(name); }
+            const waiting = pendingSet.get(name);
+            for (const b of $$('[data-option]', row)) {
+                const v = JSON.parse(b.dataset.option);
+                b.setAttribute('aria-checked', String(current !== undefined && sameOption(current, v)));
+                b.classList.toggle('is-pending', !!waiting && sameOption(waiting.value, v));
+                const ownerOnly = b.hasAttribute('data-owner-only') && !owner;
+                b.disabled = !can || ownerOnly;
+                if (ownerOnly) b.title = 'Only the owner can pick this'; else b.removeAttribute('title');
+            }
+        }
+        for (const b of $$('[data-set-action]', robotEl)) b.disabled = !can;
+    }
+    function pickSetting(name, value) {
+        const id = send('setting', value === undefined ? { name } : { name, value });
+        if (!id) return;
+        settingIds.set(id, { name, value });
+        if (settingIds.size > 50) settingIds.delete(settingIds.keys().next().value);
+        if (value !== undefined) {
+            const was = pendingSet.get(name);
+            if (was) clearTimeout(was.timer);
+            pendingSet.set(name, { value, timer: setTimeout(() => {
+                pendingSet.delete(name);
+                setNote('The robot has not confirmed that yet.');
+                if (lastPainted) paintRobot(lastPainted);
+            }, 4000) });
+        }
+        setNote('');
+        if (lastPainted) paintRobot(lastPainted);
+    }
+    /** A setting's answer: an ack (in effect, or about to be in the robot's report) or a refusal in the robot's words. */
+    function settingResult(m) {
+        const s = settingIds.get(m.id);
+        if (!s) return false;
+        settingIds.delete(m.id);
+        const pending = pendingSet.get(s.name);
+        if (m.result === 'ack') {
+            if (s.value === undefined) setNote('Done.');
+            else {
+                confirmed.set(s.name, s.value);
+                const reported = lastPainted && lastPainted.ready && lastPainted.ready.settings && lastPainted.ready.settings[s.name] !== undefined;
+                if (pending && !reported) { clearTimeout(pending.timer); pendingSet.delete(s.name); }
+            }
+        } else {
+            if (pending) { clearTimeout(pending.timer); pendingSet.delete(s.name); }
+            setNote(m.result === 'nack' ? (nackText(m.reason) || 'The robot refused that.') : (m.reason || m.code || 'That was refused.'));
+        }
+        if (lastPainted) paintRobot(lastPainted);
+        return true;
+    }
+    if (robotEl) robotEl.addEventListener('click', (e) => {
+        const option = e.target.closest('[data-option]');
+        const action = e.target.closest('[data-set-action]');
+        if (option && !option.disabled) pickSetting(option.closest('[data-set]').dataset.set, JSON.parse(option.dataset.option));
+        else if (action && !action.disabled) pickSetting(action.dataset.setAction, undefined);
+    });
 
     // ── The turn queue strip (a `queue` robot's signed-in non-member) ─────────────────────────────────
     const turnEl = $('[data-turn]');
@@ -1647,7 +1797,17 @@
         stopTurnTimer();
         if (!turnEl) return;
         const controller = myRole === 'owner' || myRole === 'operator';
-        const paused = queue && queue.paused;
+        // A robot that cannot move holds the line (its own report: not armed, its STOP, remote driving off, offline): the
+        // turn in progress keeps its time and no new one starts.
+        const robotHold = queue && queue.paused && queue.paused.by === 'robot' ? queue.paused : queue && queue.held ? queue.held : null;
+        if (robotHold && (queue.active || queue.position > 0)) {
+            turnEl.hidden = false;
+            if (turnGiveEl) turnGiveEl.hidden = true;
+            turnStateEl.textContent = queue.active ? 'Your turn is paused' : `You're #${queue.position} in line`;
+            turnMetaEl.textContent = `Turns wait while ${robotHold.words || 'the robot is not ready'}.${queue.active ? ' Your time is kept.' : ''}`;
+            return;
+        }
+        const paused = queue && queue.paused && queue.paused.by !== 'robot' ? queue.paused : null;
         if (turnGiveEl) turnGiveEl.hidden = !(paused && controller);
         if (turnLeaveEl) turnLeaveEl.hidden = !!(controller && !(queue && queue.active));
         if (!queue || (!queue.active && !(queue.position > 0) && !(paused && controller))) { turnEl.hidden = true; return; }
@@ -1671,7 +1831,9 @@
             const paintLeft = () => {
                 const left = ends != null ? Math.max(0, Math.ceil((ends - Date.now()) / 1000)) : null;
                 turnStateEl.textContent = 'Your turn';
-                turnMetaEl.textContent = `${left == null ? '—' : `${left}s`} left · ${queue.used} of ${queue.budget} commands`;
+                // Presses are buttons and clicks on the video; the stick never counts (a held stick resends every 150 ms).
+                const presses = allowed.includes('button') || allowed.includes('point') ? ` · ${queue.used} of ${queue.budget} presses` : '';
+                turnMetaEl.textContent = `${left == null ? '—' : `${left}s`} left${presses}`;
             };
             paintLeft();
             if (ends != null) turnTimer = setInterval(paintLeft, 1000);
@@ -1710,6 +1872,7 @@
         } else if (m.type === 'command_result') {
             roundTrip(m.id, m.result);
             if (m.id && headlightIds.delete(m.id)) { headlightAck(m); return; }
+            if (m.id && settingResult(m)) return;
             if (m.result === 'refused' && m.code !== 'bot.cooldown') notice(m.reason || m.code);
             else if (m.result === 'nack') { const t = nackText(m.reason); if (t) notice(t); }
             else if (m.result === 'ack') notice('');

@@ -99,7 +99,14 @@ function samples(profile, kind, names) {
         const p = profiles.get('looi');
         assert.strictEqual(p.kind, 'bridge');
         assert.deepStrictEqual(p.capabilities.slice().sort(), ['battery', 'drive.differential', 'head']);
-        assert.deepStrictEqual(p.mapping, { driver: 'looi', plugin: 'looi', actions: ['headlight'] });
+        assert.deepStrictEqual([p.mapping.driver, p.mapping.plugin, p.mapping.actions], ['looi', 'looi', ['headlight']]);
+        // Its settings (Maticus, 11-21): mode, speed stage, head speed in Camera only, the spin limit (Off is the owner's)
+        // and Set center here; the app's report (status.capabilities.looi_bridge) is where they are read back.
+        assert.deepStrictEqual(Object.keys(p.mapping.settings), ['mode', 'speed_stage', 'head_speed', 'yaw_limit', 'yaw_center']);
+        assert.deepStrictEqual(p.mapping.settings.speed_stage.options, [24, 32, 48, 69, 96, 127]);
+        assert.deepStrictEqual(p.mapping.settings.yaw_limit.owner_only, ['off']);
+        assert.ok(p.mapping.state.includes('status.capabilities.looi_bridge'));
+        assert.deepStrictEqual(p.mapping.wire_roles, { queue: 'operator' }, 'the app knows no queue role: a turn holder is an operator to it');
         assert.deepStrictEqual(Object.keys(p.commands).sort(), ['actuator', 'drive', 'halt'], 'halt is in every profile');
         assert.deepStrictEqual(p.commands.drive.axes, { throttle: [-1, 1], steer: [-1, 1] });
         assert.deepStrictEqual(p.commands.actuator.names, { head: { type: 'number', range: [-1, 1] } });

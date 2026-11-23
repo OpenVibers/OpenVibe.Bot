@@ -130,7 +130,7 @@ const { renderPanel } = require('../server/web/render');
         assert.deepStrictEqual(j.allowed_commands, []);
         assert.strictEqual(j.profile.id, 'sim.rover');
         assert.strictEqual(j.robot, undefined);
-        assert.deepStrictEqual(Object.keys(j.state).sort(), ['battery', 'latency_ms', 'online', 'robot_id', 'telemetry']);
+        assert.deepStrictEqual(Object.keys(j.state).sort(), ['battery', 'latency_ms', 'online', 'ready', 'robot_id', 'telemetry']);
         const s = await w.waitFor((m) => m.type === 'robot_state' && m.state.telemetry);
         // The profile's readouts by the driver's keys, and a simulated rover's camera view; never the raw drive or pose.
         assert.deepStrictEqual(Object.keys(s.state.telemetry).sort(), ['sensors', 'sim'], 'the drive and pose telemetry reached a watcher');

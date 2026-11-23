@@ -46,7 +46,7 @@ const CAPABILITIES = new Set([
 ]);
 
 /** Panel widget types (open in the profile, closed in code: a new widget is a new entry here). */
-const WIDGETS = new Set(['drive', 'pan-tilt', 'servo', 'lights', 'horn', 'speaker', 'display', 'telemetry', 'battery', 'latency', 'ptz', 'camera', 'head', 'lift', 'buttons', 'video_click']);
+const WIDGETS = new Set(['drive', 'pan-tilt', 'servo', 'lights', 'horn', 'speaker', 'display', 'telemetry', 'battery', 'latency', 'ptz', 'camera', 'head', 'lift', 'buttons', 'video_click', 'settings']);
 
 /** Device drivers a mapping may name. `relay` is a Link plugin with no hardware map of its own. */
 // `looi`: the community's Generic LOOI driver, a Bluetooth bridge plugin (OpenVibe Link docs/hardware-looi.md).
@@ -178,6 +178,55 @@ function validateWidgetCommand(id, w, commands) {
     return { kind: 'actuator', names: c.names.slice() };
 }
 
+const SETTING_RE = /^[a-z][a-z0-9_]{0,31}$/;
+const ROLES_ON_WIRE = new Set(['owner', 'mod', 'operator', 'queue', 'crowd']);
+const STATE_PATH = /^(status\.capabilities|telemetry\.sensors)\.[a-z][a-z0-9_]{0,39}$/;
+/**
+ * A driver's robot settings and the robot's own report, in the open `mapping` (the contract keeps `commands` closed;
+ * LOOI's speed stage, mode, head speed and spin limit, Maticus 11-21/11-23):
+ *   settings    { <name>: { label, options: [string|number, …], names?: [label per option], owner_only?: [options],
+ *                 when?: { <other setting>: <option> }, order? } | { label, action: true, order? } }   the `setting` kind's
+ *                 names and values; `order` keeps the panel's order (a stored profile's keys come back sorted)
+ *   state       [ "status.capabilities.<key>" | "telemetry.sensors.<key>", … ]       where the robot reports what is in
+ *                 effect (armed, stop, operators allowed, link, each setting's value); later paths win
+ *   wire_roles  { <role>: <role> }   how this robot's driver names a role (LOOI's app knows no `queue`: a turn holder
+ *                 goes to it as an operator, with `operator.turn: true`)
+ */
+function validateMappingExtras(id, m) {
+    if (m.settings != null) {
+        if (!isObject(m.settings) || !Object.keys(m.settings).length || Object.keys(m.settings).length > 16) bad(`${id}: mapping.settings must name 1 to 16 settings`);
+        for (const [name, s] of Object.entries(m.settings)) {
+            const where = `${id}: mapping.settings.${name}`;
+            if (!SETTING_RE.test(name)) bad(`${where}: a setting name is lower case letters, digits and _`);
+            if (!isObject(s) || typeof s.label !== 'string' || !s.label.trim() || s.label.length > 40) bad(`${where}.label is required (at most 40 characters)`);
+            if (s.order != null && !Number.isInteger(s.order)) bad(`${where}.order is a whole number`);
+            if (s.action === true) {
+                if (s.options != null || s.owner_only != null) bad(`${where}: an action takes no options`);
+                continue;
+            }
+            const scalar = (v) => (typeof v === 'string' && v.length > 0 && v.length <= 40) || (typeof v === 'number' && Number.isFinite(v));
+            if (!Array.isArray(s.options) || s.options.length < 2 || s.options.length > 12 || !s.options.every(scalar)) bad(`${where}.options must list 2 to 12 strings or numbers`);
+            if (new Set(s.options.map(String)).size !== s.options.length) bad(`${where}.options are listed once each`);
+            if (s.names != null && (!Array.isArray(s.names) || s.names.length !== s.options.length || !s.names.every((n) => typeof n === 'string' && n.length && n.length <= 24))) bad(`${where}.names gives one short label per option`);
+            if (s.owner_only != null && (!Array.isArray(s.owner_only) || !s.owner_only.every((o) => s.options.includes(o)))) bad(`${where}.owner_only names some of its options`);
+            if (s.when != null) {
+                if (!isObject(s.when)) bad(`${where}.when is { setting: option }`);
+                for (const [other, v] of Object.entries(s.when)) {
+                    const o = m.settings[other];
+                    if (!o || !Array.isArray(o.options) || !o.options.includes(v)) bad(`${where}.when names ${other}=${v}, which is not a setting's option`);
+                }
+            }
+        }
+    }
+    if (m.state != null && (!Array.isArray(m.state) || !m.state.length || m.state.length > 4 || !m.state.every((s) => typeof s === 'string' && STATE_PATH.test(s)))) {
+        bad(`${id}: mapping.state lists 1 to 4 paths like status.capabilities.<key> or telemetry.sensors.<key>`);
+    }
+    if (m.wire_roles != null) {
+        if (!isObject(m.wire_roles)) bad(`${id}: mapping.wire_roles is { role: role }`);
+        for (const [from, to] of Object.entries(m.wire_roles)) if (!ROLES_ON_WIRE.has(from) || !ROLES_ON_WIRE.has(to)) bad(`${id}: mapping.wire_roles maps ${from} to ${to}; roles are ${[...ROLES_ON_WIRE].join(', ')}`);
+    }
+}
+
 /** Validate one profile, filling the limit defaults (max_command_ms 300, heartbeat_ms 1000). */
 function validateProfile(p) {
     if (!p || typeof p !== 'object') bad('a profile must be an object');
@@ -197,6 +246,8 @@ function validateProfile(p) {
     });
     if (!p.mapping || typeof p.mapping !== 'object' || !DRIVERS.has(p.mapping.driver)) bad(`${p.id}: mapping.driver must be one of ${[...DRIVERS].join(', ')}`);
     if (p.mapping.driver === 'plugin' && !PLUGIN_NAME.test(String(p.mapping.plugin || ''))) bad(`${p.id}: a plugin driver names its Link plugin in mapping.plugin (lower case letters, digits, - and _)`);
+    validateMappingExtras(p.id, p.mapping);
+    if (widgets.some((w) => w.type === 'settings') && !p.mapping.settings && !p.mapping.state) bad(`${p.id}: a settings widget needs mapping.settings or mapping.state`);
     const l = p.limits && typeof p.limits === 'object' ? p.limits : {};
     const limits = {
         max_speed: number(l.max_speed) != null ? number(l.max_speed) : 1,
