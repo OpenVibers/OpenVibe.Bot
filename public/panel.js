@@ -1586,11 +1586,13 @@
         const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : null);
         const orientation = h && typeof h.orientation === 'string' ? h.orientation.toLowerCase() : '';
         const [min, max, center] = h ? [num(h.min), num(h.max), num(h.center)] : [null, null, null];
+        // The head's pose (LOOI app 0.2.17: p7_head.value, raw 0–255) beside the range.
+        const pose = h ? num(h.value) : null;
         let text = '';
         if (orientation === 'portrait' || orientation === 'landscape') {
             const name = orientation === 'portrait' ? 'Portrait' : 'Landscape';
             const range = min != null && max != null ? ` · ${min}–${max}` : '';
-            text = `${name}${range}${center != null ? `, centre ${center}` : ''}`;
+            text = `${name}${range}${center != null ? `, centre ${center}` : ''}${pose != null ? ` · now ${pose}` : ''}`;
         }
         for (const el of $$('[data-head-range]')) { el.textContent = text; el.hidden = !text; el.dataset.orientation = orientation || ''; }
     }

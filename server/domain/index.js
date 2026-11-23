@@ -317,6 +317,15 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         // The fast lane: followers of the owner's channel, and their subscribers, go first (each the owner's switch).
         if (typeof limits.lane_followers === 'boolean') out.lane_followers = limits.lane_followers;
         if (typeof limits.lane_subscribers === 'boolean') out.lane_subscribers = limits.lane_subscribers;
+        // The highest option of a capped setting (LOOI's speed stage) for turns and for guests: { <setting>: <option> }.
+        for (const k of ['turn_settings', 'guest_settings']) {
+            const v = limits[k];
+            if (v && typeof v === 'object' && !Array.isArray(v)) {
+                const o = {};
+                for (const [name, opt] of Object.entries(v)) if (/^[a-z][a-z0-9_]{0,31}$/.test(name) && (typeof opt === 'string' || Number.isInteger(opt))) o[name] = opt;
+                out[k] = o;
+            }
+        }
         // Crowd control's settings: the style, the window and the viewer speed cap (a fraction of each axis's range).
         if (limits.crowd && typeof limits.crowd === 'object') {
             const c = limits.crowd; const o = {};
@@ -1530,6 +1539,27 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         return { maxSpeed, maxTurn, maxCommandMs, cooldownMs };
     };
     /** The limits a device enforces itself (the `config` frame): the effective ones, never the profile's alone. */
+    /**
+     * The owner's caps for whoever holds a turn and for guests, as the robot gets them in config.role_caps (contracts
+     * 0.454.0): a top speed (already applied by the gate; the robot may show it) and a capped setting's highest option
+     * (LOOI's speed stage: the phone clamps a turn's drive to it). Null when the owner set none.
+     */
+    const roleCaps = (robot, profile) => {
+        const own = json(robot.limits, {});
+        const settings = settingsOf(profile) || {};
+        const capped = (o) => {
+            const out = {};
+            for (const [name, opt] of Object.entries(o || {})) if (settings[name] && settings[name].cap && Array.isArray(settings[name].options) && settings[name].options.includes(opt)) out[name] = opt;
+            return Object.keys(out).length ? out : null;
+        };
+        const speed = (v) => (Number(v) > 0 && Number(v) < 1 ? Number(v) : null);
+        const turn = { ...(speed(own.turn_speed) ? { max_speed: speed(own.turn_speed) } : {}), ...(capped(own.turn_settings) ? { settings: capped(own.turn_settings) } : {}) };
+        const guestSpeed = speed(own.guest_speed) || speed(own.turn_speed);
+        const guestSettings = capped(own.guest_settings) || capped(own.turn_settings);
+        const guest = { ...(guestSpeed ? { max_speed: guestSpeed } : {}), ...(guestSettings ? { settings: guestSettings } : {}) };
+        const caps = { ...(Object.keys(turn).length ? { turn } : {}), ...(Object.keys(guest).length ? { guest } : {}) };
+        return Object.keys(caps).length ? caps : null;
+    };
     const deviceLimits = (robot, profile) => {
         const eff = effectiveLimits(robot, profile);
         const hb = profile && profile.limits && profile.limits.heartbeat_ms != null ? profile.limits.heartbeat_ms : config.device.heartbeatMs;
@@ -1895,7 +1925,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         video: { live: liveVideo },
         queue: { join: joinQueue, leave: leaveQueue, state: queueState, currentTurn, consume: consumeTurn, sweep: sweepQueues, onHandoff, onResume, epoch: epochOf, giveBack, hold: holdQueue, heldOf: (id) => robotHeld.get(id) || null, onTurnStart, dropGuests, OWNER_IDLE_MS },
         audit: { record: auditCommand, list: listAudit, listPage: listAuditPage, prune: pruneAudit },
-        control: { prepare, allowedFor, effectiveLimits, deviceLimits, buildValue, DEFAULT_ALLOW, KINDS, crowdConfig },
+        control: { prepare, allowedFor, effectiveLimits, deviceLimits, roleCaps, buildValue, DEFAULT_ALLOW, KINDS, crowdConfig },
     };
 }
 

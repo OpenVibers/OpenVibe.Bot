@@ -859,6 +859,23 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         const guestSpeed = optNum(req.body.guest_speed, 10, 100);
         const on = (name) => (Array.isArray(req.body[name]) ? req.body[name].includes('on') : req.body[name] === 'on');
         const limits = { ...stored, turn_ms: seconds * 1000, turn_budget: presses, guest_turns: guestTurns };
+        // The owner's caps on a capped setting (LOOI's speed stage) for turns and guests: one of its options, or "" for any.
+        const profileRow = await getProfile(domain.db, robot.profile_id, robot.profile_version);
+        const settings = (profileRow && profileRow.profile && profileRow.profile.mapping && profileRow.profile.mapping.settings) || {};
+        for (const [who, key] of [['turn', 'turn_settings'], ['guest', 'guest_settings']]) {
+            const caps = { ...(stored[key] || {}) };
+            let touched = false;
+            for (const [name, s] of Object.entries(settings)) {
+                if (!s.cap || !Array.isArray(s.options) || req.body[`${who}_cap_${name}`] === undefined) continue;
+                touched = true;
+                const raw = String(req.body[`${who}_cap_${name}`]);
+                const opt = s.options.find((o) => String(o) === raw);
+                if (raw === '') delete caps[name];
+                else if (opt === undefined) throw new BotError(422, 'bot.invalid_input', `${name} is one of ${s.options.join(', ')}`);
+                else caps[name] = opt;
+            }
+            if (touched) limits[key] = caps;
+        }
         // The fast lane's two switches (an older form without them leaves them as they were).
         if (req.body.lane_followers !== undefined) limits.lane_followers = on('lane_followers');
         if (req.body.lane_subscribers !== undefined) limits.lane_subscribers = on('lane_subscribers');
@@ -866,7 +883,8 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         if (turnSpeed != null) limits.turn_speed = Math.round(turnSpeed) / 100;
         if (guestSpeed != null) limits.guest_speed = Math.round(guestSpeed) / 100;
         await domain.robots.update(robot.id, { limits }, { subject: me.subject, kind: 'user' });
-        if (hub) hub.broadcast(robot.id);
+        // The robot hears the caps at once (config.role_caps).
+        if (hub) { if (hub.refreshConfig) await hub.refreshConfig(robot.id); hub.broadcast(robot.id); }
         return res.redirect(303, `/panel/${robot.id}#turns`);
     }));
     r.post('/robots/:id/uncommission', ...manage, express.urlencoded({ extended: false, limit: '1kb' }), page(async (req, res) => {

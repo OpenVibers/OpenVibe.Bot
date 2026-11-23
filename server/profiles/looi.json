@@ -46,7 +46,8 @@
           96,
           127
         ],
-        "order": 2
+        "order": 2,
+        "cap": true
       },
       "head_speed": {
         "label": "Head speed",

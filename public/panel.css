@@ -1071,3 +1071,12 @@ html.embed-page[data-bot-view="panel"] .seg button { min-height: 38px; font-size
 .device-revoke summary { cursor: pointer; color: var(--danger-text, var(--danger)); font-weight: 600; font-size: 0.85rem; min-height: var(--tap); display: inline-flex; align-items: center; }
 .device-revoke form { display: grid; gap: 0.5rem; justify-items: start; }
 .device-revoke .danger { min-height: var(--tap); padding: 0 1rem; border-radius: 999px; border: 0; background: var(--fill-danger); color: #fff; font-weight: 700; cursor: pointer; }
+
+/* The owner's caps as radio chips (the Taking turns card): the .seg look, a real radio underneath. */
+.seg-radio label { position: relative; display: grid; min-width: 0; }
+.seg-radio input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.seg-radio span { display: grid; place-items: center; min-height: var(--tap); padding: 0 0.35rem; border-radius: 9px; color: var(--muted);
+  font: 600 0.9rem/1.1 inherit; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: background-color 160ms ease, color 160ms ease; }
+.seg-radio input:checked + span { background: var(--fill-accent); color: var(--on-fill-accent); }
+.seg-radio input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+html[data-ov-motion="off"] .seg-radio span { transition: none; }

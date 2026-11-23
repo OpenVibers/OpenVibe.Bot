@@ -226,6 +226,13 @@ names the person.
 took over from an old computer still paired), and the owner's Devices card marks it. A simulator drives only when no real
 device is online.
 
+**The owner's caps on the robot** (`config.role_caps`, contracts 0.454.0): for whoever holds a turn (`operator.turn:
+true`) and for guests (a `gst_` subject), `{ max_speed?, settings? }`: the turn's top speed (the gate already applies
+it) and, for a profile setting marked `cap` (LOOI's speed stage), its highest option the owner chose on the Taking
+turns card. The robot clamps those drivers to it (LOOI: a turn at stage 96 with a cap of 48 drives at 48). Sent with
+config and again at once when the owner changes it. LOOI's `sensors.p7_head` carries the head's pose in `value`
+(0–255) beside `orientation` (portrait or landscape) and the active range; the panel shows it under the head slider.
+
 **A turn's presses** (`limits.turn_budget`, 50 by default; the owner sets it with the turn's length on the robot's page):
 the buttons and clicks on the video a turn may send. Driving and the head never count (a held stick resends every
 150 ms, which spent 50 commands in about 7 s): the turn's length (`limits.turn_ms`, 60 s by default) bounds them. A spent
