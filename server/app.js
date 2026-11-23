@@ -24,7 +24,7 @@ const { http } = require('openvibe-contracts');
 const { isLoopbackDirect } = require('openvibe-shared/metrics');
 const { loadConfig } = require('./config');
 const { openDb } = require('./db');
-const { createKeyProvider, createUserAuth, createNodePrincipals, createIdentity, createOfferReporter } = require('./network');
+const { createKeyProvider, createUserAuth, createNodePrincipals, createIdentity, createOfferReporter, createNotifier } = require('./network');
 const { createOfferPublisher } = require('./jobs/offers');
 const { createOpenRe } = require('./openre/client');
 const { createBotOutbox } = require('./events/outbox');
@@ -73,7 +73,9 @@ function createApp(opts = {}) {
         : null);
     // The models on people's machines, into OpenVibe.AI's meter (server/ai-meter.js): off without OV_AI_INTERNAL_URL.
     const meter = opts.meter !== undefined ? opts.meter : createAiMeter({ config, fetchImpl, log });
-    const hub = opts.hub || createRealtime({ config, keys, userAuth, log, now, networkSend, meter });
+    // "Your turn" notifications through Network (app bot); none without Bot's OAuth client, and a test passes its own.
+    const notifier = opts.notifier !== undefined ? opts.notifier : (config.oauth.clientSecret ? createNotifier(config, { fetchImpl }) : null);
+    const hub = opts.hub || createRealtime({ config, keys, userAuth, log, now, networkSend, meter, notifier });
     const nodes = opts.nodes || createNodePrincipals(config, { fetchImpl });
     const identity = opts.identity || createIdentity(config, { fetchImpl });
     const openre = opts.openre !== undefined ? opts.openre : createOpenRe(config, { fetchImpl });

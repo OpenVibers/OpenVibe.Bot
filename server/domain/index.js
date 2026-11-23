@@ -308,7 +308,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     }
     function cleanLimits(limits = {}) {
         const out = {};
-        for (const k of ['max_speed', 'max_turn', 'max_command_ms', 'turn_ms', 'turn_budget', 'cooldown_ms']) {
+        for (const k of ['max_speed', 'max_turn', 'max_command_ms', 'turn_ms', 'turn_budget', 'cooldown_ms', 'guest_turn_ms', 'turn_speed', 'guest_speed']) {
             const n = Number(limits[k]);
             if (limits[k] != null && Number.isFinite(n) && n >= 0) out[k] = n;
         }
@@ -1263,6 +1263,17 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     const ownerSeen = new Map();   // robotId → { at, subject, role }
     const resumeListeners = new Set();
     const onResume = (fn) => { resumeListeners.add(fn); return () => resumeListeners.delete(fn); };
+    // Told when the next person in line gets their turn (the hub's "your turn" notification), after the row is theirs.
+    const turnStartListeners = new Set();
+    const onTurnStart = (fn) => { turnStartListeners.add(fn); return () => turnStartListeners.delete(fn); };
+    // bot.turn.started / bot.turn.ended (contracts 0.453.0): a robot's line in events and the owner's webhooks. Neither
+    // names the person (no member learns the driver's subject); emitted after the change, never blocking the gate.
+    function emitTurn(eventType, robot, payload) {
+        db.tx(async (t) => emit(t, eventType, { type: 'robot', id: robot.id },
+            { robot_id: robot.id, ...(USER_SUBJECT.test(String(robot.owner_subject || '')) ? { owner: robot.owner_subject } : {}), ...payload }))
+            .catch((e) => log.warn(`[Bot] ${eventType}: ${e.message}`));
+    }
+    const isGuest = (subject) => String(subject || '').startsWith('gst_');
     async function takeOver(robotId, subject, role) {
         ownerSeen.set(robotId, { at: now(), subject, role });
         if (ownerSeen.size > 10000) ownerSeen.delete(ownerSeen.keys().next().value);
@@ -1330,16 +1341,34 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         if (active && new Date(active.turn_ends_at).getTime() > now()) return active;
         if (active) {
             // Only the caller that ends the turn reports it (two at once both read it active).
-            const ended = await q.maybe(`UPDATE robot_queue SET state = 'done' WHERE robot_id = $1 AND subject = $2 AND state = 'active' RETURNING subject`, [robotId, active.subject]);
-            if (ended) handedOff(robotId, active.subject, 'turn_ended');
+            const ended = await q.maybe(`UPDATE robot_queue SET state = 'done' WHERE robot_id = $1 AND subject = $2 AND state = 'active' RETURNING subject, commands_used`, [robotId, active.subject]);
+            if (ended) {
+                handedOff(robotId, active.subject, 'turn_ended');
+                emitTurn('bot.turn.ended', robot, { reason: 'turn_ended', guest: isGuest(active.subject), presses_used: Number(ended.commands_used) || 0 });
+            }
         }
         if (held) return null;   // no turn starts while the robot cannot move
         const next = await q.maybe(`SELECT * FROM robot_queue WHERE robot_id = $1 AND state = 'waiting' ORDER BY joined_at LIMIT 1 FOR UPDATE`, [robotId]);
         if (!next) return null;
         const at = now();
-        await q.query(`UPDATE robot_queue SET state = 'active', turn_started_at = $3, turn_ends_at = $4, commands_used = 0 WHERE robot_id = $1 AND subject = $2`,
-            [robotId, next.subject, iso(at), iso(at + turnMs(robot))]);
-        return { ...next, state: 'active', turn_started_at: iso(at), turn_ends_at: iso(at + turnMs(robot)), commands_used: 0 };
+        // A guest's turn may be shorter than a signed-in person's (limits.guest_turn_ms, the owner's Taking turns card).
+        const own = json(robot.limits, {});
+        const length = isGuest(next.subject) && Number(own.guest_turn_ms) > 0 ? Number(own.guest_turn_ms) : turnMs(robot);
+        // Only the caller that promotes reports it (two at once both read the same waiting row).
+        const promoted = await q.maybe(`UPDATE robot_queue SET state = 'active', turn_started_at = $3, turn_ends_at = $4, commands_used = 0 WHERE robot_id = $1 AND subject = $2 AND state = 'waiting' RETURNING subject`,
+            [robotId, next.subject, iso(at), iso(at + length)]);
+        if (promoted) {
+            const waiting = Number(await q.value(`SELECT count(*)::int FROM robot_queue WHERE robot_id = $1 AND state = 'waiting'`, [robotId])) || 0;
+            emitTurn('bot.turn.started', robot, { ends_at: iso(at + length), guest: isGuest(next.subject), waiting });
+            const info = { subject: next.subject, joinedAt: new Date(next.joined_at).getTime(), endsAt: at + length, robot };
+            for (const fn of turnStartListeners) { try { fn(robotId, info); } catch { /* a listener never breaks the caller */ } }
+        }
+        return { ...next, state: 'active', turn_started_at: iso(at), turn_ends_at: iso(at + length), commands_used: 0 };
+    }
+    /** Every guest's place (`gst_…`): their sockets died with the last process, so nobody would ever drive them. */
+    async function dropGuests() {
+        const n = await db.value(`WITH gone AS (DELETE FROM robot_queue WHERE subject LIKE 'gst\\_%' RETURNING 1) SELECT count(*)::int FROM gone`);
+        return Number(n) || 0;
     }
     async function joinQueue(robotId, subject) {
         const at = iso(now());
@@ -1355,8 +1384,11 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     async function leaveQueue(robotId, subject) {
         const robot = await getRobot(robotId);
         if (!robot) fail(404, 'bot.robot_not_found', 'no such robot');
-        const gone = await db.maybe('DELETE FROM robot_queue WHERE robot_id = $1 AND subject = $2 RETURNING state', [robotId, subject]);
-        if (gone && gone.state === 'active') handedOff(robotId, subject, 'turn_left');
+        const gone = await db.maybe('DELETE FROM robot_queue WHERE robot_id = $1 AND subject = $2 RETURNING state, commands_used', [robotId, subject]);
+        if (gone && gone.state === 'active') {
+            handedOff(robotId, subject, 'turn_left');
+            emitTurn('bot.turn.ended', robot, { reason: 'turn_left', guest: isGuest(subject), presses_used: Number(gone.commands_used) || 0 });
+        }
         await currentTurn(robotId);
         return queueState(robotId, subject);
     }
@@ -1736,7 +1768,15 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         if (!allow.includes(kind)) return { ok: false, code: 'bot.command_not_allowed', reason: `${kind} is not allowed for ${role}`, robot, role };
         if (!online) return { ok: false, code: 'bot.device_offline', reason: 'The robot is offline. Nothing you press waits for it: it moves only while it is connected.', robot, role };
 
-        const eff = effectiveLimits(robot, profile);
+        let eff = effectiveLimits(robot, profile);
+        // A turn's top speed (the owner's Taking turns card): a fraction of the robot's own limits for whoever holds a
+        // turn, and for a guest the guest's (else the turn's). The robot's own stage or ceiling still applies after it.
+        if (role === 'queue') {
+            const own = json(robot.limits, {});
+            const guest = principal && principal.kind === 'guest';
+            const cap = Number(guest && own.guest_speed > 0 ? own.guest_speed : own.turn_speed);
+            if (cap > 0 && cap < 1) eff = { ...eff, maxSpeed: eff.maxSpeed * cap, maxTurn: eff.maxTurn * cap };
+        }
         const release = kind === 'button' && value && value.state === 'up';
         const activeKey = kind === 'button' && value && typeof value.name === 'string' ? `${robotId}|${subject}|${value.name}` : null;
         const repeatedHold = !!(activeKey && value.state === 'down' && activeButtons.get(activeKey) > now());
@@ -1829,7 +1869,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         deskLeases,
         streaming: { get: streaming, set: setStreaming },
         video: { live: liveVideo },
-        queue: { join: joinQueue, leave: leaveQueue, state: queueState, currentTurn, consume: consumeTurn, sweep: sweepQueues, onHandoff, onResume, epoch: epochOf, giveBack, hold: holdQueue, heldOf: (id) => robotHeld.get(id) || null, OWNER_IDLE_MS },
+        queue: { join: joinQueue, leave: leaveQueue, state: queueState, currentTurn, consume: consumeTurn, sweep: sweepQueues, onHandoff, onResume, epoch: epochOf, giveBack, hold: holdQueue, heldOf: (id) => robotHeld.get(id) || null, onTurnStart, dropGuests, OWNER_IDLE_MS },
         audit: { record: auditCommand, list: listAudit, listPage: listAuditPage, prune: pruneAudit },
         control: { prepare, allowedFor, effectiveLimits, deviceLimits, buildValue, DEFAULT_ALLOW, KINDS, crowdConfig },
     };

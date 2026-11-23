@@ -9,7 +9,10 @@ require('../server/realtime');
 (async () => {
     // The hold test steps the injected clock 30 s, and device liveness runs on the same clock: at the suite-wide 200 ms beat a
     // sweep between the step and the robot's next report would drop the fake phone (the headlight suite's flake). A minute.
-    const t = await boot({ env: { BOT_HEARTBEAT_MS: '60000' } });
+    // "Your turn" notifications go to a fake Network notifier here (the real one pushes as app bot).
+    const pushes = [];
+    // A guest's place waits a second for a reload here (30 s in production), so "closing the page leaves" is quick.
+    const t = await boot({ env: { BOT_HEARTBEAT_MS: '60000', BOT_GUEST_GRACE_MS: '1000' }, appOpts: { notifier: { push: async (n) => { pushes.push(n); return { ok: true }; } } } });
     const alex = t.network.newUser('alex');     // the owner
     const mona = t.network.newUser('mona');     // a Mod
     const otto = t.network.newUser('otto');     // an Operator
@@ -172,7 +175,7 @@ require('../server/realtime');
         const page = await fetch(`${t.base}/panel/${robot.id}`, { headers: cookie(alex) }).then((r) => r.text());
         const id = (page.match(/\/devices\/(dev_[0-9A-Z]+)\/revoke/) || [])[1];
         assert.ok(id, 'the Devices card names the device with its Revoke');
-        assert.match(page, /Online now/);
+        assert.match(page, /Online · drives/, 'the one online drives');
         const closed = new Promise((resolve) => dev.ws.on('close', (code) => resolve(code)));
         const r = await fetch(`${t.base}/robots/${robot.id}/devices/${id}/revoke`, { method: 'POST', redirect: 'manual',
             headers: { ...cookie(alex), Origin: t.base, 'content-type': 'application/x-www-form-urlencoded' }, body: '' });
@@ -238,6 +241,111 @@ require('../server/realtime');
         g.close();
         await k.waitFor((m) => m.type === 'robot_state' && m.state.queue && m.state.queue.active);
         h.close(); k.close(); dev.close();
+    });
+
+    await check('the newest device to connect drives: a forgotten old computer never fights the phone', async () => {
+        const { robot, pairing } = await t.robot(alex, { profile_id: 'looi' });
+        const old = await deviceFor(robot.id, pairing.code);
+        const code2 = await t.domain.pairing.create(robot.id, alex.subject);
+        t.clock.offset += 10;
+        const phone = await deviceFor(robot.id, code2.code);
+        const a = await op(alex);
+        await join(a, robot.id);
+        cmd(a, { id: 'nd1', kind: 'drive', value: { throttle: 0.1 } });
+        const c = await phone.waitFor((m) => m.type === 'command' && m.ref === 'nd1');
+        phone.send({ type: 'ack', id: c.id });
+        await result(a, 'nd1');
+        assert.ok(!old.messages.some((m) => m.type === 'command' && m.ref === 'nd1'), 'the old device got nothing');
+        const newest = (await t.domain.devices.listForRobot(robot.id))[0];   // newest first
+        assert.strictEqual(t.hub.drivingDeviceOf(robot.id), newest.id, 'the hub names the newest as the one that drives');
+        a.close(); old.close(); phone.close();
+    });
+
+    await check('a turn has the owner\'s top speed (a share of the robot\'s limits); the owner drives at full speed', async () => {
+        const { robot, pairing } = await t.robot(alex, { profile_id: 'looi', access_policy: 'queue', limits: { turn_ms: 60000, turn_budget: 50, turn_speed: 0.5 } });
+        const dev = await deviceFor(robot.id, pairing.code);
+        const q = await op(quinn);
+        await join(q, robot.id);
+        cmd(q, { id: 'ts1', kind: 'drive', value: { throttle: 1, steer: 0 } });
+        const c = await dev.waitFor((m) => m.type === 'command' && m.ref === 'ts1');
+        // LOOI's profile drives at 0.5 at most; half of that for a turn.
+        assert.strictEqual(c.value.throttle, 0.25);
+        dev.send({ type: 'ack', id: c.id });
+        await result(q, 'ts1');
+        const a = await op(alex);
+        await join(a, robot.id);
+        cmd(a, { id: 'ts2', kind: 'drive', value: { throttle: 1, steer: 0 } });
+        const c2 = await dev.waitFor((m) => m.type === 'command' && m.ref === 'ts2');
+        assert.strictEqual(c2.value.throttle, 0.5, 'the owner is not a turn');
+        q.close(); a.close(); dev.close();
+    });
+
+    await check('a guest keeps their place across a reload (a token for the tab), and a guest turn can be shorter', async () => {
+        const { robot } = await t.robot(alex, { profile_id: 'looi', access_policy: 'queue', limits: { turn_ms: 60000, turn_budget: 50, guest_turns: true, guest_turn_ms: 20000 } });
+        await t.domain.robots.setEmbedPublic(robot.id, true);
+        const watch = (ip) => t.ws('/watch', { headers: { 'X-Forwarded-For': ip } });
+        const g = await watch('10.9.1.1');
+        g.send({ type: 'join', robot_id: robot.id });
+        await g.waitFor((m) => m.type === 'joined');
+        g.send({ type: 'take_turn' });
+        const j = await g.waitFor((m) => m.type === 'joined' && m.guest === true);
+        assert.match(j.guest_token, /^gst_[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
+        const ends = Date.parse(j.state.queue.turn_ends_at) - (Date.now() + t.clock.offset);
+        assert.ok(ends > 15000 && ends <= 20000, `a guest's turn is the guest length (${ends} ms)`);
+        g.close();
+        await t.wait(100);
+        const h = await watch('10.9.1.1');
+        h.send({ type: 'join', robot_id: robot.id });
+        await h.waitFor((m) => m.type === 'joined');
+        h.send({ type: 'take_turn', token: j.guest_token });
+        const back = await h.waitFor((m) => (m.type === 'joined' && m.guest === true) || m.type === 'error');
+        assert.strictEqual(back.type, 'joined', JSON.stringify(back));
+        assert.ok(back.state.queue.active, 'the same turn, still theirs');
+        // A forged or foreign token gets no place.
+        const k = await watch('10.9.1.2');
+        k.send({ type: 'join', robot_id: robot.id });
+        await k.waitFor((m) => m.type === 'joined');
+        k.send({ type: 'take_turn', token: `${j.guest_token.split('.')[0]}.AAAA` });
+        assert.strictEqual((await k.waitFor((m) => m.type === 'error')).code, 'bot.place_gone');
+        h.close(); k.close();
+    });
+
+    await check('the next person hears their turn started (Network, app bot); the line\'s turns are events without a name', async () => {
+        const { robot } = await t.robot(alex, { profile_id: 'looi', access_policy: 'queue', limits: { turn_ms: 30000, turn_budget: 50 } });
+        const q = await op(quinn);
+        await join(q, robot.id);
+        const v = await op(vera);
+        await join(v, robot.id);
+        assert.ok(!pushes.some((n) => n.subject === quinn.subject), 'not someone whose turn started as they joined');
+        t.clock.offset += 31000;
+        await t.domain.queue.sweep();
+        await v.waitFor((m) => m.type === 'robot_state' && m.state.queue && m.state.queue.active);
+        const n = pushes.find((x) => x.subject === vera.subject);
+        assert.ok(n, 'Vera is told');
+        assert.deepStrictEqual([n.type, n.service, n.category], ['ROBOT_TURN', 'bot', 'service']);
+        assert.match(n.title, /^Your turn on /);
+        assert.match(n.url, new RegExp(`/panel/${robot.id}$`));
+        await t.wait(400);   // the events are written after the change
+        const started = (await t.outboxRows('bot.turn.started')).filter((e) => e.payload.robot_id === robot.id);
+        const ended = (await t.outboxRows('bot.turn.ended')).filter((e) => e.payload.robot_id === robot.id);
+        assert.ok(started.length >= 2, `two turns started (${started.length})`);
+        assert.deepStrictEqual(ended.map((e) => e.payload.reason), ['turn_ended']);
+        for (const e of [...started, ...ended]) assert.ok(!JSON.stringify(e.payload).includes(quinn.subject) && !JSON.stringify(e.payload).includes(vera.subject), 'no driver named');
+        q.close(); v.close();
+    });
+
+    await check('a person joins and leaves the line from outside the panel (Live\'s !drive), as themselves', async () => {
+        const { robot } = await t.robot(alex, { profile_id: 'looi', access_policy: 'queue' });
+        const j = await t.call('POST', `/api/v1/robots/${robot.id}/queue/join`, { user: quinn, body: {} });
+        assert.strictEqual(j.status, 200, JSON.stringify(j.json));
+        assert.ok(j.json.queue.active || j.json.queue.position > 0);
+        const l = await t.call('POST', `/api/v1/robots/${robot.id}/queue/leave`, { user: quinn, body: {} });
+        assert.strictEqual(l.status, 200);
+        assert.ok(!l.json.queue.active && !(l.json.queue.position > 0), 'out of the line');
+        const { robot: priv } = await t.robot(alex, { profile_id: 'looi' });
+        const p = await t.call('POST', `/api/v1/robots/${priv.id}/queue/join`, { user: quinn, body: {} });
+        assert.strictEqual(p.status, 409);
+        assert.match(p.text, /bot\.not_a_queue/);
     });
 
     await done();

@@ -12,9 +12,9 @@ const { renderPanel } = require('../server/web/render');
     const SIM = { id: 'sim.rover', name: 'Simulated rover', commands: { drive: { axes: { throttle: [-1, 1], steer: [-1, 1] } } }, widgets: [{ type: 'drive', label: 'Drive', command: { kind: 'drive' } }, { type: 'latency', label: 'Latency' }] };
     const robotRow = { id: 'rob_e1', name: 'Rover', profile_id: 'sim.rover' };
 
-    await check('BOT_WATCH_MAX_PER_IP and BOT_WATCH_MAX_PER_ROBOT default to 20 and 500', () => {
-        assert.deepStrictEqual(loadConfig({}).watch, { maxPerIp: 20, maxPerRobot: 500 });
-        assert.deepStrictEqual(loadConfig({ BOT_WATCH_MAX_PER_IP: '3', BOT_WATCH_MAX_PER_ROBOT: '0' }).watch, { maxPerIp: 3, maxPerRobot: 1 });
+    await check('BOT_WATCH_MAX_PER_IP and BOT_WATCH_MAX_PER_ROBOT default to 20 and 500; a guest\'s place waits 30 s for a reload', () => {
+        assert.deepStrictEqual(loadConfig({}).watch, { guestGraceMs: 30000, maxPerIp: 20, maxPerRobot: 500 });
+        assert.deepStrictEqual(loadConfig({ BOT_WATCH_MAX_PER_IP: '3', BOT_WATCH_MAX_PER_ROBOT: '0', BOT_GUEST_GRACE_MS: '1000' }).watch, { guestGraceMs: 1000, maxPerIp: 3, maxPerRobot: 1 });
     });
 
     await check('embed mode: no topbar, controls only for the role, links open a new tab', () => {

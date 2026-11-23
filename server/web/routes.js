@@ -852,7 +852,16 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
         if (!Number.isInteger(presses) || presses < 1 || presses > 10000) throw new BotError(422, 'bot.invalid_input', 'a turn has 1 to 10000 presses');
         const stored = typeof robot.limits === 'string' ? JSON.parse(robot.limits || '{}') : (robot.limits || {});
         const guestTurns = Array.isArray(req.body.guest_turns) ? req.body.guest_turns.includes('on') : req.body.guest_turns === 'on';
-        await domain.robots.update(robot.id, { limits: { ...stored, turn_ms: seconds * 1000, turn_budget: presses, guest_turns: guestTurns } }, { subject: me.subject, kind: 'user' });
+        // Optional (an older form has none): the guests' turn length and both top speeds, as shares of the robot's limits.
+        const optNum = (v, lo, hi) => { if (v == null || v === '') return null; const n = Number(v); if (!Number.isFinite(n) || n < lo || n > hi) throw new BotError(422, 'bot.invalid_input', `a value from ${lo} to ${hi}`); return n; };
+        const guestSeconds = optNum(req.body.guest_turn_s, 10, 3600);
+        const turnSpeed = optNum(req.body.turn_speed, 10, 100);
+        const guestSpeed = optNum(req.body.guest_speed, 10, 100);
+        const limits = { ...stored, turn_ms: seconds * 1000, turn_budget: presses, guest_turns: guestTurns };
+        if (guestSeconds != null) limits.guest_turn_ms = Math.round(guestSeconds) * 1000;
+        if (turnSpeed != null) limits.turn_speed = Math.round(turnSpeed) / 100;
+        if (guestSpeed != null) limits.guest_speed = Math.round(guestSpeed) / 100;
+        await domain.robots.update(robot.id, { limits }, { subject: me.subject, kind: 'user' });
         if (hub) hub.broadcast(robot.id);
         return res.redirect(303, `/panel/${robot.id}#turns`);
     }));
@@ -970,6 +979,7 @@ function createWebRoutes(config, { domain = null, sim = null, onvif = null, limi
                 devices: (await domain.devices.listForRobot(robot.id)).filter((d) => !d.revoked_at).map((d) => ({
                     id: d.id, name: d.name || null, kind: d.kind || null, agent_version: d.agent_version || null,
                     last_seen: d.last_seen ? new Date(d.last_seen).toISOString() : null, online: !!(hub && hub.isOnline(d.id)),
+                    drives: !!(hub && hub.drivingDeviceOf && hub.drivingDeviceOf(robot.id) === d.id),
                     link: !!d.node_principal })) }
             : null;
         // Two OpenRestream reads, run together. Only the owner's own page shows the streaming switches, greyed out

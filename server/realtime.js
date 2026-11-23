@@ -229,7 +229,7 @@ function simView(sim) {
 /** How long a restart waits for every client's close in reply to its 1012 before it drops the rest (11-12). */
 const CLOSE_HANDSHAKE_MS = 600;
 
-function createRealtime({ config, keys, userAuth, log = console, now = () => Date.now(), networkSend = null, meter = null }) {
+function createRealtime({ config, keys, userAuth, log = console, now = () => Date.now(), networkSend = null, meter = null, notifier = null }) {
     let domain = null;
     const tickets = createControlTickets({ now });   // the embedded panel's Drive (server/control-tickets.js)
     const deviceConns = new Map();     // device_id → conn
@@ -484,7 +484,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     function attachDevice(conn, device) {
         const existing = deviceConns.get(device.id);
         if (existing && existing.ws !== conn.ws) { try { existing.ws.close(4000, 'replaced by a newer connection'); } catch { /* gone */ } dropDevice(existing, { silent: true }); }
-        conn.pending = false; conn.device = device; conn.online = true; conn.lastHeartbeat = now();
+        conn.pending = false; conn.device = device; conn.online = true; conn.lastHeartbeat = now(); conn.attachedAt = now();
         deviceConns.set(device.id, conn);
         for (const robotId of deviceRobotIds(device)) setCrowdGuests(robotId, false);
         noteReadyAll(conn, true);   // back online: an offline hold lifts until the robot's report says otherwise
@@ -1395,7 +1395,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         watchConns.add(conn);
         watchersByAddr.set(addr, (watchersByAddr.get(addr) || 0) + 1);
         ws.on('close', () => {
-            if (conn.guestTurn) onGuestLeave(conn).catch((e) => log.warn(`[Bot] guest leaves the line: ${e.message}`));
+            if (conn.guestTurn) guestGone(conn);
             unsubscribe(conn);
             watchConns.delete(conn);
             const n = (watchersByAddr.get(addr) || 1) - 1;
@@ -1412,7 +1412,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         if (!msg || typeof msg !== 'object') return sendError(conn, 'bot.bad_frame', 'a frame must be an object');
         if (msg.type === 'join') return onWatchJoin(conn, msg);
         if (msg.type === 'leave') { if (conn.guestTurn) await onGuestLeave(conn); unsubscribe(conn); conn.robotId = null; return undefined; }
-        if (msg.type === 'take_turn') return onGuestTake(conn);
+        if (msg.type === 'take_turn') return onGuestTake(conn, msg);
         if (msg.type === 'leave_turn') return onGuestLeave(conn, true);
         // A guest holding a place drives through the same gate as anyone (prepare: a queue robot whose owner lets guests
         // take turns, and only the turn's holder).
@@ -1449,17 +1449,63 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         return sendFrame(conn, 'joined', { role: 'watcher', profile, allowed_commands: guests ? ['drive'] : [], guest_turns: guestTurnsOn(robot), state: publicState(await robotState(robotId), conn.readouts) });
     }
 
+    // ── "Your turn" (11-23): someone signed in whose turn starts hears it through Network's notifications (Bot pushes as
+    // app bot), so a person who switched tabs does not miss it. Not when they joined moments ago (the panel says so),
+    // never a guest (nobody to tell), never blocking the line.
+    function yourTurn(robotId, { subject, joinedAt, endsAt, robot }) {
+        if (!notifier || !/^usr_/.test(String(subject || ''))) return;
+        if (Number.isFinite(joinedAt) && now() - joinedAt < 5000) return;
+        const seconds = Math.max(1, Math.round((endsAt - now()) / 1000));
+        const name = String((robot && robot.name) || 'the robot').slice(0, 60);
+        notifier.push({
+            subject, type: 'ROBOT_TURN', category: 'service', priority: 'high', service: 'bot', icon: '🤖',
+            title: `Your turn on ${name}`, message: `You have ${seconds} s to drive. Open it to take the controls.`,
+            url: `${String(config.baseUrl || 'https://openvibe.bot').replace(/\/$/, '')}/panel/${robotId}`,
+        }).catch((e) => log.warn(`[Bot] your-turn notification: ${e.message}`));
+    }
+
     // ── Guest turns (11-23; Maticus's spec, question 1: can a signed-out viewer hold a turn?) ───────────────────────
     // On a queue robot whose owner lets guests take turns (limits.guest_turns, off by default), a watcher of its public
     // panel takes a place in line. A guest is a random id for the socket's life (`gst_…`), never an address or anything
     // that names them; one place per address and robot; closing the page leaves the line. To the robot a guest's turn is
     // like anyone's: { role: "operator", via: "queue", turn: true } on LOOI, with the guest's id as the subject.
     const guestPlaces = new Map();   // `${robotId}|${addr}` → the guest id holding a place
+    // A guest's place survives a reload (11-23, round 2): take_turn answers a token for it (the guest id, signed for this
+    // robot with a secret of this process), the page keeps it for the tab, and a socket that comes back with it within
+    // GUEST_GRACE_MS takes the place again. A closed page that does not come back leaves the line.
+    const GUEST_GRACE_MS = config.watch && Number.isFinite(config.watch.guestGraceMs) ? config.watch.guestGraceMs : 30000;
+    const guestSecret = crypto.randomBytes(32);
+    const guestLeaving = new Map();  // guest id → { timer, robotId }
+    const guestToken = (robotId, guestId) => `${guestId}.${crypto.createHmac('sha256', guestSecret).update(`${robotId}|${guestId}`).digest('base64url')}`;
+    function guestFromToken(robotId, token) {
+        const [guestId, mac] = String(token || '').split('.');
+        if (!/^gst_[A-Za-z0-9_-]{8,40}$/.test(guestId || '') || !mac) return null;
+        const want = guestToken(robotId, guestId).split('.')[1];
+        const a = Buffer.from(mac), b = Buffer.from(want);
+        return a.length === b.length && crypto.timingSafeEqual(a, b) ? guestId : null;
+    }
     const guestTurnsOn = (robot) => !!robot && robot.access_policy === 'queue' && json(robot.limits, {}).guest_turns === true;
-    async function onGuestTake(conn) {
+    async function onGuestTake(conn, msg = {}) {
         if (!conn.robotId) return sendError(conn, 'bot.not_joined', 'join a robot first');
         const robot = await domain.robots.get(conn.robotId);
         if (!guestTurnsOn(robot) || !robot.embed_public) return sendError(conn, 'bot.sign_in', 'Sign in to take a turn driving this robot.');
+        // Back after a reload: the same place, if it is still in line and no other socket holds it.
+        const back = !conn.guestTurn && msg.token ? guestFromToken(robot.id, msg.token) : null;
+        if (back) {
+            const live = [...watchConns].some((c) => c !== conn && c.guestTurn && c.guestId === back);
+            const row = live ? null : await domain.queue.state(robot.id, back);
+            if (row && (row.active || row.position > 0)) {
+                const leaving = guestLeaving.get(back);
+                if (leaving) { clearTimeout(leaving.timer); guestLeaving.delete(back); }
+                conn.guestId = back;
+                conn.guestTurn = true;
+                conn.subject = back;
+                conn.principal = { kind: 'guest', subject: back };
+                conn.role = 'queue';
+                guestPlaces.set(`${robot.id}|${conn.addr}`, back);
+            }
+        }
+        if (!conn.guestTurn && msg.token) return sendError(conn, 'bot.place_gone', 'That place in line is gone. Take a turn again.');
         if (!conn.guestTurn) {
             const key = `${robot.id}|${conn.addr}`;
             const holder = guestPlaces.get(key);
@@ -1475,11 +1521,29 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         }
         const profile = await profileFor(robot);
         const state = await robotState(robot.id, conn.guestId);
-        sendFrame(conn, 'joined', { role: 'queue', guest: true, guest_turns: true, profile,
+        sendFrame(conn, 'joined', { role: 'queue', guest: true, guest_turns: true, guest_token: guestToken(robot.id, conn.guestId), profile,
             allowed_commands: domain.control.allowedFor(robot, 'queue', profile),
             state: { ...publicState(state, conn.readouts), queue: state.queue } });
         broadcast(robot.id);
         return undefined;
+    }
+    /** The guest's page closed: their place waits GUEST_GRACE_MS for the page to come back (a reload), then goes. */
+    function guestGone(conn) {
+        if (!conn.guestTurn) return;
+        const robotId = conn.robotId;
+        const guestId = conn.guestId;
+        conn.guestTurn = false;
+        for (const [k, v] of guestPlaces) if (v === guestId) guestPlaces.delete(k);
+        const was = guestLeaving.get(guestId);
+        if (was) clearTimeout(was.timer);
+        const timer = setTimeout(() => {
+            guestLeaving.delete(guestId);
+            if ([...watchConns].some((c) => c.guestTurn && c.guestId === guestId)) return;
+            domain.queue.leave(robotId, guestId).then(() => broadcast(robotId)).catch((e) => log.warn(`[Bot] guest leaves the line: ${e.message}`));
+        }, GUEST_GRACE_MS);
+        if (timer.unref) timer.unref();
+        guestLeaving.set(guestId, { timer, robotId });
+        if (guestLeaving.size > 20000) { const [k, v] = guestLeaving.entries().next().value; clearTimeout(v.timer); guestLeaving.delete(k); }
     }
     async function onGuestLeave(conn, answer = false) {
         if (!conn.guestTurn) return undefined;
@@ -1531,15 +1595,19 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
     }
 
     // ── State and helpers ─────────────────────────────────────────────────────────────────────────
+    // The device that drives a robot: of those online for it, the newest to connect (11-23: a forgotten old computer
+    // still paired must never fight the phone that took over); a simulator only when no real device is online.
     function deviceForRobot(robotId) {
         let sim = null;
+        let best = null;
         for (const conn of deviceConns.values()) {
             if (!conn.online || !deviceRobotIds(conn.device).includes(robotId)) continue;
-            if (!conn.sim) return conn;
-            sim = sim || conn;
+            if (conn.sim) { sim = sim || conn; continue; }
+            if (!best || (conn.attachedAt || 0) > (best.attachedAt || 0)) best = conn;
         }
-        return sim;
+        return best || sim;
     }
+    const drivingDeviceOf = (robotId) => { const c = deviceForRobot(robotId); return c && c.device ? c.device.id : null; };
     function isOnline(deviceId) { const c = deviceConns.get(deviceId); return !!(c && c.online); }
     function sendToDevice(deviceId, fields) { const c = deviceConns.get(deviceId); return c ? sendFrame(c, fields.type, fields) : false; }
     function sendToRobotDevices(robotId, fields) {
@@ -1754,6 +1822,8 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         bindDomain(d) {
             domain = d;
             d.queue.onHandoff(haltForTurn);
+            if (d.queue.dropGuests) d.queue.dropGuests().then((n) => { if (n) log.log(`[Bot] ${n} guest places from before this start left the line`); }).catch((e) => log.warn(`[Bot] guest places: ${e.message}`));
+            if (d.queue.onTurnStart) d.queue.onTurnStart(yourTurn);
             // A turn that ends, is left or pauses for an owner takeover, and one that resumes, repaints every panel now
             // (after the halt has gone), not at the next sweep.
             d.queue.onHandoff((robotId) => setImmediate(() => broadcast(robotId)));
@@ -1781,7 +1851,7 @@ function createRealtime({ config, keys, userAuth, log = console, now = () => Dat
         crowdGuests(robotId, on) { if (on !== undefined) setCrowdGuests(robotId, !!on); return crowdGuests.has(robotId); },
         /** Crowd control: take someone out of the crowd for `minutes` (their drive goes now). → true when kicked */
         crowdKick(robotId, subject, minutes) { return crowd.kick(robotId, subject, Math.round(minutes * 60000)); },
-        isOnline, deviceState, sendToDevice, sendToRobotDevices, broadcast, closeDevice, robotState, refreshConfig, closeWatchers, dropSubject, operatorCommand,
+        isOnline, deviceState, sendToDevice, drivingDeviceOf, sendToRobotDevices, broadcast, closeDevice, robotState, refreshConfig, closeWatchers, dropSubject, operatorCommand,
         operatorActivity: operatorActivityOf,
         machineCommand, machineScreen, computerOf, machineChanged,
         // Network's grant relay and agent tasks (Contracts 0.409.0): close every relay under a revoked grant, and
