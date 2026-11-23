@@ -1018,3 +1018,42 @@ html[data-ov-motion="off"] .widgets:not([data-ov-arranged]):not(.ov-arrange-surf
   #panel:not(.bot-surface) .widgets:not([data-ov-arranged]):not(.ov-arrange-surface) > .widget-head .headlight-unconfirmed { font-size: 0.7rem; text-align: center; }
   #panel:not(.bot-surface) .widgets:not([data-ov-arranged]):not(.ov-arrange-surface) > .widget-head .headlight-choices { display: grid; gap: 0.3rem; }
 }
+
+/* The robot's own card (mapping.settings / mapping.state): why it waits, what it reports, and its settings as pickers. */
+.widget-settings { grid-column: 1 / -1; display: grid; gap: 0.7rem; align-content: start; }
+.widget-settings h2 { margin: 0; }
+.robot-ready { margin: 0; padding: 0.6rem 0.8rem; border-radius: 10px; font-size: 0.9rem; line-height: 1.35;
+  background: color-mix(in srgb, var(--warn) 12%, var(--bg)); border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line)); color: var(--warn); }
+.robot-ready[data-tone="stop"] { background: color-mix(in srgb, var(--danger) 12%, var(--bg)); border-color: color-mix(in srgb, var(--danger) 50%, var(--line)); color: var(--danger-text, var(--danger)); }
+.robot-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0; padding: 0; list-style: none; }
+.robot-chip { display: inline-flex; align-items: center; gap: 0.35rem; min-height: 1.75rem; padding: 0 0.65rem; border-radius: 999px; font-size: 0.82rem;
+  background: var(--raised); border: 1px solid var(--line); color: color-mix(in srgb, var(--muted) 60%, var(--text)); white-space: nowrap; }
+.robot-chip::before { content: ""; width: 0.45rem; height: 0.45rem; border-radius: 50%; background: currentColor; opacity: 0.55; }
+.robot-chip[data-tone="ok"] { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); }
+.robot-chip[data-tone="wait"] { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
+.robot-chip[data-tone="off"] { color: var(--muted); }
+.robot-chip[data-tone="stop"] { color: var(--danger-text, var(--danger)); border-color: color-mix(in srgb, var(--danger) 55%, var(--line)); font-weight: 700; }
+.robot-sets { display: grid; gap: 0.65rem; }
+.robot-set { display: grid; gap: 0.35rem; min-width: 0; }
+.robot-set[hidden] { display: none; }
+.robot-set-l { font-size: 0.78rem; font-weight: 600; letter-spacing: 0.02em; color: var(--muted); }
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 3px; padding: 3px; border-radius: 12px; background: var(--raised); border: 1px solid var(--line); }
+.seg button { min-width: 0; min-height: var(--tap); padding: 0 0.35rem; border: 0; border-radius: 9px; background: transparent; color: var(--muted);
+  font: 600 0.9rem/1.1 inherit; font-variant-numeric: tabular-nums; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  transition: background-color 160ms ease, color 160ms ease, transform 120ms ease; }
+.seg button:hover:not(:disabled) { color: var(--text); background: color-mix(in srgb, var(--text) 6%, transparent); }
+.seg button:active:not(:disabled) { transform: scale(0.96); }
+.seg button[aria-checked="true"] { background: var(--fill-accent); color: var(--on-fill-accent); }
+.seg button:disabled { cursor: default; }
+.seg button:disabled:not([aria-checked="true"]) { opacity: 0.6; }
+.seg button.is-pending { box-shadow: inset 0 0 0 2px var(--accent); color: var(--text); animation: robot-pending 1.1s ease-in-out infinite; }
+@keyframes robot-pending { 50% { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); } }
+html[data-ov-motion="off"] .seg button.is-pending { animation: none; }
+html[data-ov-motion="off"] .seg button { transition: none; }
+.robot-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.robot-action { display: inline-flex; align-items: center; gap: 0.45rem; min-height: var(--tap); padding: 0 0.95rem; border-radius: 999px; border: 1px solid var(--line);
+  background: transparent; color: var(--text); font: 600 0.9rem/1 inherit; cursor: pointer; }
+.robot-action .icon { width: 18px; height: 18px; }
+.robot-action:disabled { opacity: 0.55; cursor: default; }
+.robot-set-note { margin: 0; font-size: 0.85rem; color: var(--muted); }
+html.embed-page[data-bot-view="panel"] .seg button { min-height: 38px; font-size: 0.82rem; }

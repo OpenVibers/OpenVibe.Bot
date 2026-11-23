@@ -24,8 +24,8 @@ const { ENVELOPE } = require('../events/outbox');
 const USER_SUBJECT = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 
 const DEFAULT_ALLOW = {
-    owner: ['drive', 'actuator', 'ptz', 'say', 'display', 'button', 'point', 'headlight', 'halt'],
-    mod: ['drive', 'actuator', 'ptz', 'say', 'display', 'button', 'point', 'headlight', 'halt'],
+    owner: ['drive', 'actuator', 'ptz', 'say', 'display', 'button', 'point', 'headlight', 'setting', 'halt'],
+    mod: ['drive', 'actuator', 'ptz', 'say', 'display', 'button', 'point', 'headlight', 'setting', 'halt'],
     operator: ['drive', 'actuator', 'ptz', 'say', 'display', 'button', 'point', 'headlight', 'halt'],
     queue: ['drive', 'button', 'point', 'halt'],
     // Crowd control (plan §H2): what the crowd's one mixed command may be. A crowd member never sends a command of
@@ -35,10 +35,19 @@ const DEFAULT_ALLOW = {
 };
 const POLICIES = ['private', 'invite', 'queue', 'crowd'];
 const CROWD_STYLES = ['tug', 'last', 'mixed'];
-const KINDS = new Set(['drive', 'actuator', 'ptz', 'say', 'display', 'button', 'point', 'headlight', 'halt']);
+const KINDS = new Set(['drive', 'actuator', 'ptz', 'say', 'display', 'button', 'point', 'headlight', 'setting', 'halt']);
 const MOTION = new Set(['drive', 'actuator', 'ptz']);
 const CONTROL_ROLES = new Set(['owner', 'mod', 'operator', 'queue']);
 const OPERATOR_ROLES = new Set(['owner', 'mod', 'operator', 'viewer']);
+/**
+ * A profile's robot settings (its open `mapping.settings`, like LOOI's speed stage, mode and yaw limit): what the
+ * `setting` kind may change, each `{ label, options }` or `{ label, action: true }` (a one-off like "Set center here"),
+ * with `owner_only` naming the options only the owner may pick. Null when the profile has none.
+ */
+const settingsOf = (profile) => {
+    const s = profile && profile.mapping && profile.mapping.settings;
+    return s && typeof s === 'object' && !Array.isArray(s) && Object.keys(s).length ? s : null;
+};
 // Drive axes the owner's max_turn caps; every other drive axis is capped by max_speed.
 const TURN_AXES = new Set(['steer', 'rotation']);
 // The older drive names, still read for the axis they stand for.
@@ -1264,11 +1273,45 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         ownerSeen.delete(robotId);
         return await currentTurn(robotId);
     }
+    // A robot that cannot move now (its own report: not armed, its STOP held, remote drivers off, its link down, or its
+    // device gone) holds the queue (Maticus, 11-23: a viewer's turn ran out while the phone refused every command). The
+    // turn in progress pauses with its time kept, and no new turn starts until the robot is ready again. The hub
+    // (server/realtime.js) sets it from the robot's report; in memory, like the owner's pauses.
+    const robotHeld = new Map();   // robotId → { why, since }
+    const READY_WORDS = {
+        offline: 'the robot is offline', stop: 'the robot\'s own STOP is on', not_armed: 'the robot is not armed yet',
+        remote_off: 'remote driving is off on the robot', link_down: 'the robot\'s link to its body is down',
+    };
+    const heldWords = (robotId) => { const h = robotHeld.get(robotId); return h ? READY_WORDS[h.why] || 'the robot is not ready' : ''; };
+    /** Hold or release a robot's queue: `why` is a READY_WORDS key, or null when the robot is ready. → true when it changed. */
+    async function holdQueue(robotId, why) {
+        const was = robotHeld.get(robotId);
+        if ((was ? was.why : null) === (why || null)) return false;
+        if (why) robotHeld.set(robotId, { why, since: now() }); else robotHeld.delete(robotId);
+        if (robotHeld.size > 10000) robotHeld.delete(robotHeld.keys().next().value);
+        await currentTurn(robotId);
+        return true;
+    }
     /** The active turn for a robot, expiring it and promoting the oldest waiting row when it has ended. */
     async function currentTurn(robotId, q = db) {
         const robot = await q.maybe('SELECT * FROM robots WHERE id = $1', [robotId]);
         if (!robot) return null;
         let active = await q.maybe(`SELECT * FROM robot_queue WHERE robot_id = $1 AND state = 'active'`, [robotId]);
+        const held = robotHeld.get(robotId);
+        if (held && active && !active.paused_at) {
+            // The robot cannot move: the turn waits with its clock stopped (no halt: nothing can move it now).
+            const paused = await q.maybe(`UPDATE robot_queue SET paused_at = $3, paused_by = 'robot' WHERE robot_id = $1 AND subject = $2 AND state = 'active' AND paused_at IS NULL RETURNING *`,
+                [robotId, active.subject, iso(now())]);
+            return paused || active;
+        }
+        if (active && active.paused_at && active.paused_by === 'robot') {
+            if (held) return active;
+            const pausedMs = Math.max(0, now() - new Date(active.paused_at).getTime());
+            const resumed = await q.maybe(`UPDATE robot_queue SET paused_at = NULL, paused_by = NULL, turn_ends_at = turn_ends_at + make_interval(secs => $3::double precision / 1000)
+                WHERE robot_id = $1 AND subject = $2 AND state = 'active' AND paused_at IS NOT NULL RETURNING *`, [robotId, active.subject, pausedMs]);
+            if (resumed) for (const fn of resumeListeners) { try { fn(robotId, { subject: resumed.subject }); } catch { /* a listener never breaks the caller */ } }
+            return resumed || await q.maybe(`SELECT * FROM robot_queue WHERE robot_id = $1 AND state = 'active'`, [robotId]);
+        }
         if (active && active.paused_at) {
             // Paused by an owner or operator: it waits, clock stopped, until they have been idle OWNER_IDLE_MS or gave it back.
             const seen = ownerSeen.get(robotId);
@@ -1288,6 +1331,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
             const ended = await q.maybe(`UPDATE robot_queue SET state = 'done' WHERE robot_id = $1 AND subject = $2 AND state = 'active' RETURNING subject`, [robotId, active.subject]);
             if (ended) handedOff(robotId, active.subject, 'turn_ended');
         }
+        if (held) return null;   // no turn starts while the robot cannot move
         const next = await q.maybe(`SELECT * FROM robot_queue WHERE robot_id = $1 AND state = 'waiting' ORDER BY joined_at LIMIT 1 FOR UPDATE`, [robotId]);
         if (!next) return null;
         const at = now();
@@ -1328,7 +1372,11 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
             robot_id: robotId, subject: subject || null, active: !!(active && active.subject === subject),
             turn_ends_at: active ? iso(new Date(active.turn_ends_at).getTime()) : null,
             // An owner or operator has taken over: the turn is paused (its clock stopped) and resumes after they stop.
-            paused: active && active.paused_at ? { by: active.paused_by || 'owner', since: iso(new Date(active.paused_at).getTime()), resumes_after_idle_ms: OWNER_IDLE_MS } : null,
+            paused: active && active.paused_at ? (active.paused_by === 'robot'
+                ? { by: 'robot', why: (robotHeld.get(robotId) || {}).why || null, words: heldWords(robotId) || null, since: iso(new Date(active.paused_at).getTime()) }
+                : { by: active.paused_by || 'owner', since: iso(new Date(active.paused_at).getTime()), resumes_after_idle_ms: OWNER_IDLE_MS }) : null,
+            // No turn runs while the robot cannot move: the line waits, and says why.
+            held: robotHeld.has(robotId) ? { why: robotHeld.get(robotId).why, words: heldWords(robotId) } : null,
             position: active && active.subject === subject ? 0 : position,
             budget: turnBudget(robot),
             used: active && active.subject === subject ? active.commands_used : 0,
@@ -1337,7 +1385,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     async function consumeTurn(robotId, subject) {
         const active = await currentTurn(robotId);
         if (!active || active.subject !== subject) return { ok: false, code: 'bot.not_your_turn' };
-        if (active.paused_at) return { ok: false, code: 'bot.owner_control' };
+        if (active.paused_at) return { ok: false, code: active.paused_by === 'robot' ? 'bot.robot_not_ready' : 'bot.owner_control' };
         const robot = await getRobot(robotId);
         if (active.commands_used >= turnBudget(robot)) return { ok: false, code: 'bot.turn_budget' };
         // Only a turn that is still active spends (the sweep may have ended it since it was read).
@@ -1457,7 +1505,8 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
      */
     const profileTakes = (profile, kind) => kind === 'halt' || !!(profile && (
         (profile.commands && profile.commands[kind])
-        || (profile.mapping && Array.isArray(profile.mapping.actions) && profile.mapping.actions.includes(kind))));
+        || (profile.mapping && Array.isArray(profile.mapping.actions) && profile.mapping.actions.includes(kind))
+        || (kind === 'setting' && settingsOf(profile))));
     /**
      * What `role` may send to this robot: the owner's allowlist for the role (or the default), cut to the
      * kinds the profile takes. Every role that may drive also gets `halt`, which no allowlist removes.
@@ -1475,7 +1524,8 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         // Headlights are the owner's and People Operators' only, whatever an allow list says: never the queue,
         // never a viewer. Every role that may drive also gets halt, which no allow list removes.
         const kinds = (fromOwner || DEFAULT_ALLOW[role] || []).filter((k) => k !== 'halt' && profileTakes(profile, k)
-            && (k !== 'headlight' || role === 'owner' || role === 'mod' || role === 'operator'));
+            && (k !== 'headlight' || role === 'owner' || role === 'mod' || role === 'operator')
+            && (k !== 'setting' || role === 'owner' || role === 'mod'));
         return CONTROL_ROLES.has(role) ? [...kinds, 'halt'] : kinds;
     };
 
@@ -1531,6 +1581,21 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
             if (hold && !['down', 'up'].includes(v.state)) fail(422, 'bot.invalid_input', 'a hold button needs down or up');
             if (!hold && Object.hasOwn(v, 'state')) fail(422, 'bot.invalid_input', 'a plain button takes no state');
             return hold ? { name, state: v.state } : { name };
+        }
+        if (kind === 'setting') {
+            // A request the robot validates and answers (it has the final say, and reports what is really in effect in
+            // its telemetry): a declared name, and one of its declared options or none for an action.
+            const settings = settingsOf(profile) || {};
+            const name = typeof v.name === 'string' ? v.name : '';
+            if (!Object.hasOwn(settings, name)) fail(422, 'bot.command_not_allowed', 'this robot has no such setting');
+            if (Object.keys(v).some((k) => k !== 'name' && k !== 'value')) fail(422, 'bot.invalid_input', 'a setting takes only name and value');
+            const s = settings[name];
+            if (s.action) {
+                if (Object.hasOwn(v, 'value')) fail(422, 'bot.invalid_input', `${name} takes no value`);
+                return { name };
+            }
+            if (!s.options.some((o) => o === v.value)) fail(422, 'bot.invalid_input', `${name} is one of ${s.options.join(', ')}`);
+            return { name, value: v.value };
         }
         if (kind === 'headlight') {
             // Explicit, never a toggle: exactly {"on": true|false}.
@@ -1588,6 +1653,29 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
     }
 
     /**
+     * Why someone with no role on this robot may not send a command, in the words a panel shows (Maticus, 11-23: a
+     * viewer waiting for a turn read "you are not an operator"). A signed-in person in a queue robot's line is
+     * waiting for their turn, not refused; the codes are the ones clients already key on.
+     */
+    async function noRole(robot, subject) {
+        if (robot.access_policy === 'queue' && subject) {
+            const mine = await db.maybe('SELECT state FROM robot_queue WHERE robot_id = $1 AND subject = $2', [robot.id, subject]);
+            if (mine) {
+                const q = await queueState(robot.id, subject);
+                const where = q && q.position > 0 ? ` You are #${q.position} in line.` : '';
+                return { ok: false, code: 'bot.not_your_turn', reason: `It is not your turn yet.${where}`, robot, role: 'queue' };
+            }
+            return { ok: false, code: 'bot.not_an_operator', reason: 'Open the robot\'s panel to join the line and take a turn.', robot };
+        }
+        if (!subject) {
+            const what = robot.access_policy === 'queue' ? 'take a turn driving this robot'
+                : robot.access_policy === 'crowd' ? 'steer this robot with the crowd' : 'drive this robot';
+            return { ok: false, code: 'bot.sign_in', reason: `Sign in to ${what}.`, robot };
+        }
+        return { ok: false, code: 'bot.not_an_operator', reason: 'Only people the owner adds can drive this robot.', robot };
+    }
+
+    /**
      * Decide a command. Returns { ok:true, robot, profile, role, kind, value, deadlineMs } or
      * { ok:false, code, reason, robot?, role? }. `online` is the live socket state the hub knows.
      */
@@ -1612,12 +1700,10 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
             const turn = await currentTurn(robotId);
             if (turn && turn.subject === subject) role = 'queue';
         }
-        if (!role) {
-            return { ok: false, code: subject ? 'bot.not_an_operator' : 'bot.sign_in', reason: subject ? 'you are not an operator on this robot' : 'sign in to control a robot', robot };
-        }
+        if (!role) return noRole(robot, subject);
         if (role === 'viewer') {
             if (robot.access_policy === 'queue') role = 'queue';
-            else return { ok: false, code: 'bot.read_only', reason: 'you are a viewer on this robot', robot, role };
+            else return { ok: false, code: 'bot.read_only', reason: 'Viewers watch this robot. The owner can make you an Operator.', robot, role };
         }
         // A switched-off Operator or Mod is refused before the command reaches the device, with a message the panel
         // shows; the owner is always on. This is read fresh on every command, so a toggle needs no reconnect.
@@ -1632,6 +1718,9 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
             if (policy.sole_subject && (crowdMix || policy.sole_subject !== subject)) {
                 return { ok: false, code: 'bot.sole_control', reason: 'Sole control is on: only the person it was given to can send commands right now. The owner or a Mod can switch back to Everyone.', robot, role };
             }
+        }
+        if (kind === 'setting' && role !== 'owner' && role !== 'mod') {
+            return { ok: false, code: 'bot.command_not_allowed', reason: 'Only the owner and Mods change the robot\'s settings.', robot, role };
         }
         const allow = allowedFor(robot, role, profile);
         if (!allow.includes(kind)) return { ok: false, code: 'bot.command_not_allowed', reason: `${kind} is not allowed for ${role}`, robot, role };
@@ -1650,14 +1739,23 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         }
         const PAUSED = 'the owner has taken control: your turn is paused and keeps its time';
         if (role === 'queue') {
-            // A halt needs the turn (a waiting person may not stop the driver) but spends none of its budget.
-            if (halt || release || repeatedHold) {
+            // A halt needs the turn (a waiting person may not stop the driver) but spends none of its budget. Neither does
+            // motion: a held stick resends every 150 ms, so counting it spent a 50-command budget in about 7 s (Maticus's
+            // LOOI, 11-23). The turn's length bounds driving; the budget counts presses (buttons, clicks on the video).
+            if (halt || release || repeatedHold || MOTION.has(kind)) {
                 const turn = await currentTurn(robotId);
                 if (!turn || turn.subject !== subject) return { ok: false, code: 'bot.not_your_turn', reason: 'it is not your turn', robot, role };
+                if (turn.paused_at && turn.paused_by === 'robot') return { ok: false, code: 'bot.robot_not_ready', reason: `Your turn is paused and keeps its time: ${heldWords(robotId) || 'the robot is not ready'}.`, robot, role };
                 if (turn.paused_at) return { ok: false, code: 'bot.owner_control', reason: PAUSED, robot, role };
             } else {
                 const budget = await consumeTurn(robotId, subject);
-                if (!budget.ok) return { ok: false, code: budget.code, reason: budget.code === 'bot.turn_budget' ? 'your turn budget is spent' : budget.code === 'bot.owner_control' ? PAUSED : 'it is not your turn', robot, role };
+                if (!budget.ok) {
+                    const words = budget.code === 'bot.turn_budget' ? 'You have used this turn\'s presses. You can still drive until the turn ends.'
+                        : budget.code === 'bot.owner_control' ? PAUSED
+                            : budget.code === 'bot.robot_not_ready' ? `Your turn is paused and keeps its time: ${heldWords(robotId) || 'the robot is not ready'}.`
+                                : 'It is not your turn yet.';
+                    return { ok: false, code: budget.code, reason: words, robot, role };
+                }
             }
         } else if ((role === 'owner' || role === 'mod' || role === 'operator') && robot.access_policy === 'queue' && subject) {
             // Owner takeover: the holder's turn pauses and the robot halts before this command goes (takeOver).
@@ -1669,6 +1767,12 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         }
         let built;
         try { built = buildValue(kind, value, eff, profile); } catch (e) { return { ok: false, code: e.code || 'bot.invalid_input', reason: e.detail || e.message, robot, role }; }
+        if (kind === 'setting' && role !== 'owner') {
+            const s = settingsOf(profile)[built.name];
+            if (Array.isArray(s.owner_only) && Object.hasOwn(built, 'value') && s.owner_only.includes(built.value)) {
+                return { ok: false, code: 'bot.owner_only', reason: `Only the owner can set ${String(s.label || built.name).toLowerCase()} to ${built.value}.`, robot, role };
+            }
+        }
         const specificMs = kind === 'button' ? profile.commands.button.names[built.name].cooldown_ms || 0
             : kind === 'point' ? profile.commands.point.cooldown_ms || 0 : 0;
         const specificKey = kind === 'button' ? `button:${built.name}` : 'point';
@@ -1715,7 +1819,7 @@ function createDomain({ db, config, outbox, link = null, nodes = null, openre = 
         deskLeases,
         streaming: { get: streaming, set: setStreaming },
         video: { live: liveVideo },
-        queue: { join: joinQueue, leave: leaveQueue, state: queueState, currentTurn, consume: consumeTurn, sweep: sweepQueues, onHandoff, onResume, epoch: epochOf, giveBack, OWNER_IDLE_MS },
+        queue: { join: joinQueue, leave: leaveQueue, state: queueState, currentTurn, consume: consumeTurn, sweep: sweepQueues, onHandoff, onResume, epoch: epochOf, giveBack, hold: holdQueue, heldOf: (id) => robotHeld.get(id) || null, OWNER_IDLE_MS },
         audit: { record: auditCommand, list: listAudit, listPage: listAuditPage, prune: pruneAudit },
         control: { prepare, allowedFor, effectiveLimits, deviceLimits, buildValue, DEFAULT_ALLOW, KINDS, crowdConfig },
     };

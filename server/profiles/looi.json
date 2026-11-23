@@ -5,18 +5,163 @@
   "vendor": "LOOI",
   "kind": "bridge",
   "description": "LOOI, the tracked desk robot that uses a phone as its face: differential drive and head tilt over Bluetooth from a bridge computer (Windows, macOS or Linux) running the OpenVibe Link with the Generic LOOI driver. The phone streams its own video, for example from its browser to the owner's OpenVibe.Live channel, where the robot's panel shows under the stream.",
-  "capabilities": ["drive.differential", "head", "battery"],
-  "mapping": { "driver": "looi", "plugin": "looi", "actions": ["headlight"] },
+  "capabilities": [
+    "drive.differential",
+    "head",
+    "battery"
+  ],
+  "mapping": {
+    "driver": "looi",
+    "plugin": "looi",
+    "actions": [
+      "headlight"
+    ],
+    "state": [
+      "status.capabilities.looi_bridge",
+      "telemetry.sensors.looi_bridge"
+    ],
+    "wire_roles": {
+      "queue": "operator"
+    },
+    "settings": {
+      "mode": {
+        "label": "Mode",
+        "options": [
+          "drive_and_head",
+          "camera_only"
+        ],
+        "names": [
+          "Drive + Head",
+          "Camera only"
+        ]
+      },
+      "speed_stage": {
+        "label": "Speed",
+        "options": [
+          24,
+          32,
+          48,
+          69,
+          96,
+          127
+        ]
+      },
+      "head_speed": {
+        "label": "Head speed",
+        "options": [
+          "gentle",
+          "medium",
+          "fast",
+          "max"
+        ],
+        "names": [
+          "Gentle",
+          "Medium",
+          "Fast",
+          "Max"
+        ],
+        "when": {
+          "mode": "camera_only"
+        }
+      },
+      "yaw_limit": {
+        "label": "Spin limit",
+        "options": [
+          "off",
+          45,
+          90,
+          135,
+          180
+        ],
+        "names": [
+          "Off",
+          "45\u00b0",
+          "90\u00b0",
+          "135\u00b0",
+          "180\u00b0"
+        ],
+        "owner_only": [
+          "off"
+        ]
+      },
+      "yaw_center": {
+        "label": "Set center here",
+        "action": true
+      }
+    }
+  },
   "commands": {
-    "drive": { "axes": { "throttle": [-1, 1], "steer": [-1, 1] } },
-    "actuator": { "names": { "head": { "type": "number", "range": [-1, 1] } } }
+    "drive": {
+      "axes": {
+        "throttle": [
+          -1,
+          1
+        ],
+        "steer": [
+          -1,
+          1
+        ]
+      }
+    },
+    "actuator": {
+      "names": {
+        "head": {
+          "type": "number",
+          "range": [
+            -1,
+            1
+          ]
+        }
+      }
+    }
   },
   "widgets": [
-    { "type": "drive", "capability": "drive.differential", "label": "Drive", "order": 1, "command": { "kind": "drive" } },
-    { "type": "head", "capability": "head", "label": "Head tilt", "order": 2, "command": { "kind": "actuator", "names": ["head"] } },
-    { "type": "battery", "capability": "battery", "label": "Battery", "order": 3 },
-    { "type": "latency", "label": "Latency", "order": 4 }
+    {
+      "type": "drive",
+      "capability": "drive.differential",
+      "label": "Drive",
+      "order": 1,
+      "command": {
+        "kind": "drive"
+      }
+    },
+    {
+      "type": "head",
+      "capability": "head",
+      "label": "Head tilt",
+      "order": 2,
+      "command": {
+        "kind": "actuator",
+        "names": [
+          "head"
+        ]
+      }
+    },
+    {
+      "type": "battery",
+      "capability": "battery",
+      "label": "Battery",
+      "order": 3
+    },
+    {
+      "type": "latency",
+      "label": "Latency",
+      "order": 4
+    },
+    {
+      "type": "settings",
+      "label": "Robot",
+      "order": 5
+    }
   ],
-  "limits": { "max_speed": 0.5, "max_turn": 0.6, "max_command_ms": 500, "heartbeat_ms": 1000 },
-  "ceiling": { "max_speed": 1, "max_turn": 1 }
+  "limits": {
+    "max_speed": 0.5,
+    "max_turn": 0.6,
+    "max_command_ms": 500,
+    "heartbeat_ms": 1000
+  },
+  "ceiling": {
+    "max_speed": 1,
+    "max_turn": 1
+  }
 }

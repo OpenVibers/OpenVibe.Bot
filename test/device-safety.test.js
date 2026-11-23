@@ -54,7 +54,7 @@ const { boot, check, done } = require('./helpers/app');
         const panel = fs.readFileSync(path.join(__dirname, '..', 'public', 'panel.js'), 'utf8');
         assert.match(panel, /state\.status && Array\.isArray\(state\.status\.faults\)/, 'the panel reads the device\'s faults');
         assert.match(panel, /else if \(m\.result === 'nack'\) \{ const t = nackText\(m\.reason\); if \(t\) notice\(t\); \}/, 'and says why the robot refused');
-        assert.match(panel, /const QUIET_NACKS = new Set\(\['expired'\]\);/, 'a deadline that passed in transit is not news');
+        assert.match(panel, /const QUIET_NACKS = new Set\(\['expired', 'stale', 'already_armed'\]\);/, 'a deadline that passed in transit is not news');
         const html = require('../server/web/render').renderPanel({ robot: { id: robot.id, name: 'R', profile_id: 'sim.rover' }, profile: { id: 'sim.rover', name: 'Rover', commands: {}, widgets: [] }, role: 'operator' });
         assert.ok(html.includes('data-device-fault'), 'the panel has a place for them');
         op.close(); dev.close();

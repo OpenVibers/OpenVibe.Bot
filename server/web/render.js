@@ -270,6 +270,32 @@ function cameraTiles(w, profile, signaling_url = null, pointEnabled = false) {
     }).join('');
 }
 
+/**
+ * The robot's own card (Maticus's 11-21/11-23 asks; the profile's mapping.settings and mapping.state): a line saying why it
+ * cannot move when it cannot, chips of what it reports (armed, its STOP, remote driving, its link, the mount, the spin from
+ * center), and a picker per setting. A pick is a request: the robot checks it, and its report is what the picker shows (a
+ * pick is marked waiting until the robot says it is in effect). The owner and Mods pick; everyone else sees the same rows,
+ * read-only. Hidden until the robot first reports (public/panel.js paintRobot).
+ */
+function settingsWidget(profile, enabled) {
+    const settings = (profile.mapping && profile.mapping.settings) || {};
+    const rows = [];
+    const actions = [];
+    for (const [name, s] of Object.entries(settings)) {
+        if (s.action) {
+            actions.push(`<button type="button" class="robot-action" data-set-action="${esc(name)}"${disabledUnless(enabled)}>${icon('plus')}<span>${esc(s.label)}</span></button>`);
+            continue;
+        }
+        const options = s.options.map((o, i) => `<button type="button" role="radio" aria-checked="false" data-option="${data(o)}"${(s.owner_only || []).includes(o) ? ' data-owner-only' : ''}${disabledUnless(enabled)}>${esc((s.names && s.names[i]) || String(o))}</button>`).join('');
+        rows.push(`<div class="robot-set" data-set="${esc(name)}"${s.when ? ` data-when="${data(s.when)}"` : ''}><span class="robot-set-l" id="set-${esc(name)}">${esc(s.label)}</span>`
+            + `<div class="seg" role="radiogroup" aria-labelledby="set-${esc(name)}">${options}</div></div>`);
+    }
+    return '<p class="robot-ready" data-ready role="status" hidden></p>'
+        + '<ul class="robot-chips" data-robot-chips aria-label="What the robot reports"></ul>'
+        + (rows.length || actions.length ? `<div class="robot-sets" data-robot-sets>${rows.join('')}${actions.length ? `<div class="robot-actions">${actions.join('')}</div>` : ''}</div>` : '')
+        + '<p class="robot-set-note" data-set-note role="status" hidden></p>';
+}
+
 function renderWidget(w, { profile = {}, allowed_commands = [], signaling_url = null, part = null, partAttrs = {}, flatten = false, embed = false } = {}) {
     const commands = profile.commands || {};
     const kind = w.command ? w.command.kind : null;
@@ -368,6 +394,9 @@ function renderWidget(w, { profile = {}, allowed_commands = [], signaling_url = 
                 + `<span>${esc(button.label)}</span>${button.key ? `<kbd>${esc(button.key)}</kbd>` : ''}</button>`).join('')}</div>`;
             break;
         }
+        case 'settings':
+            inner = settingsWidget(profile, allowed_commands.includes('setting'));
+            break;
         case 'video_click':
             if ((profile.widgets || []).some((widget) => widget.type === 'camera')) return '';
             inner = `<div class="cameras">${cameraTiles(w, profile, signaling_url, enabled)}</div>`;
@@ -375,12 +404,13 @@ function renderWidget(w, { profile = {}, allowed_commands = [], signaling_url = 
         default:
             inner = '';
     }
-    const cmd = w.command ? ` data-command="${data(w.command)}"` : '';
+    // The settings card sends `setting` (the gate allows it to the owner and Mods); it shows once the robot reports.
+    const cmd = w.command ? ` data-command="${data(w.command)}"` : w.type === 'settings' && profile.mapping && profile.mapping.settings ? ` data-command="${data({ kind: 'setting' })}"` : '';
     if (w.type === 'drive') {
         return `<section class="widget widget-drive" data-widget="drive" data-ov-host${flatten ? ' data-ov-flatten="true"' : ''}${cmd}><h2 data-ov-decor>${esc(label)}</h2>${inner}</section>`;
     }
     const partAttr = part ? ` data-ov-part="${esc(part)}" ${partAttrs[part] || ''}` : '';
-    return `<section class="widget widget-${esc(w.type)}" data-widget="${esc(w.type)}"${cmd}${partAttr}><h2>${esc(label)}</h2>${inner}</section>`;
+    return `<section class="widget widget-${esc(w.type)}" data-widget="${esc(w.type)}"${cmd}${partAttr}${w.type === 'settings' ? ' hidden' : ''}><h2>${esc(label)}</h2>${inner}</section>`;
 }
 
 /** One owner switch: a checkbox posted as name=on, after a hidden name=off so an unchecked box still says off. */
@@ -696,6 +726,26 @@ ${row('Longest command', 'max_command_ms', `${effective.maxCommandMs} ms`)}
 
 
 /**
+ * Taking turns (a queue robot, the owner's page): how long a turn lasts and how many presses it has, with what each
+ * means (Maticus, 11-23: "explain what the turn budget is and make it adjustable"). Driving is bounded by the turn's
+ * length; the presses count buttons and clicks on the video, never the stick (a held stick resends every 150 ms).
+ */
+function turnsCard(robot, info) {
+    if (robot.access_policy !== 'queue' || !info) return '';
+    const own = info.robotLimits || {};
+    const seconds = Math.round((own.turn_ms > 0 ? own.turn_ms : info.turnMs) / 1000);
+    const presses = own.turn_budget > 0 ? own.turn_budget : info.turnBudget;
+    return `<section class="setting-card" id="turns" aria-labelledby="turns-h"><h2 id="turns-h">Taking turns</h2>
+<p class="setting-note">One person drives at a time, in the order they joined. A turn ends when its time is up or they leave. While the robot cannot move (not armed, its own STOP, remote driving off, or offline) the line waits and the turn keeps its time.</p>
+<form method="post" action="/robots/${esc(robot.id)}/turns" class="limits-form">
+<label class="field"><span class="field-label">Turn length (seconds)</span><input type="number" name="turn_s" min="10" max="3600" step="5" value="${esc(seconds)}" required></label>
+<label class="field"><span class="field-label">Presses per turn</span><input type="number" name="turn_budget" min="1" max="10000" step="1" value="${esc(presses)}" required></label>
+<p class="setting-note">Presses are buttons and clicks on the video. Driving and the head never count: the turn's length limits them.</p>
+<button type="submit">Save</button>
+</form></section>`;
+}
+
+/**
  * Commissioning (owner only): raise this robot's max_speed/max_turn above the profile's defaults, up to its
  * ceiling, and drop back to the defaults at once. One explicit form each way; nothing here applies to an
  * operator or an agent.
@@ -914,7 +964,7 @@ ${tryIt ? tryIntro() : ''}
 <div class="widgets"${arrange ? require('./surface').surfaceAttrs(arrange.catalog, arrange.layout, arrange.device, arrangeApply) : ''}>
 ${widgets.join('\n')}
 </div>
-${arrange ? `<script type="application/json" id="ov-arrange-data">${JSON.stringify({ catalog: arrange.catalog, layout: arrange.layout, device: arrange.device, surface: arrange.catalog.id, signedIn: arrange.signedIn, layoutSource: arrange.layoutSource || 'default', save: arrange.save || null, suggest: arrange.suggest || null, share: arrange.share || null, reset: arrange.reset || null, author: arrange.author || null, defaultLayout: arrange.defaultLayout || null }).replace(/</g, '\\u003c')}</script>` : ''}${tryIt ? tryOutro(profile) : ''}${role === 'owner' && !embed && !tryIt ? `<div class="owner-settings">${limitsCard(robot, limitsInfo, profile)}${onStreamCard(robot, { liveUrl })}${localProfileForm(robot, profile, profileForm)}${commissionForm(robot, profile)}${automation ? routinesCard(robot, profile, automation) + webhooksCard(robot, automation) : ''}${agentForm(robot)}${listingForm(robot)}${embedForm(robot)}${streamingForm(robot, streaming)}${people ? peopleCard(robot, people) : ''}</div>` : ''}
+${arrange ? `<script type="application/json" id="ov-arrange-data">${JSON.stringify({ catalog: arrange.catalog, layout: arrange.layout, device: arrange.device, surface: arrange.catalog.id, signedIn: arrange.signedIn, layoutSource: arrange.layoutSource || 'default', save: arrange.save || null, suggest: arrange.suggest || null, share: arrange.share || null, reset: arrange.reset || null, author: arrange.author || null, defaultLayout: arrange.defaultLayout || null }).replace(/</g, '\\u003c')}</script>` : ''}${tryIt ? tryOutro(profile) : ''}${role === 'owner' && !embed && !tryIt ? `<div class="owner-settings">${limitsCard(robot, limitsInfo, profile)}${onStreamCard(robot, { liveUrl })}${turnsCard(robot, limitsInfo)}${localProfileForm(robot, profile, profileForm)}${commissionForm(robot, profile)}${automation ? routinesCard(robot, profile, automation) + webhooksCard(robot, automation) : ''}${agentForm(robot)}${listingForm(robot)}${embedForm(robot)}${streamingForm(robot, streaming)}${people ? peopleCard(robot, people) : ''}</div>` : ''}
 </main>`;
     return page(tryIt ? 'Try the panel with a simulated rover' : robot.name, body, {
         scripts: panelScripts(profile, tryIt, embed), bodyClass: embed ? 'embed-page' : 'panel-page',
