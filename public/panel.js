@@ -1668,6 +1668,21 @@
         not_armed: (owner) => (owner ? 'Arm the robot on its phone to drive.' : 'Waiting for the streamer to arm the robot.'),
         remote_off: (owner) => (owner ? 'Remote driving is off on the robot: turn on Allow operators there so others can drive.' : 'The streamer has not turned on remote driving yet.'),
     };
+    // The owner's caps for turns and guests (Taking turns), in the option's own name, and whether the robot says it
+    // holds them (LOOI app 0.2.20: green once it does, "waiting" while it says it does not).
+    function capsChip(c) {
+        const say = (set) => Object.entries(set || {}).map(([name, v]) => {
+            const row = $$('[data-set]', robotEl).find((x) => x.dataset.set === name);
+            const button = row && $$('[data-option]', row).find((b) => sameOption(JSON.parse(b.dataset.option), v));
+            return button ? button.textContent : String(v);
+        }).join(', ');
+        const turn = say(c.turn);
+        const guest = say(c.guest);
+        const text = turn ? `Turn cap ${turn}${guest && guest !== turn ? ` · guests ${guest}` : ''}` : `Guest cap ${guest}`;
+        if (c.applied === true) return ['ok', text];
+        if (c.applied === false) return ['wait', `${text} (waiting for the robot)`];
+        return ['', text];
+    }
     function paintRobot(state) {
         if (!robotEl) return;
         const r = state && state.ready;
@@ -1689,6 +1704,7 @@
             if (r.orientation) chips.push(['', r.orientation === 'portrait' ? 'Portrait' : 'Landscape']);
             if (r.yaw_center_set === false) chips.push(['wait', 'Center not set']);
             else if (r.yaw_from_center != null) chips.push(['', `${Math.round(Math.abs(r.yaw_from_center))}° from center`]);
+            if (r.caps) chips.push(capsChip(r.caps));
             chipsEl.textContent = '';
             for (const [tone, text] of chips) {
                 const li = document.createElement('li');

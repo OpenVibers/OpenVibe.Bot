@@ -230,7 +230,9 @@ device is online.
 true`) and for guests (a `gst_` subject), `{ max_speed?, settings? }`: the turn's top speed (the gate already applies
 it) and, for a profile setting marked `cap` (LOOI's speed stage), its highest option the owner chose on the Taking
 turns card. The robot clamps those drivers to it (LOOI: a turn at stage 96 with a cap of 48 drives at 48). Sent with
-config and again at once when the owner changes it. LOOI's `sensors.p7_head` carries the head's pose in `value`
+config and again at once when the owner changes it. A robot may say it holds them in its status (`role_caps_applied`, LOOI app 0.2.20: `true` /
+`false`, or the caps it applied in `role_caps`'s shape); the panel's robot card shows the cap, green once the robot
+says it holds it and "waiting for the robot" while it says it does not. LOOI's `sensors.p7_head` carries the head's pose in `value`
 (0–255) beside `orientation` (portrait or landscape) and the active range; the panel shows it under the head slider.
 
 **A turn's presses** (`limits.turn_budget`, 50 by default; the owner sets it with the turn's length on the robot's page):

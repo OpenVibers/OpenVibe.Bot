@@ -397,5 +397,30 @@ require('../server/realtime');
         dev.close();
     });
 
+    await check('the robot says it holds the caps (LOOI 0.2.20 role_caps_applied): the panel reads "applied", or "waiting" until it does', async () => {
+        const { robot, pairing } = await t.robot(alex, { profile_id: 'looi', access_policy: 'queue' });
+        const dev = await deviceFor(robot.id, pairing.code);
+        const a = await op(alex);
+        await join(a, robot.id);
+        const post = (body) => fetch(`${t.base}/robots/${robot.id}/turns`, { method: 'POST', redirect: 'manual',
+            headers: { ...cookie(alex), Origin: t.base, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(body).toString() });
+        assert.strictEqual((await post({ turn_s: '60', turn_budget: '50', turn_cap_speed_stage: '48', guest_cap_speed_stage: '32' })).status, 303);
+        await dev.waitFor((m) => m.type === 'config' && !!m.role_caps);
+        // An app before 0.2.20 says nothing: the caps show, neither applied nor refused.
+        report(dev, { operators_allowed: true, armed: true, speed_stage: 96 });
+        const s0 = await a.waitFor((x) => x.type === 'robot_state' && x.state.ready && x.state.ready.caps);
+        assert.deepStrictEqual(s0.state.ready.caps, { turn: { speed_stage: 48 }, guest: { speed_stage: 32 }, applied: null });
+        // The caps it applied, in config.role_caps's shape: they match what Bot sent.
+        report(dev, { operators_allowed: true, armed: true, speed_stage: 96, role_caps_applied: { turn: { settings: { speed_stage: 48 } }, guest: { settings: { speed_stage: 32 } } } });
+        const s1 = await a.waitFor((x) => x.type === 'robot_state' && x.state.ready && x.state.ready.caps && x.state.ready.caps.applied === true);
+        assert.strictEqual(s1.state.ready.settings.speed_stage, 96, 'the robot\'s own stage is unchanged: only turns are held to 48');
+        // A stale word (an older cap) is not "applied"; a plain false is "waiting".
+        report(dev, { operators_allowed: true, armed: true, role_caps_applied: { turn: { speed_stage: 69 } } });
+        await a.waitFor((x) => x.type === 'robot_state' && x.state.ready && x.state.ready.caps && x.state.ready.caps.applied === false);
+        report(dev, { operators_allowed: true, armed: true, role_caps_applied: true });
+        await a.waitFor((x) => x.type === 'robot_state' && x.state.ready && x.state.ready.caps && x.state.ready.caps.applied === true);
+        a.close(); dev.close();
+    });
+
     await done();
 })();
