@@ -75,7 +75,11 @@ const CAP = {
     watchLink: 'bot.machine.watch_link',
     // Network's machine-access relay (Contracts 0.409.0): an agent task for a machine's own agent.
     relay: 'bot.machine.relay',
+    // Read a person's own machines for them, read-only (Contracts 0.455.0): Codes' spare-usage planner (plan AD.37).
+    machineRead: 'bot.machine.read',
 };
+/** The services that may read a person's machines for them (bot.machine.read), and nothing else. */
+const MACHINE_READERS = new Set(['svc:codes']);
 
 /** Services that act as a person's agent (plan T15/T17): they drive a robot only where its owner turned agent_control on. */
 const AGENT_SERVICES = new Set(['svc:actor']);
@@ -648,11 +652,13 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         // The network's hub (plan L34): it fronts Bot for the person and names them in X-OV-Subject. It is the
         // network's own service: no other one may list a person's machines as them.
         const hubService = req.principal.kind === 'service' && req.principal.sub === HUB_SERVICE && apiAuth.granted(req.principal, CAP.machine);
+        // Codes' spare-usage planner reads them for the person, read-only (bot.machine.read, Contracts 0.455.0).
+        const reader = req.principal.kind === 'service' && MACHINE_READERS.has(req.principal.sub);
         if (req.principal.kind === 'service') {
-            if (!svc && !hubService) fail(403, 'bot.forbidden', 'machines are listed for their owner, their agent, their watches, their AI and the network\'s hub');
+            if (!svc && !hubService && !reader) fail(403, 'bot.forbidden', 'machines are listed for their owner, their agent, their watches, their AI, the network\'s hub and the spare-usage planner');
             // Each service with its own capability: OpenVibe.AI lists those whose models the owner's AI may use
             // (a node credential with machine `any`, contracts 0.221.0).
-            const cap = svc ? (svc.cap || CAP.computer) : CAP.machine;
+            const cap = svc ? (svc.cap || CAP.computer) : hubService ? CAP.machine : CAP.machineRead;
             if (!apiAuth.granted(req.principal, cap)) fail(403, 'capability.denied', `${cap} not granted`);
         }
         const rows = await domain.machines.list(subject);
@@ -854,8 +860,15 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
     // bot.machine.manage and naming the person in X-OV-Subject. Bot stays the registry underneath, so the
     // machine is the named person's own or it is not there at all (404, never 403: nobody may probe whose
     // machine an id is). A person acts for themself and for nobody else.
-    const hubSubject = (req) => {
+    const hubSubject = (req, { read = false } = {}) => {
         if (req.principal.kind !== 'service') fail(403, 'bot.forbidden', 'only the machine\'s owner or the network\'s hub manages a machine');
+        // A reader (bot.machine.read) reads one machine of the person it names; it never changes one.
+        if (read && MACHINE_READERS.has(req.principal.sub)) {
+            if (!apiAuth.granted(req.principal, CAP.machineRead)) fail(403, 'capability.denied', `${CAP.machineRead} not granted`);
+            const rs = req.headers['x-ov-subject'];
+            if (!rs) fail(422, 'bot.invalid_input', 'a reader acts for a person (X-OV-Subject)');
+            return userSubject(rs, 'subject');
+        }
         // The hub is the network's own service, and only that one: the capability alone would let any service
         // that holds it name any person in X-OV-Subject and act as them.
         if (req.principal.sub !== HUB_SERVICE) fail(403, 'bot.forbidden', 'only the network\'s hub manages a machine for a person');
@@ -865,18 +878,18 @@ function v1Router({ domain, apiAuth, limits, hub, jobs: jobService, config, subm
         return userSubject(s, 'subject');
     };
     /** The machine, and whose it is. → { device, subject } */
-    const hubMachine = async (req) => {
+    const hubMachine = async (req, { read = false } = {}) => {
         if (req.principal.kind === 'anonymous') fail(401, 'bot.sign_in', 'sign in to do that');
         const subject = req.principal.kind === 'user'
             ? self(req, req.headers['x-ov-subject'], req.body?.owner)
-            : hubSubject(req);
+            : hubSubject(req, { read });
         const device = await domain.devices.get(String(req.params.id || '').slice(0, 64));
         const owner = device && !device.revoked_at ? await domain.devices.ownerOf(device) : null;
         if (!owner || owner !== subject) fail(404, 'bot.device_not_found', 'no such machine of yours');
         return { device, subject };
     };
     r.get('/machines/:id', wrap(async (req, res) => {
-        const { device } = await hubMachine(req);
+        const { device } = await hubMachine(req, { read: true });
         res.json({ machine: await machineView(device) });
     }));
     // A new name for the machine.

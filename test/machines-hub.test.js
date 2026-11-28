@@ -53,6 +53,20 @@ const { boot, check, done } = require('./helpers/app');
         assert.deepStrictEqual(row.roles, ['codes.worker']);
     });
 
+    await check('Codes reads the person\'s machines read-only with bot.machine.read; it changes none, and nobody else reads them', async () => {
+        const reader = (method, url, { cap = ['bot.machine.read'], sub = 'svc:codes', subject = alex.subject, body } = {}) =>
+            t.call(method, url, { body, sub, cap, headers: { 'X-OV-Subject': subject } });
+        const list = await reader('GET', '/api/v1/machines');
+        assert.strictEqual(list.status, 200, list.text);
+        assert.deepStrictEqual(list.json.machines.map((m) => m.id), [alexMachine.id], 'the named person\'s machines only');
+        const one = await reader('GET', `/api/v1/machines/${alexMachine.id}`);
+        assert.strictEqual(one.status, 200, one.text);
+        assert.strictEqual((await reader('GET', `/api/v1/machines/${samMachine.id}`)).status, 404, 'another person\'s machine is not there');
+        assert.strictEqual((await reader('GET', '/api/v1/machines', { cap: [] })).status, 403, 'the capability is needed');
+        assert.strictEqual((await reader('GET', '/api/v1/machines', { sub: 'svc:someone' })).status, 403, 'only the services named for it');
+        assert.strictEqual((await reader('PATCH', `/api/v1/machines/${alexMachine.id}`, { body: { name: 'Taken' } })).status, 403, 'reading is not renaming');
+    });
+
     await check('the hub needs the capability and the person, and never another person\'s machine', async () => {
         const noCap = await t.call('PATCH', `/api/v1/machines/${alexMachine.id}`, { body: { name: 'Nope' }, sub: 'svc:network', cap: ['bot.read'], headers: { 'X-OV-Subject': alex.subject } });
         assert.strictEqual(noCap.status, 403, noCap.text);
@@ -72,7 +86,8 @@ const { boot, check, done } = require('./helpers/app');
         const other = (path, body) => t.call(path.method, path.url, { body, sub: 'svc:codes', cap: ['bot.machine.manage'], headers: { 'X-OV-Subject': alex.subject } });
         const list = await other({ method: 'GET', url: '/api/v1/machines' });
         assert.strictEqual(list.status, 403, list.text);
-        assert.strictEqual(list.json.code, 'bot.forbidden');
+        // Codes may read for a person with bot.machine.read (0.455.0); with only the hub's capability it reads nothing.
+        assert.strictEqual(list.json.code, 'capability.denied');
         const renamed = await other({ method: 'PATCH', url: `/api/v1/machines/${alexMachine.id}` }, { name: 'Stolen' });
         assert.strictEqual(renamed.status, 403, renamed.text);
         assert.strictEqual(renamed.json.code, 'bot.forbidden');
