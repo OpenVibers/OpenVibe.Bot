@@ -155,6 +155,23 @@ const PROJECT = `prj_${ids.ulid()}`;
         assert.strictEqual((await row(job.id)).state, 'failed');
     });
 
+    await check('a job the worker could not run says why (job_exit.detail → fault_detail)', async () => {
+        const n = await node();
+        const job = newJob();
+        await send(n.deviceId, job);
+        await n.c.waitFor((m) => m.type === 'job' && m.job.id === job.id);
+        const exit = frame('job_exit', { id: job.id, reason: 'failed', code: null, result: null, detail: 'claude is not installed on this machine', usage: { wall_ms: 0 } });
+        assert.ok(validate('platform.job-frame@1', exit).valid, JSON.stringify(validate('platform.job-frame@1', exit).errors));
+        await n.exit(job.id, { reason: 'failed', detail: 'claude is not installed on this machine', usage: { wall_ms: 0 } });
+        const j = await row(job.id);
+        assert.strictEqual(j.state, 'failed');
+        assert.strictEqual(j.fault_detail, 'claude is not installed on this machine');
+        // Only a failed exit carries one: an exit the process made itself keeps none.
+        const ran = await n.running(1790935350000);
+        await n.exit(ran.id, { reason: 'exited', code: 1, usage: { started_ms: 1790935350000, wall_ms: 1000 } });
+        assert.strictEqual((await row(ran.id)).fault_detail, null);
+    });
+
     await check('job_exit twice writes one set and is acked twice', async () => {
         const n = await node();
         const S = 1790935400000;

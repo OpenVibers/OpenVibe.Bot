@@ -52,10 +52,11 @@ const requestCancel = (db, id, at) => db.maybe(
 /** Seconds queued so far; never moves back. */
 const advanceUsage = (db, id, upTo, at) => db.exec('UPDATE run_jobs SET usage_read = GREATEST(usage_read, $2), updated_at = $3 WHERE id = $1', [id, upTo, at]);
 /** The first job_exit: final state and exit fields, once. */
-const finish = (db, id, { reason, code, result, wallMs, startedMs, at }) => db.exec(
+const finish = (db, id, { reason, code, result, wallMs, startedMs, detail = null, at }) => db.exec(
     `UPDATE run_jobs SET state = $2, exit_reason = $3, exit_code = $4, result = $5, wall_ms = $6, started_ms = COALESCE(started_ms, $7),
-            finished_at = COALESCE(finished_at, $8), updated_at = $8
+            finished_at = COALESCE(finished_at, $8), updated_at = $8, fault_detail = COALESCE($9, fault_detail)
      WHERE id = $1 AND exit_reason IS NULL`,
-    [id, stateOfExit(reason, code), reason, code, result === undefined || result === null ? null : JSON.stringify(result), wallMs, startedMs, at]);
+    [id, stateOfExit(reason, code), reason, code, result === undefined || result === null ? null : JSON.stringify(result), wallMs, startedMs, at,
+        detail]);
 
 module.exports = { put, get, ofNode, unacked, cancelPending, markSent, markPlaced, markRefused, markStarted, requestCancel, advanceUsage, finish, stateOfExit };

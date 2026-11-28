@@ -283,7 +283,9 @@ function createJobFrames({ db: getDb, usage = null, log = console, now = () => D
                 for (const r of metering.exitReadings({ wallMs, ...readingFields(row, startedMs) })) await metering.enqueue(t, r, now());
                 await store.advanceUsage(t, row.id, Math.ceil(wallMs / 1000), now());
             }
-            await store.finish(t, row.id, { reason: msg.reason, code: msg.code, result: msg.result, wallMs, startedMs, at: now() });
+            // Why a job the worker could not run failed (job_exit.detail, Contracts 0.457.0), kept for Run to pass on.
+            const detail = msg.reason === 'failed' && typeof msg.detail === 'string' && msg.detail.trim() ? msg.detail.trim().slice(0, 500) : null;
+            await store.finish(t, row.id, { reason: msg.reason, code: msg.code, result: msg.result, wallMs, startedMs, detail, at: now() });
             return true;
         });
         if (!known) return unknown(link, msg.id);
