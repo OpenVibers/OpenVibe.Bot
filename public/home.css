@@ -48,7 +48,7 @@
 .hm-state[data-state="online"] { color: color-mix(in srgb, var(--success, #22c55e) 45%, var(--text-primary, #e6edf7)); }
 .hm-state[data-state="online"] .hm-dot { background: var(--success, #22c55e); box-shadow: 0 0 0 3px color-mix(in srgb, var(--success, #22c55e) 25%, transparent); }
 
-.hm-badge { flex: none; font-size: 11.5px; font-weight: 700; letter-spacing: .03em; padding: 2px 8px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+.hm-badge { flex: none; font-size: 12px; font-weight: 700; letter-spacing: .03em; padding: 2px 8px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
 .hm-k-browser { color: color-mix(in srgb, #8b5cf6 45%, var(--text-primary, #e6edf7)); }
 .hm-k-phone { color: color-mix(in srgb, #ec4899 45%, var(--text-primary, #e6edf7)); }
 .hm-k-onboard { color: color-mix(in srgb, #22c55e 45%, var(--text-primary, #e6edf7)); }
