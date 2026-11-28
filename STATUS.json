@@ -7,11 +7,11 @@
   "domain": "openvibe.bot (www -> apex; /device and /control WebSockets; /install)",
   "contracts": "openvibe-contracts v0.455.0",
   "sdk": "openvibe-sdk v0.189.0",
-  "shared": "openvibe-shared v4.337.0",
+  "shared": "openvibe-shared v4.339.0",
   "packages": [
     "openvibe-contracts v0.455.0",
     "openvibe-sdk v0.189.0",
-    "openvibe-shared v4.337.0"
+    "openvibe-shared v4.339.0"
   ],
   "capabilities": [
     "bot.robot.read",
@@ -19,7 +19,8 @@
     "bot.robot.control",
     "bot.computer.control",
     "bot.machine.ai",
-    "bot.machine.manage", "bot.machine.read",
+    "bot.machine.manage",
+    "bot.machine.read",
     "bot.machine.watch_link",
     "bot.desk.session",
     "bot.device.connect",
