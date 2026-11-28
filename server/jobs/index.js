@@ -41,7 +41,7 @@ function presentJob(row) {
     return {
         id: row.id, node_id: row.node_id, class: row.class, state: row.state,
         project_id: row.project_id, subject: row.subject, provider: row.provider,
-        cancel_requested: row.cancel_requested, fault_code: row.fault_code,
+        cancel_requested: row.cancel_requested, fault_code: row.fault_code, fault_detail: row.fault_detail ?? null,
         sent_at: row.sent_at, started_ms: row.started_ms, finished_at: row.finished_at,
         exit_reason: row.exit_reason, exit_code: row.exit_code, wall_ms: row.wall_ms,
         usage_read: row.usage_read, result: json(row.result, null), job: json(row.job, null),
